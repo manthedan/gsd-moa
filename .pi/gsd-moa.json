@@ -1,8 +1,14 @@
 {
   "primary": {
-    "provider": "openai",
+    "provider": "factory-codex",
     "model": "gpt-5.5",
-    "api": "openai-responses"
+    "api": "openai-completions",
+    "baseUrl": "http://127.0.0.1:8317/v1",
+    "apiKey": "$FACTORY_GPT_API_KEY",
+    "compat": {
+      "supportsDeveloperRole": false,
+      "maxTokensField": "max_tokens"
+    }
   },
   "reference": {
     "provider": "zai",

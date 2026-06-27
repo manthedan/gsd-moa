@@ -39,12 +39,18 @@ Configuration is project-local at `.pi/gsd-moa.json`.
 ```json
 {
   "primary": {
-    "provider": "openai",
+    "provider": "factory-codex",
     "model": "gpt-5.5",
-    "api": "openai-responses"
+    "api": "openai-completions",
+    "baseUrl": "http://127.0.0.1:8317/v1",
+    "apiKey": "$FACTORY_GPT_API_KEY",
+    "compat": {
+      "supportsDeveloperRole": false,
+      "maxTokensField": "max_tokens"
+    }
   },
   "reference": {
-    "provider": "zai-coding-cn",
+    "provider": "zai",
     "model": "glm-5.2",
     "api": "openai-completions",
     "baseUrl": "https://api.z.ai/api/coding/paas/v4",
@@ -59,13 +65,16 @@ Configuration is project-local at `.pi/gsd-moa.json`.
 }
 ```
 
-Set your Z.ai key before advisor mode:
+Set the Factory proxy key and Z.ai key before running locally:
 
 ```bash
-export ZAI_API_KEY=...
+export FACTORY_GPT_API_KEY=... # Factory Droid custom GPT-5.5 Codex-subscription route
+export ZAI_API_KEY=...         # Factory Droid custom GLM-5.2 Z.ai Coding Plan route
 ```
 
-The default reference route uses Z.ai's GLM Coding Plan/OpenAI-compatible endpoint. If you are not using a Coding Plan subscription, change `baseUrl` to the general Z.ai endpoint your account supports.
+You can extract them from `~/.factory/settings.json` without committing secrets.
+
+The default primary route uses Factory Droid's local OpenAI-compatible Codex subscription proxy (`http://127.0.0.1:8317/v1`) for GPT-5.5. The default reference route uses Z.ai's GLM Coding Plan/OpenAI-compatible endpoint. If you are not using a Coding Plan subscription, change `baseUrl` to the general Z.ai endpoint your account supports.
 
 ## Routing Controls
 
