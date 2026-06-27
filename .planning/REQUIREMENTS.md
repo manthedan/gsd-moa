@@ -9,19 +9,19 @@ Requirements for the first Pi extension/package prototype.
 
 ### Package & Configuration
 
-- [ ] **PKG-01**: Developer can load the project-local Pi extension/package without modifying Pi core.
-- [ ] **PKG-02**: Provider `gsd-moa` appears with model aliases `gpt55-glm52-single`, `gpt55-glm52-advisor`, and `gpt55-glm52-auto`.
-- [ ] **PKG-03**: Developer can configure primary and reference routes in `.pi/gsd-moa.json`.
-- [ ] **PKG-04**: Configuration supports GPT-5.5 as primary and GLM-5.2 via Z.ai subscription as reference.
-- [ ] **PKG-05**: Invalid configuration fails fast with actionable errors, including a recursion guard against upstream provider `gsd-moa`.
+- [x] **PKG-01**: Developer can load the project-local Pi extension/package without modifying Pi core.
+- [x] **PKG-02**: Provider `gsd-moa` appears with model aliases `gpt55-glm52-single`, `gpt55-glm52-advisor`, and `gpt55-glm52-auto`.
+- [x] **PKG-03**: Developer can configure primary and reference routes in `.pi/gsd-moa.json`.
+- [x] **PKG-04**: Configuration supports GPT-5.5 as primary and GLM-5.2 via Z.ai subscription as reference.
+- [x] **PKG-05**: Invalid configuration fails fast with actionable errors, including a recursion guard against upstream provider `gsd-moa`.
 
 ### Policy & Context
 
-- [ ] **POL-01**: `single` mode always routes directly to the configured primary model.
-- [ ] **POL-02**: `advisor` mode always runs a reference/advisor call before the final primary call.
-- [ ] **POL-03**: `auto` mode uses deterministic heuristics to choose only `single` or `advisor` in v1.
-- [ ] **POL-04**: Explicit force/off markers can force advisor or single routing and are stripped before upstream model calls.
-- [ ] **CTX-01**: Reference/advisor context contains only advisory-safe user/assistant text and excludes tool results, tool calls, and tool schemas.
+- [x] **POL-01**: `single` mode always routes directly to the configured primary model.
+- [x] **POL-02**: `advisor` mode always runs a reference/advisor call before the final primary call.
+- [x] **POL-03**: `auto` mode uses deterministic heuristics to choose only `single` or `advisor` in v1.
+- [x] **POL-04**: Explicit force/off markers can force advisor or single routing and are stripped before upstream model calls.
+- [x] **CTX-01**: Reference/advisor context contains only advisory-safe user/assistant text and excludes tool results, tool calls, and tool schemas.
 - [ ] **CTX-02**: Final primary context preserves normal Pi tools and receives advisor guidance when advisor mode is active.
 
 ### Streaming & Provider Orchestration
@@ -42,7 +42,7 @@ Requirements for the first Pi extension/package prototype.
 
 ### Tests & Documentation
 
-- [ ] **TEST-01**: Unit tests cover mode selection, marker stripping, context sanitization, recursion guard, and config validation.
+- [x] **TEST-01**: Unit tests cover mode selection, marker stripping, context sanitization, recursion guard, and config validation.
 - [ ] **TEST-02**: Unit tests use fake upstream streams to cover single/advisor orchestration without real model calls.
 - [ ] **TEST-03**: Unit tests verify advisor calls receive no tools and final calls preserve tools.
 - [ ] **TEST-04**: Unit tests verify advisor cache hit/miss behavior and combined usage aggregation.
@@ -83,16 +83,16 @@ Deferred to a future milestone.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PKG-01 | Phase 1 | Pending |
-| PKG-02 | Phase 1 | Pending |
-| PKG-03 | Phase 1 | Pending |
-| PKG-04 | Phase 1 | Pending |
-| PKG-05 | Phase 1 | Pending |
-| POL-01 | Phase 1 | Pending |
-| POL-02 | Phase 1 | Pending |
-| POL-03 | Phase 1 | Pending |
-| POL-04 | Phase 1 | Pending |
-| CTX-01 | Phase 1 | Pending |
+| PKG-01 | Phase 1 | Complete |
+| PKG-02 | Phase 1 | Complete |
+| PKG-03 | Phase 1 | Complete |
+| PKG-04 | Phase 1 | Complete |
+| PKG-05 | Phase 1 | Complete |
+| POL-01 | Phase 1 | Complete |
+| POL-02 | Phase 1 | Complete |
+| POL-03 | Phase 1 | Complete |
+| POL-04 | Phase 1 | Complete |
+| CTX-01 | Phase 1 | Complete |
 | CTX-02 | Phase 3 | Pending |
 | STR-01 | Phase 2 | Pending |
 | STR-02 | Phase 2 | Pending |
@@ -104,7 +104,7 @@ Deferred to a future milestone.
 | CACHE-03 | Phase 3 | Pending |
 | USAGE-01 | Phase 3 | Pending |
 | USAGE-02 | Phase 3 | Pending |
-| TEST-01 | Phase 1 | Pending |
+| TEST-01 | Phase 1 | Complete |
 | TEST-02 | Phase 2 | Pending |
 | TEST-03 | Phase 3 | Pending |
 | TEST-04 | Phase 3 | Pending |
@@ -112,6 +112,7 @@ Deferred to a future milestone.
 | DOC-02 | Phase 4 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 27 total
 - Mapped to phases: 27
 - Unmapped: 0 ✓

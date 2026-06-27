@@ -1,0 +1,52 @@
+{
+  "primary": {
+    "provider": "openai",
+    "model": "gpt-5.5",
+    "api": "openai-responses"
+  },
+  "reference": {
+    "provider": "zai-coding-cn",
+    "model": "glm-5.2",
+    "api": "openai-completions",
+    "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+    "apiKey": "$ZAI_API_KEY",
+    "compat": {
+      "thinkingFormat": "zai",
+      "zaiToolStream": true,
+      "supportsDeveloperRole": false,
+      "maxTokensField": "max_tokens"
+    }
+  },
+  "aliases": {
+    "gpt55-glm52-single": { "mode": "single" },
+    "gpt55-glm52-advisor": { "mode": "advisor" },
+    "gpt55-glm52-auto": { "mode": "auto" }
+  },
+  "auto": {
+    "defaultMode": "single",
+    "advisorKeywords": [
+      "plan",
+      "review",
+      "audit",
+      "verify",
+      "security",
+      "architecture",
+      "debug",
+      "requirements"
+    ],
+    "singleKeywords": [
+      "typo",
+      "format",
+      "small edit",
+      "rename"
+    ]
+  },
+  "cache": {
+    "enabled": true,
+    "dir": ".pi/gsd-moa-cache",
+    "ttlSeconds": 604800
+  },
+  "prompts": {
+    "advisorVersion": "v1"
+  }
+}

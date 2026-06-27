@@ -1,0 +1,41 @@
+{
+  "name": "pi-gsd-moa",
+  "version": "0.1.0",
+  "description": "Hermes-inspired Mixture-of-Agents custom provider for Pi/GSD.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "files": [
+    "src",
+    "README.md",
+    "docs"
+  ],
+  "scripts": {
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "keywords": [
+    "pi",
+    "gsd",
+    "mixture-of-agents",
+    "model-provider"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.80.1",
+    "@earendil-works/pi-coding-agent": ">=0.80.1"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.80.1",
+    "@earendil-works/pi-coding-agent": "^0.80.1",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}
