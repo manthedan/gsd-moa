@@ -27,7 +27,7 @@ Give GSD/Pi a normal-looking model provider that adds second-model judgment only
 - [ ] Implement deterministic auto-routing that chooses only `single` or `advisor` in v1.
 - [ ] Implement advisor-output caching keyed by normalized task/context and prompt version.
 - [ ] Report combined usage/cost for all upstream calls while exposing the visible assistant response as a `gsd-moa` model response.
-- [ ] Provide clear configuration for primary and reference provider/model routes, including configurable GLM-5.2 routing via Z.ai, OpenRouter, or another Pi-supported provider.
+- [ ] Provide clear project-local configuration in `.pi/gsd-moa.json` for primary and reference provider/model routes, with v1 reference routing targeting a Z.ai subscription for GLM-5.2.
 - [ ] Keep future compatibility with a CLIProxyAPI/OpenAI-compatible proxy extraction path in mind, without making it part of the first deliverable.
 
 ### Out of Scope
@@ -92,7 +92,7 @@ Z.ai / OpenRouter GLM-5.2
 - **Cost control**: Routing must be deterministic and cheap; do not call another LLM to decide whether to use MoA.
 - **Latency control**: Default mode is effectively single/direct for normal turns; advisor is reserved for higher-leverage calls.
 - **Testability**: Real upstream model calls must be replaceable by mocks/fakes in tests.
-- **Configuration**: Primary and reference provider/model routes must be configurable, with support for GLM via Z.ai, OpenRouter, or equivalent Pi-supported routes.
+- **Configuration**: Primary and reference provider/model routes must be configurable in `.pi/gsd-moa.json`; v1 assumes GLM access through a Z.ai subscription.
 - **Cache correctness**: Cache advisor outputs with prompt-versioned keys; avoid caching final tool-capable actions unless explicitly read-only in a future phase.
 
 ## Key Decisions
@@ -106,7 +106,8 @@ Z.ai / OpenRouter GLM-5.2
 | `auto` routes only between `single` and `advisor` in v1 | Keeps auto cheap and predictable; full MoA can be added later. | — Pending |
 | Only final GPT-5.5 call can use tools | Prevents dueling tool calls, conflicting patches, and complex merge semantics. | — Pending |
 | Reuse Pi provider internals where possible | Avoid duplicating provider serialization/streaming logic and stay compatible with Pi's model registry. | — Pending |
-| Use project/package config, not env-only config | Enables primary/reference route configuration and future package usability. | — Pending |
+| Use project-local `.pi/gsd-moa.json`, not env-only config | Enables primary/reference route configuration and future package usability. | — Pending |
+| Route v1 GLM reference calls through a Z.ai subscription | Matches the expected available GLM-5.2 access path for the prototype. | — Pending |
 | Keep CLIProxyAPI/OpenAI-compatible proxy as future path | Useful for cross-runtime GSD, but premature for the first Pi prototype. | — Pending |
 
 ## Evolution
