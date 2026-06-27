@@ -5,7 +5,7 @@
     "api": "openai-responses"
   },
   "reference": {
-    "provider": "zai-coding-cn",
+    "provider": "zai",
     "model": "glm-5.2",
     "api": "openai-completions",
     "baseUrl": "https://api.z.ai/api/coding/paas/v4",
