@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Package, Config, and Policy Foundation** - Create the Pi package skeleton, config schema, deterministic router, context sanitizer, and foundational tests. (completed 2026-06-27)
 - [x] **Phase 2: Single-Mode Provider Stream** - Register the `gsd-moa` provider and prove single-mode primary streaming/tool-call pass-through with fake upstreams. (completed 2026-06-27)
 - [x] **Phase 3: Advisor Orchestration, Cache, and Usage** - Add GLM advisor orchestration, advice injection, advisor cache, tool-safety enforcement, and combined usage reporting. (completed 2026-06-27)
-- [ ] **Phase 4: Integration Docs and Prototype Validation** - Document setup and run the local Pi extension smoke path, with future `full_moa`/proxy notes captured.
+- [x] **Phase 4: Integration Docs and Prototype Validation** - Document setup and run the local Pi extension smoke path, with future `full_moa`/proxy notes captured. (completed 2026-06-27)
 
 ## Phase Details
 
@@ -103,8 +103,8 @@ Plans:
 
 Plans:
 
-- [ ] 04-01: Write setup/config/model-alias documentation and local smoke checklist.
-- [ ] 04-02: Capture future full MoA/proxy architecture notes and final prototype validation evidence.
+- [x] 04-01: Write setup/config/model-alias documentation and local smoke checklist.
+- [x] 04-02: Capture future full MoA/proxy architecture notes and final prototype validation evidence.
 
 ## Progress
 
@@ -116,4 +116,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Package, Config, and Policy Foundation | 3/3 | Complete | 2026-06-27 |
 | 2. Single-Mode Provider Stream | 2/2 | Complete | 2026-06-27 |
 | 3. Advisor Orchestration, Cache, and Usage | 3/3 | Complete | 2026-06-27 |
-| 4. Integration Docs and Prototype Validation | 0/2 | Not started | - |
+| 4. Integration Docs and Prototype Validation | 2/2 | Complete | 2026-06-27 |

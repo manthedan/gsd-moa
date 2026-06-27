@@ -53,8 +53,9 @@ function withRouteApiKey(model: Model<Api>, options?: SimpleStreamOptions): Simp
 
 export function streamOptionsForRoute(route: UpstreamRoute, options?: SimpleStreamOptions): SimpleStreamOptions {
   const apiKey = resolveConfigValue(route.apiKey);
+  const { apiKey: _providerApiKey, ...rest } = options ?? {};
   return {
-    ...options,
+    ...rest,
     ...(apiKey ? { apiKey } : {}),
     headers: { ...(options?.headers ?? {}), ...(route.headers ?? {}) },
   };

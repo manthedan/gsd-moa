@@ -8,7 +8,7 @@ export default function gsdMoaExtension(pi: ExtensionAPI) {
     name: "GSD MoA",
     api: "gsd-moa-api",
     baseUrl: "gsd-moa://local",
-    apiKey: "$GSD_MOA_API_KEY",
+    apiKey: "gsd-moa-local",
     models: GSD_MOA_MODELS,
     streamSimple: streamGsdMoa,
   });

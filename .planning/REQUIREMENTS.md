@@ -46,8 +46,8 @@ Requirements for the first Pi extension/package prototype.
 - [x] **TEST-02**: Unit tests use fake upstream streams to cover single/advisor orchestration without real model calls.
 - [x] **TEST-03**: Unit tests verify advisor calls receive no tools and final calls preserve tools.
 - [x] **TEST-04**: Unit tests verify advisor cache hit/miss behavior and combined usage aggregation.
-- [ ] **DOC-01**: Documentation explains setup, `.pi/gsd-moa.json`, Z.ai subscription routing, model aliases, and why `auto` is not `full_moa` in v1.
-- [ ] **DOC-02**: Documentation records the future path for `full_moa` and CLIProxyAPI/OpenAI-compatible proxy extraction.
+- [x] **DOC-01**: Documentation explains setup, `.pi/gsd-moa.json`, Z.ai subscription routing, model aliases, and why `auto` is not `full_moa` in v1.
+- [x] **DOC-02**: Documentation records the future path for `full_moa` and CLIProxyAPI/OpenAI-compatible proxy extraction.
 
 ## v2 Requirements
 
@@ -108,8 +108,8 @@ Deferred to a future milestone.
 | TEST-02 | Phase 2 | Complete |
 | TEST-03 | Phase 3 | Complete |
 | TEST-04 | Phase 3 | Complete |
-| DOC-01 | Phase 4 | Pending |
-| DOC-02 | Phase 4 | Pending |
+| DOC-01 | Phase 4 | Complete |
+| DOC-02 | Phase 4 | Complete |
 
 **Coverage:**
 
