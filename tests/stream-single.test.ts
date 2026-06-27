@@ -74,9 +74,9 @@ describe("single-mode streaming", () => {
     const upstream: UpstreamClient = {
       stream(model, seenContext) {
         calls++;
-        assert.equal(model.provider, "openai");
+        assert.equal(model.provider, "factory-codex");
         assert.equal(model.id, "gpt-5.5");
-        assert.equal(seenContext, context);
+        assert.deepEqual(seenContext.messages, context.messages);
         return fakeTextStream(model, "primary response");
       },
       async complete() { throw new Error("advisor should not run in single mode"); },
@@ -97,6 +97,20 @@ describe("single-mode streaming", () => {
       async complete() { throw new Error("not used"); },
     };
     await collect(streamGsdMoa(gsdModel, context, undefined, { config: DEFAULT_CONFIG, upstream }));
+  });
+
+  it("strips routing markers before the final primary call", async () => {
+    const markedContext: Context = {
+      messages: [{ role: "user", content: "<!-- gsd-moa:single --> hello", timestamp: 1 }],
+    };
+    const upstream: UpstreamClient = {
+      stream(model, seenContext) {
+        assert.equal((seenContext.messages[0] as any).content, "hello");
+        return fakeTextStream(model, "ok");
+      },
+      async complete() { throw new Error("not used"); },
+    };
+    await collect(streamGsdMoa(gsdModel, markedContext, undefined, { config: DEFAULT_CONFIG, upstream }));
   });
 
   it("turns upstream errors into Pi-compatible error events", async () => {

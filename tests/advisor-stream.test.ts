@@ -87,7 +87,7 @@ describe("advisor orchestration", () => {
       const upstream: UpstreamClient = {
         async complete(seenModel, seenContext) {
           advisorCalls++;
-          assert.equal(seenModel.provider, "zai-coding-cn");
+          assert.equal(seenModel.provider, "zai");
           assert.equal(seenModel.id, "glm-5.2");
           assert.equal(seenContext.tools, undefined);
           assert.match(seenContext.systemPrompt ?? "", /private advisor/i);
@@ -95,7 +95,7 @@ describe("advisor orchestration", () => {
         },
         stream(seenModel, seenContext) {
           primaryCalls++;
-          assert.equal(seenModel.provider, "openai");
+          assert.equal(seenModel.provider, "factory-codex");
           assert.equal(seenContext.tools?.[0]?.name, "Bash");
           assert.match(seenContext.systemPrompt ?? "", /Check tests and edge cases/);
           return streamText(seenModel, "final", usage(1, 2));

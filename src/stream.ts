@@ -9,7 +9,7 @@ import {
 } from "@earendil-works/pi-ai/compat";
 import { runAdvisor } from "./advisor.js";
 import { loadConfig } from "./config.js";
-import { hasRecentToolResults, latestUserText, withAdvisorGuidance } from "./context.js";
+import { hasRecentToolResults, latestUserText, stripMarkersFromContext, withAdvisorGuidance } from "./context.js";
 import { chooseMode } from "./policy.js";
 import type { AdvisorResult, GsdMoaConfig, MoaRunDetails } from "./types.js";
 import { routeToModel, streamOptionsForRoute, type UpstreamClient, compatUpstreamClient } from "./upstream.js";
@@ -38,11 +38,12 @@ export function streamGsdMoa(
     });
 
     try {
-      let finalContext = context;
+      const primaryContext = stripMarkersFromContext(context);
+      let finalContext = primaryContext;
       let advisor: AdvisorResult | undefined;
       if (policy.mode === "advisor") {
         advisor = await runAdvisor(config, context, policy, upstream, options);
-        finalContext = withAdvisorGuidance(context, advisor.text, policy);
+        finalContext = withAdvisorGuidance(primaryContext, advisor.text, policy);
       }
 
       const primaryModel = routeToModel(config.primary);

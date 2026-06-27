@@ -1,8 +1,8 @@
 # pi-gsd-moa
 
-Hermes-inspired Mixture-of-Agents provider for Pi/GSD.
+Hermes-inspired advisor/router provider for upstream Pi and Pi-derived GSD workflows.
 
-`pi-gsd-moa` registers a Pi custom provider named `gsd-moa`. The provider lets GSD select a normal model id while the provider decides whether to run a cheap single-writer primary call or a private GLM advisor pass before the final GPT acting call.
+`pi-gsd-moa` registers a Pi custom provider named `gsd-moa`. The provider lets Pi select a normal model id while the provider decides whether to run a cheap single-writer primary call or a private GLM advisor pass before the final GPT acting call. v1 is MoA-inspired advisor mode, not full multi-proposal MoA fan-out.
 
 ## Model Aliases
 
@@ -30,7 +30,7 @@ Then select the provider/model in Pi, for example:
 /model gpt55-glm52-auto --provider gsd-moa
 ```
 
-The package is intentionally shaped for publishing: `package.json` declares the Pi extension entry under `pi.extensions`. For day-to-day local smoke tests, load `./src/index.ts` directly with `-e`.
+The package is intentionally shaped for publishing against upstream Pi (`@earendil-works/pi-*`): `package.json` declares the Pi extension entry under `pi.extensions`. For day-to-day local smoke tests, load `./src/index.ts` directly with `-e`.
 
 ## Configuration
 

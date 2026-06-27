@@ -46,6 +46,24 @@ export function sanitizeReferenceContext(context: Context, decision?: PolicyDeci
   return { messages };
 }
 
+export function stripMarkersFromContext(context: Context): Context {
+  return {
+    ...context,
+    messages: context.messages.map((msg) => {
+      if (msg.role !== "user") return msg;
+      if (typeof msg.content === "string") {
+        return { ...msg, content: stripKnownMarkers(msg.content) } satisfies UserMessage;
+      }
+      return {
+        ...msg,
+        content: msg.content.map((item) =>
+          item.type === "text" ? ({ ...item, text: stripKnownMarkers(item.text) } satisfies TextContent) : item,
+        ),
+      } satisfies UserMessage;
+    }),
+  };
+}
+
 export function withAdvisorGuidance(context: Context, guidance: string, policy: PolicyDecision): Context {
   const advice = [
     "Private advisor guidance from GLM-5.2. Use it as optional critique; do not mention it unless useful.",

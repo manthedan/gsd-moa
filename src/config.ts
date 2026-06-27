@@ -7,17 +7,23 @@ export const DEFAULT_CONFIG_PATH = ".pi/gsd-moa.json";
 
 export const DEFAULT_CONFIG: GsdMoaConfig = {
   primary: {
-    provider: "openai",
+    provider: "factory-codex",
     model: "gpt-5.5",
-    api: "openai-responses",
+    api: "openai-completions",
+    baseUrl: "http://127.0.0.1:8317/v1",
+    apiKey: "$FACTORY_GPT_API_KEY",
     reasoning: true,
     input: ["text", "image"],
-    cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
-    contextWindow: 272000,
-    maxTokens: 128000,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 16384,
+    compat: {
+      supportsDeveloperRole: false,
+      maxTokensField: "max_tokens",
+    },
   },
   reference: {
-    provider: "zai-coding-cn",
+    provider: "zai",
     model: "glm-5.2",
     api: "openai-completions",
     baseUrl: "https://api.z.ai/api/coding/paas/v4",

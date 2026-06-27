@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A prototype Pi extension/package that adds a `gsd-moa` model provider implementing a Hermes-inspired Mixture-of-Agents (MoA) facade for agentic coding workflows. Pi and GSD see normal model IDs like `gsd-moa/gpt55-glm52-auto`, while the provider decides whether to call GPT-5.5 directly or first obtain tool-less GLM-5.2 advisory feedback before the final GPT-5.5 acting call.
+A prototype Pi extension/package that adds a `gsd-moa` model provider implementing a Hermes-inspired advisor/router facade for agentic coding workflows. Upstream Pi and Pi-derived GSD harnesses see normal model IDs like `gsd-moa/gpt55-glm52-auto`, while the provider decides whether to call GPT-5.5 directly or first obtain tool-less GLM-5.2 advisory feedback before the final GPT-5.5 acting call. v1 is advisor mode, not full multi-proposal MoA fan-out.
 
 The project starts as a local Pi package-shaped prototype, with a clean path to publish as a reusable Pi package and later extract into an OpenAI-compatible local proxy if cross-runtime portability is needed.
 
