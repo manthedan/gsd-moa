@@ -23,9 +23,34 @@
       "maxTokensField": "max_tokens"
     }
   },
+  "fullMoa": {
+    "enabled": true,
+    "proposers": [
+      {
+        "id": "architect",
+        "label": "Architecture proposer",
+        "prompt": "Propose a robust architecture or plan. Emphasize boundaries, interfaces, sequencing, and tradeoffs."
+      },
+      {
+        "id": "reviewer",
+        "label": "Critical reviewer",
+        "prompt": "Critique the request and likely solution. Find bugs, missing requirements, risks, and tests that would fail."
+      },
+      {
+        "id": "implementer",
+        "label": "Implementation proposer",
+        "prompt": "Draft a practical implementation approach. Emphasize concrete steps, edge cases, and verification."
+      }
+    ],
+    "synthesis": {
+      "enabled": true,
+      "prompt": "Synthesize the proposal bundle into concise guidance for the final acting model. Preserve disagreements and important risks; do not call tools or write patches."
+    }
+  },
   "aliases": {
     "gpt55-glm52-single": { "mode": "single" },
     "gpt55-glm52-advisor": { "mode": "advisor" },
+    "gpt55-glm52-full": { "mode": "full_moa" },
     "gpt55-glm52-auto": { "mode": "auto" }
   },
   "auto": {
@@ -40,6 +65,14 @@
       "debug",
       "requirements"
     ],
+    "fullMoaKeywords": [
+      "full moa",
+      "multi-agent",
+      "deep review",
+      "architecture critique",
+      "milestone audit",
+      "threat model"
+    ],
     "singleKeywords": [
       "typo",
       "format",
@@ -53,6 +86,7 @@
     "ttlSeconds": 604800
   },
   "prompts": {
-    "advisorVersion": "v1"
+    "advisorVersion": "v1",
+    "fullMoaVersion": "v1"
   }
 }

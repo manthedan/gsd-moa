@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { AliasMode, GsdMoaConfig, UpstreamRoute } from "./types.js";
+import type { AliasMode, FullMoaConfig, GsdMoaConfig, UpstreamRoute } from "./types.js";
 import { PROVIDER_ID } from "./types.js";
 
 export const DEFAULT_CONFIG_PATH = ".pi/gsd-moa.json";
@@ -40,14 +40,40 @@ export const DEFAULT_CONFIG: GsdMoaConfig = {
       maxTokensField: "max_tokens",
     },
   },
+  fullMoa: {
+    enabled: true,
+    proposers: [
+      {
+        id: "architect",
+        label: "Architecture proposer",
+        prompt: "Propose a robust architecture or plan. Emphasize boundaries, interfaces, sequencing, and tradeoffs.",
+      },
+      {
+        id: "reviewer",
+        label: "Critical reviewer",
+        prompt: "Critique the request and likely solution. Find bugs, missing requirements, risks, and tests that would fail.",
+      },
+      {
+        id: "implementer",
+        label: "Implementation proposer",
+        prompt: "Draft a practical implementation approach. Emphasize concrete steps, edge cases, and verification.",
+      },
+    ],
+    synthesis: {
+      enabled: true,
+      prompt: "Synthesize the proposal bundle into concise guidance for the final acting model. Preserve disagreements and important risks; do not call tools or write patches.",
+    },
+  },
   aliases: {
     "gpt55-glm52-single": { mode: "single" },
     "gpt55-glm52-advisor": { mode: "advisor" },
+    "gpt55-glm52-full": { mode: "full_moa" },
     "gpt55-glm52-auto": { mode: "auto" },
   },
   auto: {
     defaultMode: "single",
     advisorKeywords: ["plan", "review", "audit", "verify", "security", "architecture", "debug", "requirements"],
+    fullMoaKeywords: ["full moa", "multi-agent", "deep review", "architecture critique", "milestone audit", "threat model"],
     singleKeywords: ["typo", "format", "small edit", "rename"],
   },
   cache: {
@@ -57,6 +83,7 @@ export const DEFAULT_CONFIG: GsdMoaConfig = {
   },
   prompts: {
     advisorVersion: "v1",
+    fullMoaVersion: "v1",
   },
 };
 
@@ -91,6 +118,7 @@ export function loadConfig(path = DEFAULT_CONFIG_PATH, cwd = process.cwd()): Gsd
     ...structuredClone(DEFAULT_CONFIG),
     primary: mergeRoute(DEFAULT_CONFIG.primary, parsed.primary),
     reference: mergeRoute(DEFAULT_CONFIG.reference, parsed.reference),
+    fullMoa: mergeFullMoa(DEFAULT_CONFIG.fullMoa, parsed.fullMoa),
     aliases: isRecord(parsed.aliases) ? (parsed.aliases as GsdMoaConfig["aliases"]) : DEFAULT_CONFIG.aliases,
     auto: isRecord(parsed.auto)
       ? {
@@ -99,6 +127,9 @@ export function loadConfig(path = DEFAULT_CONFIG_PATH, cwd = process.cwd()): Gsd
           advisorKeywords: Array.isArray(parsed.auto.advisorKeywords)
             ? (parsed.auto.advisorKeywords as string[])
             : DEFAULT_CONFIG.auto.advisorKeywords,
+          fullMoaKeywords: Array.isArray(parsed.auto.fullMoaKeywords)
+            ? (parsed.auto.fullMoaKeywords as string[])
+            : DEFAULT_CONFIG.auto.fullMoaKeywords,
           singleKeywords: Array.isArray(parsed.auto.singleKeywords)
             ? (parsed.auto.singleKeywords as string[])
             : DEFAULT_CONFIG.auto.singleKeywords,
@@ -114,6 +145,7 @@ export function loadConfig(path = DEFAULT_CONFIG_PATH, cwd = process.cwd()): Gsd
 export function validateConfig(cfg: GsdMoaConfig): void {
   validateRoute("primary", cfg.primary);
   validateRoute("reference", cfg.reference);
+  validateFullMoa(cfg.fullMoa, cfg.reference);
 
   for (const [name, alias] of Object.entries(cfg.aliases)) {
     if (!name.trim()) throw new Error("aliases must not contain blank model ids");
@@ -122,6 +154,7 @@ export function validateConfig(cfg: GsdMoaConfig): void {
 
   validateMode("auto.defaultMode", cfg.auto.defaultMode);
   if (!Array.isArray(cfg.auto.advisorKeywords)) throw new Error("auto.advisorKeywords must be an array");
+  if (!Array.isArray(cfg.auto.fullMoaKeywords)) throw new Error("auto.fullMoaKeywords must be an array");
   if (!Array.isArray(cfg.auto.singleKeywords)) throw new Error("auto.singleKeywords must be an array");
   if (typeof cfg.cache.enabled !== "boolean") throw new Error("cache.enabled must be boolean");
   if (!cfg.cache.dir) throw new Error("cache.dir is required");
@@ -129,6 +162,44 @@ export function validateConfig(cfg: GsdMoaConfig): void {
     throw new Error("cache.ttlSeconds must be a non-negative number");
   }
   if (!cfg.prompts.advisorVersion) throw new Error("prompts.advisorVersion is required");
+  if (!cfg.prompts.fullMoaVersion) throw new Error("prompts.fullMoaVersion is required");
+}
+
+export function mergeUpstreamRoute(base: UpstreamRoute, override: Partial<UpstreamRoute> | undefined): UpstreamRoute {
+  if (!override) return { ...base, headers: base.headers ? { ...base.headers } : undefined, compat: base.compat ? { ...base.compat } : undefined, cost: base.cost ? { ...base.cost } : undefined, input: base.input ? [...base.input] : undefined };
+  return mergeRoute(base, override);
+}
+
+function mergeFullMoa(defaults: FullMoaConfig, override: unknown): FullMoaConfig {
+  if (!isRecord(override)) return structuredClone(defaults);
+  const synthesis = isRecord(override.synthesis)
+    ? { ...defaults.synthesis, ...override.synthesis }
+    : defaults.synthesis;
+  return {
+    ...defaults,
+    ...override,
+    proposers: Array.isArray(override.proposers) ? (override.proposers as FullMoaConfig["proposers"]) : defaults.proposers,
+    synthesis,
+  };
+}
+
+function validateFullMoa(fullMoa: FullMoaConfig, reference: UpstreamRoute): void {
+  if (typeof fullMoa.enabled !== "boolean") throw new Error("fullMoa.enabled must be boolean");
+  if (!Array.isArray(fullMoa.proposers) || fullMoa.proposers.length < 2) {
+    throw new Error("fullMoa.proposers must contain at least two proposers");
+  }
+  const ids = new Set<string>();
+  for (const proposer of fullMoa.proposers) {
+    if (!proposer.id?.trim()) throw new Error("fullMoa.proposers[].id is required");
+    if (ids.has(proposer.id)) throw new Error(`duplicate fullMoa proposer id: ${proposer.id}`);
+    ids.add(proposer.id);
+    if (!proposer.label?.trim()) throw new Error(`fullMoa proposer ${proposer.id} label is required`);
+    if (!proposer.prompt?.trim()) throw new Error(`fullMoa proposer ${proposer.id} prompt is required`);
+    validateRoute(`fullMoa.proposers.${proposer.id}.route`, mergeUpstreamRoute(reference, proposer.route));
+  }
+  if (typeof fullMoa.synthesis.enabled !== "boolean") throw new Error("fullMoa.synthesis.enabled must be boolean");
+  if (fullMoa.synthesis.enabled && !fullMoa.synthesis.prompt?.trim()) throw new Error("fullMoa.synthesis.prompt is required when enabled");
+  if (fullMoa.synthesis.route) validateRoute("fullMoa.synthesis.route", mergeUpstreamRoute(reference, fullMoa.synthesis.route));
 }
 
 function validateRoute(label: string, route: UpstreamRoute): void {
@@ -140,7 +211,7 @@ function validateRoute(label: string, route: UpstreamRoute): void {
 }
 
 function validateMode(label: string, mode: AliasMode): void {
-  if (!["single", "advisor", "auto"].includes(mode)) {
-    throw new Error(`${label} must be one of: single, advisor, auto`);
+  if (!["single", "advisor", "full_moa", "auto"].includes(mode)) {
+    throw new Error(`${label} must be one of: single, advisor, full_moa, auto`);
   }
 }

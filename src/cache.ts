@@ -82,14 +82,16 @@ function cachePath(config: GsdMoaConfig, key: string, cwd: string): string {
 }
 
 function normalizeContext(context: Context): string {
-  return context.messages
+  return [context.systemPrompt ? `system:${context.systemPrompt}` : "", context.messages
     .slice(-12)
     .map((msg) => {
       if (msg.role === "user") return `user:${messageText(msg)}`;
       if (msg.role === "assistant") return `assistant:${assistantText(msg)}`;
       return `tool:${msg.toolName}:${msg.content.map((c) => (c.type === "text" ? c.text : "[image]")).join("\n")}`;
     })
-    .join("\n---\n")
+    .join("\n---\n")]
+    .filter(Boolean)
+    .join("\n===\n")
     .replace(/\s+/g, " ")
     .trim();
 }

@@ -9,9 +9,10 @@ import {
 } from "@earendil-works/pi-ai/compat";
 import { runAdvisor } from "./advisor.js";
 import { loadConfig } from "./config.js";
-import { hasRecentToolResults, latestUserText, stripMarkersFromContext, withAdvisorGuidance } from "./context.js";
+import { hasRecentToolResults, latestUserText, stripMarkersFromContext, withAdvisorGuidance, withFullMoaGuidance } from "./context.js";
+import { runFullMoa } from "./moa.js";
 import { chooseMode } from "./policy.js";
-import type { AdvisorResult, GsdMoaConfig, MoaRunDetails } from "./types.js";
+import type { AdvisorResult, FullMoaResult, GsdMoaConfig, MoaRunDetails } from "./types.js";
 import { routeToModel, streamOptionsForRoute, type UpstreamClient, compatUpstreamClient } from "./upstream.js";
 import { addUsage } from "./usage.js";
 
@@ -41,9 +42,13 @@ export function streamGsdMoa(
       const primaryContext = stripMarkersFromContext(context);
       let finalContext = primaryContext;
       let advisor: AdvisorResult | undefined;
+      let fullMoa: FullMoaResult | undefined;
       if (policy.mode === "advisor") {
         advisor = await runAdvisor(config, context, policy, upstream, options);
         finalContext = withAdvisorGuidance(primaryContext, advisor.text, policy);
+      } else if (policy.mode === "full_moa") {
+        fullMoa = await runFullMoa(config, context, policy, upstream, options);
+        finalContext = withFullMoaGuidance(primaryContext, fullMoa, policy);
       }
 
       const primaryModel = routeToModel(config.primary);
@@ -51,19 +56,19 @@ export function streamGsdMoa(
       for await (const event of inner) {
         if (event.type === "done") {
           const primaryUsage = event.message.usage;
-          const combinedUsage = addUsage(advisor?.usage, primaryUsage);
+          const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
           event.message.usage = combinedUsage;
           event.message.diagnostics = [
             ...(event.message.diagnostics ?? []),
-            moaDiagnostic(config, policy, advisor, primaryUsage, combinedUsage),
+            moaDiagnostic(config, policy, advisor, fullMoa, primaryUsage, combinedUsage),
           ];
         } else if (event.type === "error") {
           const primaryUsage = event.error.usage;
-          const combinedUsage = addUsage(advisor?.usage, primaryUsage);
+          const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
           event.error.usage = combinedUsage;
           event.error.diagnostics = [
             ...(event.error.diagnostics ?? []),
-            moaDiagnostic(config, policy, advisor, primaryUsage, combinedUsage),
+            moaDiagnostic(config, policy, advisor, fullMoa, primaryUsage, combinedUsage),
           ];
         }
         stream.push(event);
@@ -86,6 +91,7 @@ function moaDiagnostic(
   config: GsdMoaConfig,
   policy: ReturnType<typeof chooseMode>,
   advisor: AdvisorResult | undefined,
+  fullMoa: FullMoaResult | undefined,
   primaryUsage: AssistantMessage["usage"],
   combinedUsage: AssistantMessage["usage"],
 ): NonNullable<AssistantMessage["diagnostics"]>[number] {
@@ -93,11 +99,14 @@ function moaDiagnostic(
     mode: policy.mode,
     requestedMode: policy.requestedMode,
     reason: policy.reason,
-    cacheHit: advisor?.cacheHit,
+    cacheHit: fullMoa
+      ? fullMoa.innerCalls.every((call) => call.cacheHit === true)
+      : advisor?.cacheHit,
     innerCalls: [
-      ...(advisor && !advisor.cacheHit
-        ? [{ role: "reference" as const, provider: config.reference.provider, model: config.reference.model, usage: advisor.usage }]
+      ...(advisor
+        ? [{ role: "reference" as const, provider: config.reference.provider, model: config.reference.model, usage: advisor.usage, cacheHit: advisor.cacheHit }]
         : []),
+      ...(fullMoa?.innerCalls ?? []),
       { role: "primary" as const, provider: config.primary.provider, model: config.primary.model, usage: primaryUsage },
     ],
     combinedUsage,

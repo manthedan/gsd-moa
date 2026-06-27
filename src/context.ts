@@ -1,5 +1,5 @@
 import type { AssistantMessage, Context, Message, TextContent, UserMessage } from "@earendil-works/pi-ai/compat";
-import type { PolicyDecision } from "./types.js";
+import type { FullMoaResult, PolicyDecision } from "./types.js";
 
 export function latestUserText(context: Context): string {
   for (let i = context.messages.length - 1; i >= 0; i--) {
@@ -78,6 +78,30 @@ export function withAdvisorGuidance(context: Context, guidance: string, policy: 
   };
 }
 
+export function withFullMoaGuidance(context: Context, result: FullMoaResult, policy: PolicyDecision): Context {
+  const advice = [
+    "Private full-MoA proposal bundle. Use it as auxiliary judgment; do not mention internal routing unless useful.",
+    `Routing: requested=${policy.requestedMode}, selected=${policy.mode}, reason=${policy.reason}.`,
+    "Independent proposals:",
+    ...result.proposals.map((proposal, index) => [
+      `Proposal ${index + 1}: ${proposal.label} (${proposal.provider}/${proposal.model}, cacheHit=${proposal.cacheHit})`,
+      proposal.text.trim(),
+    ].join("\n")),
+    ...(result.synthesis
+      ? [
+          "Synthesis layer:",
+          result.synthesis.text.trim(),
+        ]
+      : []),
+    "Final instruction: synthesize one coherent answer/action path. Only you may use tools.",
+  ].join("\n\n");
+
+  return {
+    ...context,
+    systemPrompt: [context.systemPrompt, advice].filter(Boolean).join("\n\n"),
+  };
+}
+
 export function messageText(message: UserMessage): string {
   if (typeof message.content === "string") return stripKnownMarkers(message.content);
   return message.content
@@ -95,6 +119,6 @@ export function assistantText(message: AssistantMessage): string {
 
 export function stripKnownMarkers(text: string): string {
   return text
-    .replace(/<!--\s*gsd-moa:(advisor|on|single|off)\s*-->/gi, "")
+    .replace(/<!--\s*gsd-moa:(advisor|on|full|full_moa|single|off)\s*-->/gi, "")
     .trim();
 }

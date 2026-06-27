@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A prototype Pi extension/package that adds a `gsd-moa` model provider implementing a Hermes-inspired advisor/router facade for agentic coding workflows. Upstream Pi and Pi-derived GSD harnesses see normal model IDs like `gsd-moa/gpt55-glm52-auto`, while the provider decides whether to call GPT-5.5 directly or first obtain tool-less GLM-5.2 advisory feedback before the final GPT-5.5 acting call. v1 is advisor mode, not full multi-proposal MoA fan-out.
+A prototype Pi extension/package that adds a `gsd-moa` model provider implementing a Hermes-inspired MoA/advisor/router facade for agentic coding workflows. Upstream Pi and Pi-derived GSD harnesses see normal model IDs like `gsd-moa/gpt55-glm52-auto`, while the provider decides whether to call GPT-5.5 directly, first obtain tool-less GLM-5.2 advisory feedback, or run a tool-less multi-proposer full-MoA layer before the final GPT-5.5 acting call.
 
 The project starts as a local Pi package-shaped prototype, with a clean path to publish as a reusable Pi package and later extract into an OpenAI-compatible local proxy if cross-runtime portability is needed.
 
@@ -10,14 +10,15 @@ The project starts as a local Pi package-shaped prototype, with a clean path to 
 
 Give GSD/Pi a normal-looking model provider that adds second-model judgment only when it is worth the latency/cost, while preserving safe single-writer tool execution.
 
-## Current Milestone: v1.1 Useful Proof / Dogfood Evaluation
+## Current Milestone: v1.1 Full MoA Build-out Before Testing
 
-**Goal:** Prove `gsd-moa` is useful on real Pi/GSD work before hardening or publishing.
+**Goal:** Implement full multi-proposer MoA before the dogfood/testing milestone, then evaluate `single` vs `advisor` vs `full_moa`.
 
 **Target features:**
-- A repeatable live proof harness that runs `single` vs `advisor` on realistic coding-agent tasks.
-- Trace artifacts that show route, latency, usage, cache behavior, and advisor influence without leaking secrets.
-- A human-readable summary that answers when advisor mode is worth the extra latency/cost.
+- `gpt55-glm52-full` alias with tool-less multi-proposer fan-out.
+- Optional tool-less synthesis layer before the final GPT-5.5 acting call.
+- Diagnostics and cache behavior for every proposer/synthesizer inner call.
+- Preserve the single-writer tool boundary: only final GPT receives Pi tools.
 
 ## Requirements
 
@@ -26,20 +27,20 @@ Give GSD/Pi a normal-looking model provider that adds second-model judgment only
 - [x] v1.0 shipped a local Pi provider prototype with `single`, `advisor`, and `auto` aliases.
 - [x] v1.0 enforced the single-writer tool policy: GLM advisor calls are tool-less; final GPT calls keep Pi tools.
 - [x] v1.0 proved Factory GPT-5.5 proxy + Z.ai GLM-5.2 routes can work together locally.
+- [x] v1.1 added `gpt55-glm52-full`, tool-less proposer fan-out, optional tool-less synthesis, and per-inner-call diagnostics.
 
 ### Active
 
-- [ ] Build a proof harness that can run live `single` and `advisor` comparisons through the configured Factory/Z.ai proxy routes.
+- [ ] Build a proof harness that can run live `single`, `advisor`, and `full_moa` comparisons through the configured Factory/Z.ai proxy routes.
 - [ ] Capture per-run artifacts that are useful for judgment: prompts, outputs, diagnostics, usage, latency, cache hit/miss, and redacted config.
-- [ ] Include realistic GSD/Pi tasks where advisor mode should plausibly matter: plan review, code review, debugging, architecture critique, and milestone audit.
+- [ ] Include realistic GSD/Pi tasks where advisor/full-MoA modes should plausibly matter: plan review, code review, debugging, architecture critique, and milestone audit.
 - [ ] Provide a scoring/review rubric focused on usefulness, not benchmark theater.
-- [ ] Produce an aggregated proof summary that says when `gpt55-glm52-advisor` appears worth using over `single`.
+- [ ] Produce an aggregated proof summary that says when `gpt55-glm52-advisor` and `gpt55-glm52-full` appear worth using over `single`.
 
 ### Out of Scope
 
 - Hardening/publishing before proof of usefulness.
 - Leaderboard-style benchmarking or fake statistical precision.
-- Full MoA fan-out/synthesis.
 - Additional autonomous tool-capable writers.
 - Sending secrets into proof artifacts.
 
@@ -61,20 +62,22 @@ Pi / GSD agent harness
   ↓
 gsd-moa provider facade
   ↓
-policy: single | advisor | auto
+policy: single | advisor | full_moa | auto
   ↓
 upstream calls:
   - single: GPT-5.5 only
   - advisor: GLM-5.2 tool-less critique → GPT-5.5 final acting call
+  - full_moa: multiple tool-less proposers → optional tool-less synthesis → GPT-5.5 final acting call
 ```
 
 The provider aliases should be:
 
 - `gsd-moa/gpt55-glm52-single` — force direct GPT-5.5 call.
 - `gsd-moa/gpt55-glm52-advisor` — force GLM advisor then GPT final.
-- `gsd-moa/gpt55-glm52-auto` — deterministic router; v1 chooses `single` or `advisor`, never full MoA.
+- `gsd-moa/gpt55-glm52-full` — force tool-less multi-proposer MoA, optional synthesis, then GPT final.
+- `gsd-moa/gpt55-glm52-auto` — deterministic router; chooses the cheapest useful mode using markers, keywords, and tool-loop state.
 
-`auto` means “choose the cheapest useful available mode,” not “run the most expensive MoA.” Later, after full MoA exists, `auto` may choose it only for rare gates like final signoff or hard failure recovery.
+`auto` means “choose the cheapest useful available mode,” not “run the most expensive MoA by default.” Full MoA is reserved for explicit markers/alias or high-leverage keywords like deep review, milestone audit, or threat model.
 
 Potential future portability path:
 
@@ -107,8 +110,8 @@ Z.ai / OpenRouter GLM-5.2
 | Implement MoA below GSD Core in the Pi provider layer | GSD should keep seeing a normal model ID; provider middleware is the clean abstraction for routing/fan-out. | — Pending |
 | Prototype as a Pi package-shaped extension | Faster iteration than a proxy, while keeping reuse/publishability. | — Pending |
 | Provider id is `gsd-moa`; package name is `pi-gsd-moa` | Clear model IDs and package identity. | — Pending |
-| v1 supports `single`, `advisor`, and `auto`; defers `full_moa` | Advisor likely captures most value with lower latency/cost than full proposal synthesis. | — Pending |
-| `auto` routes only between `single` and `advisor` in v1 | Keeps auto cheap and predictable; full MoA can be added later. | — Pending |
+| Add `full_moa` before testing milestone | Expert review identified the main feature delta from Hermes/MoA as missing multi-proposer fan-out and synthesis. | Implemented in v1.1 |
+| `auto` may choose full MoA only for high-leverage keywords | Keeps normal turns cheap while allowing explicit/deep work to exercise the full feature. | Implemented in v1.1 |
 | Only final GPT-5.5 call can use tools | Prevents dueling tool calls, conflicting patches, and complex merge semantics. | — Pending |
 | Reuse Pi provider internals where possible | Avoid duplicating provider serialization/streaming logic and stay compatible with Pi's model registry. | — Pending |
 | Use project-local `.pi/gsd-moa.json`, not env-only config | Enables primary/reference route configuration and future package usability. | — Pending |
@@ -134,4 +137,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-27 starting v1.1 useful proof milestone*
+*Last updated: 2026-06-27 after full MoA build-out request*

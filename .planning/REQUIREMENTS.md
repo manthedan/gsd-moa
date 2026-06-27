@@ -51,34 +51,37 @@ Requirements for the first Pi extension/package prototype.
 
 ## v1.1 Requirements
 
-Requirements for proving advisor-mode usefulness before hardening.
+Requirements for completing full MoA before the testing/proof milestone, then proving advisor/full-MoA usefulness before hardening.
+
+### Full MoA Build-out
+
+- [x] **MOA-01**: Provider supports tool-less multi-proposer fan-out before one final tool-capable primary call.
+- [x] **MOA-02**: Provider supports an optional tool-less synthesis layer over proposer outputs.
+- [x] **MOA-03**: Provider exposes a `gpt55-glm52-full` alias and explicit full-MoA markers.
+- [x] **MOA-04**: `auto` can choose full MoA only for configured high-leverage keywords while tool-loop continuations stay single.
+- [x] **MOA-05**: Diagnostics include proposer/synthesizer inner-call provider/model, usage, and cache hit/miss.
 
 ### Proof Harness
 
 - [ ] **PROOF-01**: A local command/script runs live proof tasks through `gsd-moa` using the Factory GPT-5.5 proxy and Z.ai GLM-5.2 route.
-- [ ] **PROOF-02**: Each proof task can run both `gpt55-glm52-single` and `gpt55-glm52-advisor` against the same input.
+- [ ] **PROOF-02**: Each proof task can run `gpt55-glm52-single`, `gpt55-glm52-advisor`, and `gpt55-glm52-full` against the same input.
 - [ ] **PROOF-03**: Proof runs write durable artifacts under a gitignored run directory with prompts, outputs, diagnostics, latency, usage, cache hit/miss, and redacted config.
 
 ### Evaluation Tasks & Rubric
 
 - [ ] **EVAL-01**: The proof suite includes realistic plan review, code review, debugging, architecture critique, and milestone audit tasks.
-- [ ] **EVAL-02**: A human-review rubric scores whether advisor mode catches issues, improves recommendations, changes final output usefully, and justifies latency/cost.
-- [ ] **EVAL-03**: The suite produces an aggregate summary explaining when advisor mode appears worth choosing over single mode.
+- [ ] **EVAL-02**: A human-review rubric scores whether advisor/full-MoA modes catch issues, improve recommendations, change final output usefully, and justify latency/cost.
+- [ ] **EVAL-03**: The suite produces an aggregate summary explaining when advisor or full-MoA mode appears worth choosing over single mode.
 
 ### Safety & Observability
 
-- [ ] **SAFE-01**: Proof artifacts demonstrate that GLM advisor calls remain tool-less and final GPT calls are the only tool-capable calls.
-- [ ] **OBS-03**: Proof artifacts expose `gsd-moa.details` and route metadata sufficiently to debug advisor influence and cache behavior.
-- [ ] **DOC-03**: Documentation includes the current advisor-mode flow diagram and proof-harness usage instructions.
+- [ ] **SAFE-01**: Proof artifacts demonstrate that GLM advisor/proposer/synthesizer calls remain tool-less and final GPT calls are the only tool-capable calls.
+- [ ] **OBS-03**: Proof artifacts expose `gsd-moa.details` and route metadata sufficiently to debug advisor/full-MoA influence and cache behavior.
+- [ ] **DOC-03**: Documentation includes current advisor-mode and full-MoA flow diagrams plus proof-harness usage instructions.
 
 ## v2 Requirements
 
 Deferred to a future milestone.
-
-### Full MoA
-
-- **MOA-01**: Provider supports proposal fan-out from GPT-5.5 and GLM-5.2 followed by synthesis.
-- **MOA-02**: `auto` can choose full MoA only for rare high-leverage gates such as final signoff or hard failure recovery.
 
 ### Proxy Portability
 
@@ -94,7 +97,6 @@ Deferred to a future milestone.
 
 | Feature | Reason |
 |---------|--------|
-| Full MoA in v1 | Advisor mode should prove value first with lower latency/cost. |
 | Multiple tool-capable writers | Avoids conflicting tool calls, shell results, and patches. |
 | LLM-based router | Defeats the cost goal; routing should be deterministic and cheap. |
 | GSD Core workflow branching for MoA | Provider-layer abstraction keeps GSD portable and simple. |
@@ -132,22 +134,27 @@ Deferred to a future milestone.
 | TEST-04 | Phase 3 | Complete |
 | DOC-01 | Phase 4 | Complete |
 | DOC-02 | Phase 4 | Complete |
-| PROOF-01 | Phase 5 | Planned |
-| PROOF-02 | Phase 5 | Planned |
-| PROOF-03 | Phase 5 | Planned |
-| EVAL-01 | Phase 6 | Planned |
-| EVAL-02 | Phase 6 | Planned |
-| EVAL-03 | Phase 7 | Planned |
-| SAFE-01 | Phase 7 | Planned |
-| OBS-03 | Phase 7 | Planned |
-| DOC-03 | Phase 7 | Planned |
+| MOA-01 | Phase 5 | Complete |
+| MOA-02 | Phase 5 | Complete |
+| MOA-03 | Phase 5 | Complete |
+| MOA-04 | Phase 5 | Complete |
+| MOA-05 | Phase 5 | Complete |
+| PROOF-01 | Phase 6 | Planned |
+| PROOF-02 | Phase 6 | Planned |
+| PROOF-03 | Phase 6 | Planned |
+| EVAL-01 | Phase 7 | Planned |
+| EVAL-02 | Phase 7 | Planned |
+| EVAL-03 | Phase 8 | Planned |
+| SAFE-01 | Phase 8 | Planned |
+| OBS-03 | Phase 8 | Planned |
+| DOC-03 | Phase 8 | Planned |
 
 **Coverage:**
 
 - v1 requirements: 27 total, complete
-- v1.1 requirements: 9 total, 9 mapped to planned phases
+- v1.1 requirements: 14 total, 5 complete and 9 mapped to planned phases
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-27*
-*Last updated: 2026-06-27 starting v1.1 useful proof milestone*
+*Last updated: 2026-06-27 after full MoA build-out*
