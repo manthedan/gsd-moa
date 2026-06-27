@@ -22,30 +22,30 @@ Requirements for the first Pi extension/package prototype.
 - [x] **POL-03**: `auto` mode uses deterministic heuristics to choose only `single` or `advisor` in v1.
 - [x] **POL-04**: Explicit force/off markers can force advisor or single routing and are stripped before upstream model calls.
 - [x] **CTX-01**: Reference/advisor context contains only advisory-safe user/assistant text and excludes tool results, tool calls, and tool schemas.
-- [ ] **CTX-02**: Final primary context preserves normal Pi tools and receives advisor guidance when advisor mode is active.
+- [x] **CTX-02**: Final primary context preserves normal Pi tools and receives advisor guidance when advisor mode is active.
 
 ### Streaming & Provider Orchestration
 
 - [x] **STR-01**: `streamSimple` emits Pi-compatible assistant stream events for text responses.
 - [x] **STR-02**: Single mode streams the primary model response without unnecessary advisor latency.
-- [ ] **STR-03**: Advisor mode waits for cached/fresh GLM advice before streaming the final GPT response.
+- [x] **STR-03**: Advisor mode waits for cached/fresh GLM advice before streaming the final GPT response.
 - [x] **STR-04**: Final GPT response can emit tool calls through Pi's normal tool loop.
 - [x] **STR-05**: Provider handles upstream errors and abort signals with Pi-compatible error/abort messages.
 
 ### Cache & Usage
 
-- [ ] **CACHE-01**: Advisor outputs are cached using a key that includes prompt version, reference route, normalized task/context, and cache-relevant config.
-- [ ] **CACHE-02**: Repeated advisor requests with unchanged cache keys reuse cached GLM advice.
-- [ ] **CACHE-03**: v1 does not cache final tool-capable responses.
-- [ ] **USAGE-01**: Final assistant message reports combined token usage/cost for all upstream calls.
-- [ ] **USAGE-02**: Provider details expose selected mode, cache hit/miss, and inner call route metadata for debugging.
+- [x] **CACHE-01**: Advisor outputs are cached using a key that includes prompt version, reference route, normalized task/context, and cache-relevant config.
+- [x] **CACHE-02**: Repeated advisor requests with unchanged cache keys reuse cached GLM advice.
+- [x] **CACHE-03**: v1 does not cache final tool-capable responses.
+- [x] **USAGE-01**: Final assistant message reports combined token usage/cost for all upstream calls.
+- [x] **USAGE-02**: Provider details expose selected mode, cache hit/miss, and inner call route metadata for debugging.
 
 ### Tests & Documentation
 
 - [x] **TEST-01**: Unit tests cover mode selection, marker stripping, context sanitization, recursion guard, and config validation.
 - [x] **TEST-02**: Unit tests use fake upstream streams to cover single/advisor orchestration without real model calls.
-- [ ] **TEST-03**: Unit tests verify advisor calls receive no tools and final calls preserve tools.
-- [ ] **TEST-04**: Unit tests verify advisor cache hit/miss behavior and combined usage aggregation.
+- [x] **TEST-03**: Unit tests verify advisor calls receive no tools and final calls preserve tools.
+- [x] **TEST-04**: Unit tests verify advisor cache hit/miss behavior and combined usage aggregation.
 - [ ] **DOC-01**: Documentation explains setup, `.pi/gsd-moa.json`, Z.ai subscription routing, model aliases, and why `auto` is not `full_moa` in v1.
 - [ ] **DOC-02**: Documentation records the future path for `full_moa` and CLIProxyAPI/OpenAI-compatible proxy extraction.
 
@@ -93,21 +93,21 @@ Deferred to a future milestone.
 | POL-03 | Phase 1 | Complete |
 | POL-04 | Phase 1 | Complete |
 | CTX-01 | Phase 1 | Complete |
-| CTX-02 | Phase 3 | Pending |
+| CTX-02 | Phase 3 | Complete |
 | STR-01 | Phase 2 | Complete |
 | STR-02 | Phase 2 | Complete |
-| STR-03 | Phase 3 | Pending |
+| STR-03 | Phase 3 | Complete |
 | STR-04 | Phase 2 | Complete |
 | STR-05 | Phase 2 | Complete |
-| CACHE-01 | Phase 3 | Pending |
-| CACHE-02 | Phase 3 | Pending |
-| CACHE-03 | Phase 3 | Pending |
-| USAGE-01 | Phase 3 | Pending |
-| USAGE-02 | Phase 3 | Pending |
+| CACHE-01 | Phase 3 | Complete |
+| CACHE-02 | Phase 3 | Complete |
+| CACHE-03 | Phase 3 | Complete |
+| USAGE-01 | Phase 3 | Complete |
+| USAGE-02 | Phase 3 | Complete |
 | TEST-01 | Phase 1 | Complete |
 | TEST-02 | Phase 2 | Complete |
-| TEST-03 | Phase 3 | Pending |
-| TEST-04 | Phase 3 | Pending |
+| TEST-03 | Phase 3 | Complete |
+| TEST-04 | Phase 3 | Complete |
 | DOC-01 | Phase 4 | Pending |
 | DOC-02 | Phase 4 | Pending |
 

@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Package, Config, and Policy Foundation** - Create the Pi package skeleton, config schema, deterministic router, context sanitizer, and foundational tests. (completed 2026-06-27)
 - [x] **Phase 2: Single-Mode Provider Stream** - Register the `gsd-moa` provider and prove single-mode primary streaming/tool-call pass-through with fake upstreams. (completed 2026-06-27)
-- [ ] **Phase 3: Advisor Orchestration, Cache, and Usage** - Add GLM advisor orchestration, advice injection, advisor cache, tool-safety enforcement, and combined usage reporting.
+- [x] **Phase 3: Advisor Orchestration, Cache, and Usage** - Add GLM advisor orchestration, advice injection, advisor cache, tool-safety enforcement, and combined usage reporting. (completed 2026-06-27)
 - [ ] **Phase 4: Integration Docs and Prototype Validation** - Document setup and run the local Pi extension smoke path, with future `full_moa`/proxy notes captured.
 
 ## Phase Details
@@ -81,9 +81,9 @@ Plans:
 
 Plans:
 
-- [ ] 03-01: Implement advisor runner, prompt versioning, advice shape, and advice injection.
-- [ ] 03-02: Implement advisor cache key/storage/TTL and no-final-action-cache safeguards.
-- [ ] 03-03: Aggregate usage/cost/details and test advisor tool-safety, cache behavior, and auto routing.
+- [x] 03-01: Implement advisor runner, prompt versioning, advice shape, and advice injection.
+- [x] 03-02: Implement advisor cache key/storage/TTL and no-final-action-cache safeguards.
+- [x] 03-03: Aggregate usage/cost/details and test advisor tool-safety, cache behavior, and auto routing.
 
 ### Phase 4: Integration Docs and Prototype Validation
 
@@ -115,5 +115,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Package, Config, and Policy Foundation | 3/3 | Complete | 2026-06-27 |
 | 2. Single-Mode Provider Stream | 2/2 | Complete | 2026-06-27 |
-| 3. Advisor Orchestration, Cache, and Usage | 0/3 | Not started | - |
+| 3. Advisor Orchestration, Cache, and Usage | 3/3 | Complete | 2026-06-27 |
 | 4. Integration Docs and Prototype Validation | 0/2 | Not started | - |
