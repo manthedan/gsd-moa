@@ -14,7 +14,7 @@ Build the provider from the inside out: first establish the package/config found
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Package, Config, and Policy Foundation** - Create the Pi package skeleton, config schema, deterministic router, context sanitizer, and foundational tests. (completed 2026-06-27)
-- [ ] **Phase 2: Single-Mode Provider Stream** - Register the `gsd-moa` provider and prove single-mode primary streaming/tool-call pass-through with fake upstreams.
+- [x] **Phase 2: Single-Mode Provider Stream** - Register the `gsd-moa` provider and prove single-mode primary streaming/tool-call pass-through with fake upstreams. (completed 2026-06-27)
 - [ ] **Phase 3: Advisor Orchestration, Cache, and Usage** - Add GLM advisor orchestration, advice injection, advisor cache, tool-safety enforcement, and combined usage reporting.
 - [ ] **Phase 4: Integration Docs and Prototype Validation** - Document setup and run the local Pi extension smoke path, with future `full_moa`/proxy notes captured.
 
@@ -60,8 +60,8 @@ Plans:
 
 Plans:
 
-- [ ] 02-01: Register provider/models and implement fake upstream stream harness plus single-mode pass-through.
-- [ ] 02-02: Add primary adapter integration, tool-call preservation, and error/abort handling tests.
+- [x] 02-01: Register provider/models and implement fake upstream stream harness plus single-mode pass-through.
+- [x] 02-02: Add primary adapter integration, tool-call preservation, and error/abort handling tests.
 
 ### Phase 3: Advisor Orchestration, Cache, and Usage
 
@@ -114,6 +114,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Package, Config, and Policy Foundation | 3/3 | Complete | 2026-06-27 |
-| 2. Single-Mode Provider Stream | 0/2 | Not started | - |
+| 2. Single-Mode Provider Stream | 2/2 | Complete | 2026-06-27 |
 | 3. Advisor Orchestration, Cache, and Usage | 0/3 | Not started | - |
 | 4. Integration Docs and Prototype Validation | 0/2 | Not started | - |

@@ -26,11 +26,11 @@ Requirements for the first Pi extension/package prototype.
 
 ### Streaming & Provider Orchestration
 
-- [ ] **STR-01**: `streamSimple` emits Pi-compatible assistant stream events for text responses.
-- [ ] **STR-02**: Single mode streams the primary model response without unnecessary advisor latency.
+- [x] **STR-01**: `streamSimple` emits Pi-compatible assistant stream events for text responses.
+- [x] **STR-02**: Single mode streams the primary model response without unnecessary advisor latency.
 - [ ] **STR-03**: Advisor mode waits for cached/fresh GLM advice before streaming the final GPT response.
-- [ ] **STR-04**: Final GPT response can emit tool calls through Pi's normal tool loop.
-- [ ] **STR-05**: Provider handles upstream errors and abort signals with Pi-compatible error/abort messages.
+- [x] **STR-04**: Final GPT response can emit tool calls through Pi's normal tool loop.
+- [x] **STR-05**: Provider handles upstream errors and abort signals with Pi-compatible error/abort messages.
 
 ### Cache & Usage
 
@@ -43,7 +43,7 @@ Requirements for the first Pi extension/package prototype.
 ### Tests & Documentation
 
 - [x] **TEST-01**: Unit tests cover mode selection, marker stripping, context sanitization, recursion guard, and config validation.
-- [ ] **TEST-02**: Unit tests use fake upstream streams to cover single/advisor orchestration without real model calls.
+- [x] **TEST-02**: Unit tests use fake upstream streams to cover single/advisor orchestration without real model calls.
 - [ ] **TEST-03**: Unit tests verify advisor calls receive no tools and final calls preserve tools.
 - [ ] **TEST-04**: Unit tests verify advisor cache hit/miss behavior and combined usage aggregation.
 - [ ] **DOC-01**: Documentation explains setup, `.pi/gsd-moa.json`, Z.ai subscription routing, model aliases, and why `auto` is not `full_moa` in v1.
@@ -94,18 +94,18 @@ Deferred to a future milestone.
 | POL-04 | Phase 1 | Complete |
 | CTX-01 | Phase 1 | Complete |
 | CTX-02 | Phase 3 | Pending |
-| STR-01 | Phase 2 | Pending |
-| STR-02 | Phase 2 | Pending |
+| STR-01 | Phase 2 | Complete |
+| STR-02 | Phase 2 | Complete |
 | STR-03 | Phase 3 | Pending |
-| STR-04 | Phase 2 | Pending |
-| STR-05 | Phase 2 | Pending |
+| STR-04 | Phase 2 | Complete |
+| STR-05 | Phase 2 | Complete |
 | CACHE-01 | Phase 3 | Pending |
 | CACHE-02 | Phase 3 | Pending |
 | CACHE-03 | Phase 3 | Pending |
 | USAGE-01 | Phase 3 | Pending |
 | USAGE-02 | Phase 3 | Pending |
 | TEST-01 | Phase 1 | Complete |
-| TEST-02 | Phase 2 | Pending |
+| TEST-02 | Phase 2 | Complete |
 | TEST-03 | Phase 3 | Pending |
 | TEST-04 | Phase 3 | Pending |
 | DOC-01 | Phase 4 | Pending |

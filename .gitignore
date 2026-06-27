@@ -1,4 +1,5 @@
 node_modules/
+.ralph/
 .pi/gsd-moa-cache/
 coverage/
 dist/
