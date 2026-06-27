@@ -1,20 +1,20 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-current_phase: 0
-current_phase_name: none
-status: Awaiting next milestone
-stopped_at: Milestone v1.0 complete; ready to define next milestone
-last_updated: "2026-06-27T07:49:33.957Z"
+milestone: v1.1
+milestone_name: Useful Proof / Dogfood Evaluation
+current_phase: 5
+current_phase_name: Proof Harness and Artifact Capture
+status: planning
+stopped_at: Ready to plan Phase 5 proof harness
+last_updated: "2026-06-27T08:10:00.000Z"
 last_activity: 2026-06-27
-last_activity_desc: Milestone v1.0 completed and archived
+last_activity_desc: Milestone v1.1 started around useful proof before hardening
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 10
-  completed_plans: 10
-  percent: 100
+  total_phases: 3
+  completed_phases: 0
+  total_plans: 8
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -24,20 +24,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-27)
 
 **Core value:** Give GSD/Pi a normal-looking model provider that adds second-model judgment only when it is worth the latency/cost, while preserving safe single-writer tool execution.
-**Current focus:** Milestone complete
+**Current focus:** v1.1 — Useful Proof / Dogfood Evaluation
 
 ## Current Position
 
-Phase: Milestone v1.0 complete
-Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-06-27 — Milestone v1.0 completed and archived
+Phase: 5 of 7 (Proof Harness and Artifact Capture)
+Plan: Not started
+Status: Planning
+Last activity: 2026-06-27 — Milestone v1.1 started around useful proof before hardening
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 10
+- Total plans completed: 0 in current milestone
 - Average duration: -
 - Total execution time: 0.0 hours
 
@@ -45,10 +47,9 @@ Last activity: 2026-06-27 — Milestone v1.0 completed and archived
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1 | 3 | - | - |
-| 2 | 2 | - | - |
-| 3 | 3 | - | - |
-| 4 | 2 | - | - |
+| 5 | 3 | - | - |
+| 6 | 2 | - | - |
+| 7 | 3 | - | - |
 
 **Recent Trend:**
 
@@ -64,33 +65,22 @@ Last activity: 2026-06-27 — Milestone v1.0 completed and archived
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- Initialize as a Pi provider-layer extension/package, not GSD Core workflow branching.
-- Use provider id `gsd-moa` and package shape/name `pi-gsd-moa`.
-- v1 includes `single`, `advisor`, and `auto`; full MoA is deferred.
-- Use `.pi/gsd-moa.json` for project-local configuration.
-- Route GLM-5.2 reference calls through a Z.ai subscription.
+- v1.0 shipped the provider prototype and archived phases 1–4.
+- Use Factory Droid's local GPT-5.5 Codex proxy for primary calls when appropriate.
+- Use Z.ai Coding Plan GLM-5.2 for reference/advisor calls.
+- Before hardening/publishing, prove advisor mode is useful with real dogfood artifacts.
 
 ### Pending Todos
 
-None yet.
+- Plan Phase 5 proof harness.
+- Build artifact schema that redacts secrets but preserves route/usage/latency evidence.
+- Include current advisor-mode diagram in docs/proof usage.
 
 ### Blockers/Concerns
 
-None yet.
+- Live proof runs require Factory proxy availability and valid `FACTORY_GPT_API_KEY` / `ZAI_API_KEY`.
+- Need avoid benchmark theater; evidence should support a human decision about usefulness.
 
-## Deferred Items
+## Notes
 
-| Category | Item | Status | Deferred At |
-|----------|------|--------|-------------|
-| Full MoA | Proposal fan-out plus synthesis | Deferred to v2 | Initialization |
-| Proxy | CLIProxyAPI/OpenAI-compatible gateway extraction | Deferred to v2 | Initialization |
-
-## Session Continuity
-
-Last session: 2026-06-27
-Stopped at: Milestone v1.0 complete
-Resume file: None
-
-## Operator Next Steps
-
-- Start the next milestone with /gsd-new-milestone
+v1.0 archive lives in `.planning/milestones/`.

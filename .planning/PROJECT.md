@@ -10,33 +10,38 @@ The project starts as a local Pi package-shaped prototype, with a clean path to 
 
 Give GSD/Pi a normal-looking model provider that adds second-model judgment only when it is worth the latency/cost, while preserving safe single-writer tool execution.
 
+## Current Milestone: v1.1 Useful Proof / Dogfood Evaluation
+
+**Goal:** Prove `gsd-moa` is useful on real Pi/GSD work before hardening or publishing.
+
+**Target features:**
+- A repeatable live proof harness that runs `single` vs `advisor` on realistic coding-agent tasks.
+- Trace artifacts that show route, latency, usage, cache behavior, and advisor influence without leaking secrets.
+- A human-readable summary that answers when advisor mode is worth the extra latency/cost.
+
 ## Requirements
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] v1.0 shipped a local Pi provider prototype with `single`, `advisor`, and `auto` aliases.
+- [x] v1.0 enforced the single-writer tool policy: GLM advisor calls are tool-less; final GPT calls keep Pi tools.
+- [x] v1.0 proved Factory GPT-5.5 proxy + Z.ai GLM-5.2 routes can work together locally.
 
 ### Active
 
-- [ ] Implement a Pi custom provider extension named `gsd-moa` with model aliases for `gpt55-glm52-single`, `gpt55-glm52-advisor`, and `gpt55-glm52-auto`.
-- [ ] Structure the prototype as a publishable Pi package (`pi-gsd-moa`) while keeping it usable project-locally during development.
-- [ ] Reuse Pi provider/streaming internals where possible, instead of hand-rolling every upstream provider call.
-- [ ] Keep upstream calls mockable so routing, prompt construction, cache behavior, tool policy, and usage aggregation can be tested without real model spend.
-- [ ] Implement v1 modes: `single`, `advisor`, and `auto`; explicitly defer `full_moa` proposal fan-out/synthesis.
-- [ ] Ensure reference/advisor calls never receive tools and cannot emit tool calls; only the final GPT-5.5 acting call can use Pi tools.
-- [ ] Implement deterministic auto-routing that chooses only `single` or `advisor` in v1.
-- [ ] Implement advisor-output caching keyed by normalized task/context and prompt version.
-- [ ] Report combined usage/cost for all upstream calls while exposing the visible assistant response as a `gsd-moa` model response.
-- [ ] Provide clear project-local configuration in `.pi/gsd-moa.json` for primary and reference provider/model routes, with v1 reference routing targeting a Z.ai subscription for GLM-5.2.
-- [ ] Keep future compatibility with a CLIProxyAPI/OpenAI-compatible proxy extraction path in mind, without making it part of the first deliverable.
+- [ ] Build a proof harness that can run live `single` and `advisor` comparisons through the configured Factory/Z.ai proxy routes.
+- [ ] Capture per-run artifacts that are useful for judgment: prompts, outputs, diagnostics, usage, latency, cache hit/miss, and redacted config.
+- [ ] Include realistic GSD/Pi tasks where advisor mode should plausibly matter: plan review, code review, debugging, architecture critique, and milestone audit.
+- [ ] Provide a scoring/review rubric focused on usefulness, not benchmark theater.
+- [ ] Produce an aggregated proof summary that says when `gpt55-glm52-advisor` appears worth using over `single`.
 
 ### Out of Scope
 
-- Full MoA in v1 — proposal fan-out plus synthesis is more expensive and should wait until advisor mode proves useful.
-- Multiple tool-capable writers — merging competing tool calls/patch streams is intentionally avoided.
-- GSD Core workflow branching for MoA — GSD should mostly keep seeing a normal model ID.
-- A production OpenAI-compatible proxy in v1 — CLIProxyAPI/local proxy support is a future portability direction, not the first implementation target.
-- Blind caching of final tool-capable responses — cache advice aggressively, not mutable filesystem actions.
+- Hardening/publishing before proof of usefulness.
+- Leaderboard-style benchmarking or fake statistical precision.
+- Full MoA fan-out/synthesis.
+- Additional autonomous tool-capable writers.
+- Sending secrets into proof artifacts.
 
 ## Context
 
@@ -109,6 +114,7 @@ Z.ai / OpenRouter GLM-5.2
 | Use project-local `.pi/gsd-moa.json`, not env-only config | Enables primary/reference route configuration and future package usability. | — Pending |
 | Route v1 GLM reference calls through a Z.ai subscription | Matches the expected available GLM-5.2 access path for the prototype. | — Pending |
 | Keep CLIProxyAPI/OpenAI-compatible proxy as future path | Useful for cross-runtime GSD, but premature for the first Pi prototype. | — Pending |
+| Prove usefulness before hardening | Passing tests and smoke checks is insufficient; need dogfood evidence that advisor mode improves real work. | Active in v1.1 |
 
 ## Evolution
 
@@ -128,4 +134,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-27 after initialization*
+*Last updated: 2026-06-27 starting v1.1 useful proof milestone*

@@ -1,119 +1,92 @@
-# Roadmap: GSD MoA Pi Provider
+# Roadmap: v1.1 Useful Proof / Dogfood Evaluation
 
 ## Overview
 
-Build the provider from the inside out: first establish the package/config foundation and deterministic policy, then prove Pi provider streaming with mockable upstream calls, then add advisor orchestration with safe tool boundaries, caching, and usage aggregation, and finally harden the prototype with docs and a Pi smoke-test path. The roadmap uses vertical MVP slices so each phase leaves the provider more runnable and verifiable.
+Before hardening or publishing `gsd-moa`, prove that advisor mode is useful on realistic Pi/GSD work. This milestone builds a repeatable proof harness, a small live evaluation suite, and human-readable evidence that explains when `gpt55-glm52-advisor` is worth using instead of `gpt55-glm52-single`.
 
 ## Phases
 
-**Phase Numbering:**
+**Phase Numbering:** Continuing from v1.0; archived phases 1–4 live under `.planning/milestones/v1.0-phases/`.
 
-- Integer phases (1, 2, 3): Planned milestone work
-- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
-
-Decimal phases appear between their surrounding integers in numeric order.
-
-- [x] **Phase 1: Package, Config, and Policy Foundation** - Create the Pi package skeleton, config schema, deterministic router, context sanitizer, and foundational tests. (completed 2026-06-27)
-- [x] **Phase 2: Single-Mode Provider Stream** - Register the `gsd-moa` provider and prove single-mode primary streaming/tool-call pass-through with fake upstreams. (completed 2026-06-27)
-- [x] **Phase 3: Advisor Orchestration, Cache, and Usage** - Add GLM advisor orchestration, advice injection, advisor cache, tool-safety enforcement, and combined usage reporting. (completed 2026-06-27)
-- [x] **Phase 4: Integration Docs and Prototype Validation** - Document setup and run the local Pi extension smoke path, with future `full_moa`/proxy notes captured. (completed 2026-06-27)
+- [ ] **Phase 5: Proof Harness and Artifact Capture** - Add a local live-run harness that executes `single` and `advisor` through the configured Factory/Z.ai proxy routes and writes durable, redacted artifacts.
+- [ ] **Phase 6: Realistic Evaluation Task Suite and Rubric** - Define representative Pi/GSD tasks plus a usefulness rubric for comparing single vs advisor outputs.
+- [ ] **Phase 7: Dogfood Run, Summary, and Decision Gate** - Run the suite, inspect results, document advisor-mode value, and decide whether to harden, adjust, or pause.
 
 ## Phase Details
 
-### Phase 1: Package, Config, and Policy Foundation
+### Phase 5: Proof Harness and Artifact Capture
 
-**Goal**: A local, package-shaped Pi extension foundation exists with validated config, mode routing, safe context preparation, and unit tests.
+**Goal**: A developer can run a local proof command that compares `single` and `advisor` on the same input and saves enough trace evidence to inspect what happened.
 **Mode:** mvp
-**Depends on**: Nothing (first phase)
-**Requirements**: [PKG-01, PKG-02, PKG-03, PKG-04, PKG-05, POL-01, POL-02, POL-03, POL-04, CTX-01, TEST-01]
+**Depends on**: v1.0 complete
+**Requirements**: [PROOF-01, PROOF-02, PROOF-03]
 **Success Criteria** (what must be TRUE):
 
-  1. Developer can load the project-local package/extension skeleton without Pi core changes.
-  2. `.pi/gsd-moa.json` is parsed, defaulted, and validated with actionable errors.
-  3. Deterministic policy maps aliases and markers to v1 modes (`single` or `advisor`) without LLM routing.
-  4. Reference-safe context generation strips tools/tool transcript while preserving useful user/assistant text.
-  5. Tests cover config validation, recursion guard, mode selection, marker stripping, and context sanitization.
+1. A local command/script runs live proof cases through `gsd-moa` using the configured Factory GPT-5.5 proxy and Z.ai GLM-5.2 route.
+2. Each case can run both `gpt55-glm52-single` and `gpt55-glm52-advisor` against identical prompt/context input.
+3. Run artifacts are stored under a gitignored proof directory with stable filenames.
+4. Artifacts include redacted config, prompt/input, output, diagnostics, route metadata, latency, usage, and cache hit/miss.
+5. Missing proxy keys or unavailable local proxy fail with actionable setup messages.
 
 **Plans**: 3 plans
 
 Plans:
 
-- [x] 01-01: Create package skeleton, extension entry, config schema, and defaults.
-- [x] 01-02: Implement deterministic mode policy, marker stripping, and recursion/config guards.
-- [x] 01-03: Implement reference-safe context sanitizer and foundational unit tests.
+- [ ] 05-01: Add proof harness CLI/script and package command.
+- [ ] 05-02: Add redacted artifact writer with latency/usage/diagnostic capture.
+- [ ] 05-03: Add setup validation for Factory GPT and Z.ai proxy routes.
 
-### Phase 2: Single-Mode Provider Stream
+### Phase 6: Realistic Evaluation Task Suite and Rubric
 
-**Goal**: `gsd-moa` can act as a Pi provider in single mode, streaming a primary GPT-compatible response and preserving normal Pi tool behavior.
+**Goal**: The proof harness has meaningful tasks and a review rubric focused on whether advisor mode improves real work.
 **Mode:** mvp
-**Depends on**: Phase 1
-**Requirements**: [STR-01, STR-02, STR-04, STR-05, TEST-02]
+**Depends on**: Phase 5
+**Requirements**: [EVAL-01, EVAL-02]
 **Success Criteria** (what must be TRUE):
 
-  1. Pi model registry can see/select the `gsd-moa` aliases.
-  2. `gpt55-glm52-single` streams fake and real-adapter primary responses through Pi-compatible stream events.
-  3. Final primary calls receive normal Pi tools and can emit tool calls through Pi's normal loop.
-  4. Upstream errors and aborts become Pi-compatible assistant error/abort messages.
-  5. Fake upstream stream tests prove text, tool-call, usage, error, and abort paths without real model spend.
+1. The suite includes plan review, code review, debugging, architecture critique, and milestone audit cases.
+2. Case inputs are realistic but safe to run without mutating the repository.
+3. The rubric asks whether advisor mode caught issues single missed, improved final recommendations, or added unnecessary noise.
+4. The rubric captures latency/cost tolerance and when advisor mode should be avoided.
+5. Example reviewer notes are included so future runs are comparable.
 
 **Plans**: 2 plans
 
 Plans:
 
-- [x] 02-01: Register provider/models and implement fake upstream stream harness plus single-mode pass-through.
-- [x] 02-02: Add primary adapter integration, tool-call preservation, and error/abort handling tests.
+- [ ] 06-01: Author representative proof cases from this repo/GSD workflow.
+- [ ] 06-02: Define human usefulness rubric and reviewer note format.
 
-### Phase 3: Advisor Orchestration, Cache, and Usage
+### Phase 7: Dogfood Run, Summary, and Decision Gate
 
-**Goal**: Advisor mode safely runs GLM-5.2 without tools, injects cached/fresh advice into the GPT-5.5 final call, and reports combined usage/cost.
+**Goal**: A real dogfood run produces an evidence-backed decision about advisor mode's usefulness and next steps.
 **Mode:** mvp
-**Depends on**: Phase 2
-**Requirements**: [CTX-02, STR-03, CACHE-01, CACHE-02, CACHE-03, USAGE-01, USAGE-02, TEST-03, TEST-04]
+**Depends on**: Phase 6
+**Requirements**: [EVAL-03, SAFE-01, OBS-03, DOC-03]
 **Success Criteria** (what must be TRUE):
 
-  1. `gpt55-glm52-advisor` runs a tool-less GLM reference/advisor call before the final GPT call.
-  2. `gpt55-glm52-auto` chooses advisor only for deterministic high-leverage triggers and otherwise stays single.
-  3. Advisor output is cached by prompt version, reference route, normalized task/context, and cache-relevant config.
-  4. Final GPT call receives advisor guidance and normal tools; reference/advisor calls receive no tools.
-  5. Final assistant message includes combined usage/cost and details for mode, cache hit/miss, and inner routes.
+1. At least five proof cases run end-to-end with both `single` and `advisor` variants.
+2. Summary identifies where advisor mode helped, hurt, or was not worth the overhead.
+3. Summary includes observed latency/usage/cache behavior and reviewer conclusions.
+4. Artifacts demonstrate GLM calls remain tool-less and final GPT calls are the only tool-capable path.
+5. Docs include advisor-mode diagram and proof-harness usage instructions.
+6. Final decision gate recommends one of: harden/publish, adjust prompts/routing, expand evals, or pause.
 
 **Plans**: 3 plans
 
 Plans:
 
-- [x] 03-01: Implement advisor runner, prompt versioning, advice shape, and advice injection.
-- [x] 03-02: Implement advisor cache key/storage/TTL and no-final-action-cache safeguards.
-- [x] 03-03: Aggregate usage/cost/details and test advisor tool-safety, cache behavior, and auto routing.
-
-### Phase 4: Integration Docs and Prototype Validation
-
-**Goal**: The prototype is documented and validated as a local Pi extension/package with clear setup, Z.ai routing, model alias semantics, and future expansion notes.
-**Mode:** mvp
-**Depends on**: Phase 3
-**Requirements**: [DOC-01, DOC-02]
-**Success Criteria** (what must be TRUE):
-
-  1. Documentation explains installing/loading the local Pi package-shaped extension.
-  2. Documentation includes a complete `.pi/gsd-moa.json` example for GPT-5.5 primary and Z.ai GLM-5.2 reference routing.
-  3. Documentation explains `single`, `advisor`, and `auto`, including why v1 `auto` is not `full_moa`.
-  4. Documentation records future `full_moa` and CLIProxyAPI/OpenAI-compatible proxy extraction paths.
-  5. A local smoke checklist verifies provider selection and basic single/advisor behavior.
-
-**Plans**: 2 plans
-
-Plans:
-
-- [x] 04-01: Write setup/config/model-alias documentation and local smoke checklist.
-- [x] 04-02: Capture future full MoA/proxy architecture notes and final prototype validation evidence.
+- [ ] 07-01: Run dogfood proof suite and collect artifacts.
+- [ ] 07-02: Write aggregate proof summary and usefulness decision.
+- [ ] 07-03: Update docs with advisor flow diagram and proof usage.
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4
+Phases execute in numeric order: 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Package, Config, and Policy Foundation | 3/3 | Complete | 2026-06-27 |
-| 2. Single-Mode Provider Stream | 2/2 | Complete | 2026-06-27 |
-| 3. Advisor Orchestration, Cache, and Usage | 3/3 | Complete | 2026-06-27 |
-| 4. Integration Docs and Prototype Validation | 2/2 | Complete | 2026-06-27 |
+| 5. Proof Harness and Artifact Capture | 0/3 | Planned | - |
+| 6. Realistic Evaluation Task Suite and Rubric | 0/2 | Planned | - |
+| 7. Dogfood Run, Summary, and Decision Gate | 0/3 | Planned | - |

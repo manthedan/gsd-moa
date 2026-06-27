@@ -49,6 +49,28 @@ Requirements for the first Pi extension/package prototype.
 - [x] **DOC-01**: Documentation explains setup, `.pi/gsd-moa.json`, Z.ai subscription routing, model aliases, and why `auto` is not `full_moa` in v1.
 - [x] **DOC-02**: Documentation records the future path for `full_moa` and CLIProxyAPI/OpenAI-compatible proxy extraction.
 
+## v1.1 Requirements
+
+Requirements for proving advisor-mode usefulness before hardening.
+
+### Proof Harness
+
+- [ ] **PROOF-01**: A local command/script runs live proof tasks through `gsd-moa` using the Factory GPT-5.5 proxy and Z.ai GLM-5.2 route.
+- [ ] **PROOF-02**: Each proof task can run both `gpt55-glm52-single` and `gpt55-glm52-advisor` against the same input.
+- [ ] **PROOF-03**: Proof runs write durable artifacts under a gitignored run directory with prompts, outputs, diagnostics, latency, usage, cache hit/miss, and redacted config.
+
+### Evaluation Tasks & Rubric
+
+- [ ] **EVAL-01**: The proof suite includes realistic plan review, code review, debugging, architecture critique, and milestone audit tasks.
+- [ ] **EVAL-02**: A human-review rubric scores whether advisor mode catches issues, improves recommendations, changes final output usefully, and justifies latency/cost.
+- [ ] **EVAL-03**: The suite produces an aggregate summary explaining when advisor mode appears worth choosing over single mode.
+
+### Safety & Observability
+
+- [ ] **SAFE-01**: Proof artifacts demonstrate that GLM advisor calls remain tool-less and final GPT calls are the only tool-capable calls.
+- [ ] **OBS-03**: Proof artifacts expose `gsd-moa.details` and route metadata sufficiently to debug advisor influence and cache behavior.
+- [ ] **DOC-03**: Documentation includes the current advisor-mode flow diagram and proof-harness usage instructions.
+
 ## v2 Requirements
 
 Deferred to a future milestone.
@@ -110,13 +132,22 @@ Deferred to a future milestone.
 | TEST-04 | Phase 3 | Complete |
 | DOC-01 | Phase 4 | Complete |
 | DOC-02 | Phase 4 | Complete |
+| PROOF-01 | Phase 5 | Planned |
+| PROOF-02 | Phase 5 | Planned |
+| PROOF-03 | Phase 5 | Planned |
+| EVAL-01 | Phase 6 | Planned |
+| EVAL-02 | Phase 6 | Planned |
+| EVAL-03 | Phase 7 | Planned |
+| SAFE-01 | Phase 7 | Planned |
+| OBS-03 | Phase 7 | Planned |
+| DOC-03 | Phase 7 | Planned |
 
 **Coverage:**
 
-- v1 requirements: 27 total
-- Mapped to phases: 27
+- v1 requirements: 27 total, complete
+- v1.1 requirements: 9 total, 9 mapped to planned phases
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-27*
-*Last updated: 2026-06-27 after initial definition*
+*Last updated: 2026-06-27 starting v1.1 useful proof milestone*

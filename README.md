@@ -112,6 +112,10 @@ Final assistant messages include a `gsd-moa.details` diagnostic containing:
 4. Selecting `gpt55-glm52-advisor` with `ZAI_API_KEY` set runs a GLM advisor call and then a GPT final response.
 5. Tool calls, if any, come only from the final GPT call.
 
+## Advisor Flow
+
+See [`docs/ADVISOR-MODE.md`](docs/ADVISOR-MODE.md) for the current advisor-mode sequence and safety boundary diagram.
+
 ## Future Work
 
 See [`docs/FUTURE.md`](docs/FUTURE.md) for deferred full MoA and OpenAI-compatible proxy extraction notes.
