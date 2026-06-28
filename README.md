@@ -156,7 +156,7 @@ Final assistant messages include a `gsd-moa.details` diagnostic containing:
 
 ## Advisor and Full MoA Flows
 
-See [`docs/ADVISOR-MODE.md`](docs/ADVISOR-MODE.md) for advisor mode, [`docs/FULL-MOA.md`](docs/FULL-MOA.md) for full reference-model MoA flow diagrams, and [`docs/TERMINAL-BENCH.md`](docs/TERMINAL-BENCH.md) for the single-vs-full proof loop.
+See [`docs/ADVISOR-MODE.md`](docs/ADVISOR-MODE.md) for advisor mode, [`docs/FULL-MOA.md`](docs/FULL-MOA.md) for full reference-model MoA flow diagrams, [`docs/TERMINAL-BENCH.md`](docs/TERMINAL-BENCH.md) for the single-vs-full proof loop, and [`docs/EVALUATION.md`](docs/EVALUATION.md) for the human rubric plus current evidence snapshot.
 
 ## Future Work
 

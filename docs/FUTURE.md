@@ -9,6 +9,9 @@
 3. Better per-inner-call status reporting if Pi exposes provider progress events.
 4. Proof artifacts that show when full MoA beats advisor mode enough to justify cost.
 5. Optional output-shape contracts for planner/reviewer/debugger use cases.
+6. Modular model references that can resolve already-configured Pi models and conditionally add specialists such as Gemini for multimodal tasks.
+
+See [`MODULAR-MOA.md`](MODULAR-MOA.md) for the model-reference resolver and conditional Gemini exploration notes.
 
 The single-writer invariant should remain non-negotiable: reference models and synthesizers advise only; final primary owns tools.
 
