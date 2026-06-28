@@ -236,8 +236,8 @@ def _subagent_refs_for_message(
         model = "/".join(str(part) for part in [provider, model_name] if part)
         cache_hit = call.get("cacheHit") is True or (isinstance(trace_call, dict) and trace_call.get("cacheHit") is True)
         usage = call.get("usage") if isinstance(call.get("usage"), dict) else None
-        if usage is None and isinstance(trace_call, dict) and isinstance(trace_call.get("usage"), dict):
-            usage = trace_call.get("usage")
+        if usage is None:
+            usage = _trace_call_usage(trace_call)
         sub_steps = _subagent_steps(call, trace_call, model, usage, cache_hit)
         trajectories.append(
             _drop_none(
@@ -314,16 +314,20 @@ def _subagent_steps(
                 }
             )
         )
-    text = _trace_call_text(trace_call) or _subagent_message(call, cache_hit)
-    started_at = trace_call.get("startedAt") if isinstance(trace_call, dict) else None
+    text = _trace_call_text(trace_call)
+    reasoning = _trace_call_reasoning(trace_call)
+    if not text:
+        text = _subagent_message(call, cache_hit, reasoning_only=bool(reasoning))
+    timestamp = _trace_call_message_timestamp(trace_call) or (trace_call.get("startedAt") if isinstance(trace_call, dict) else None)
     steps.append(
         _drop_none(
             {
                 "step_id": len(steps) + 1,
-                "timestamp": _timestamp(started_at),
+                "timestamp": _timestamp(timestamp),
                 "source": "agent",
                 "model_name": model or None,
                 "message": text,
+                "reasoning_content": None if cache_hit and usage is None else (reasoning or None),
                 "metrics": None if cache_hit and usage is None else _metrics(usage),
                 "llm_call_count": 0 if cache_hit and usage is None else 1,
                 "extra": {"gsd_moa_inner_call": call},
@@ -333,12 +337,14 @@ def _subagent_steps(
     return steps
 
 
-def _subagent_message(call: dict[str, Any], cache_hit: bool) -> str:
+def _subagent_message(call: dict[str, Any], cache_hit: bool, reasoning_only: bool = False) -> str:
     role = call.get("role", "subagent")
     label = call.get("label") or call.get("id") or role
     provider = call.get("provider", "unknown-provider")
     model = call.get("model", "unknown-model")
     suffix = " (cache hit)" if cache_hit else ""
+    if reasoning_only:
+        return f"gsd-moa {role} call: {label} via {provider}/{model}{suffix}. Response text was empty; see reasoning_content."
     return f"gsd-moa {role} call: {label} via {provider}/{model}{suffix}. Inner text not present in Pi JSONL diagnostics."
 
 
@@ -406,6 +412,36 @@ def _trace_call_text(trace_call: dict[str, Any] | None) -> str:
     if isinstance(message, dict):
         return _content_text(message.get("content"))
     return ""
+
+
+def _trace_call_reasoning(trace_call: dict[str, Any] | None) -> str:
+    if not isinstance(trace_call, dict):
+        return ""
+    message = trace_call.get("message")
+    if isinstance(message, dict):
+        return _thinking_text(message.get("content"))
+    return ""
+
+
+def _trace_call_usage(trace_call: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(trace_call, dict):
+        return None
+    usage = trace_call.get("usage")
+    if isinstance(usage, dict):
+        return usage
+    message = trace_call.get("message")
+    if isinstance(message, dict) and isinstance(message.get("usage"), dict):
+        return message.get("usage")
+    return None
+
+
+def _trace_call_message_timestamp(trace_call: dict[str, Any] | None) -> Any:
+    if not isinstance(trace_call, dict):
+        return None
+    message = trace_call.get("message")
+    if isinstance(message, dict):
+        return message.get("timestamp")
+    return None
 
 
 def _tool_result_observation(message: dict[str, Any], last_agent_step: dict[str, Any] | None) -> dict[str, Any]:
