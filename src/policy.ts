@@ -46,7 +46,12 @@ export function chooseMode(config: GsdMoaConfig, input: PolicyInput): PolicyDeci
   if (singleHit) return decision(requestedMode, "single", `single keyword: ${singleHit}`, strippedText, markers);
 
   const fullMoaHit = config.auto.fullMoaKeywords.find((kw) => normalized.includes(kw.toLowerCase()));
-  if (fullMoaHit) return decision(requestedMode, "full_moa", `full MoA keyword: ${fullMoaHit}`, strippedText, markers);
+  if (fullMoaHit && config.fullMoa.enabled) {
+    return decision(requestedMode, "full_moa", `full MoA keyword: ${fullMoaHit}`, strippedText, markers);
+  }
+  if (fullMoaHit) {
+    return decision(requestedMode, "advisor", `full MoA keyword: ${fullMoaHit}; fullMoa disabled, advisor fallback`, strippedText, markers);
+  }
 
   const advisorHit = config.auto.advisorKeywords.find((kw) => normalized.includes(kw.toLowerCase()));
   if (advisorHit) return decision(requestedMode, "advisor", `advisor keyword: ${advisorHit}`, strippedText, markers);
