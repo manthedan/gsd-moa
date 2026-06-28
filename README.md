@@ -12,7 +12,7 @@ Use provider `gsd-moa` with one of these model ids:
 |---|---|
 | `gpt55-glm52-single` | Direct primary GPT-5.5 call. Fastest/cheapest. |
 | `gpt55-glm52-advisor` | Tool-less GLM-5.2 advisor call, then final GPT-5.5 acting call with normal tools. |
-| `gpt55-glm52-full` | Tool-less GLM-5.2 + GPT-5.5 reference fan-out, optional tool-less GPT-5.5 synthesis layer, then final GPT-5.5 acting call with normal tools. |
+| `gpt55-glm52-full` | Tool-less GLM-5.2 + GPT-5.5 reference fan-out, optional tool-less GPT-5.5 execution-memo synthesis layer, then final GPT-5.5 acting call with normal tools. |
 | `gpt55-glm52-auto` | Deterministic policy chooses `single`, `advisor`, or `full_moa` from alias, markers, tool-loop state, and keywords. |
 
 ## Local Installation
@@ -151,7 +151,7 @@ Final assistant messages include a `gsd-moa.details` diagnostic containing:
 2. `pi -a -e ./src/index.ts --list-models gpt55-glm52` shows provider `gsd-moa` with the four aliases.
 3. Selecting `gpt55-glm52-single` produces a normal streamed response.
 4. Selecting `gpt55-glm52-advisor` with `ZAI_API_KEY` set runs a GLM advisor call and then a GPT final response.
-5. Selecting `gpt55-glm52-full` runs GLM-5.2 and GPT-5.5 as tool-less reference models, optional GPT-5.5 synthesis, and then one GPT final response.
+5. Selecting `gpt55-glm52-full` runs GLM-5.2 and GPT-5.5 as tool-less private advisors, optional GPT-5.5 execution-memo synthesis, injects that private context as privileged guidance, adds a non-private execution note when tools are present, and then runs one GPT final response.
 6. Tool calls, if any, come only from the final GPT call.
 
 ## Advisor and Full MoA Flows

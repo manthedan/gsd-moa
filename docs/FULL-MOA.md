@@ -1,6 +1,6 @@
 # Full MoA Flow
 
-`gpt55-glm52-full` follows the Hermes/OpenRouter Model Fusion shape: run multiple tool-less reference models over the same sanitized conversation, optionally synthesize their outputs, then let one final GPT-5.5 acting call use normal Pi tools.
+`gpt55-glm52-full` follows the Hermes/OpenRouter Model Fusion shape: run multiple tool-less reference models over the same sanitized conversation, optionally synthesize their outputs into a private execution memo, then let one final GPT-5.5 acting call use normal Pi tools.
 
 ```mermaid
 flowchart TD
@@ -12,8 +12,8 @@ flowchart TD
   E --> E2[GPT-5.5 reference<br/>Factory proxy]
   E1 --> F[Reference response bundle]
   E2 --> F
-  F --> G[Optional tool-less GPT-5.5 synthesis layer]
-  G --> H[Inject reference bundle + synthesis<br/>into final primary context]
+  F --> G[Optional tool-less GPT-5.5 synthesis layer<br/>private execution memo]
+  G --> H[Inject reference bundle + synthesis<br/>as private system guidance<br/>plus public execution note when tools exist]
   H --> I[Final GPT-5.5 acting call<br/>Factory proxy<br/>normal Pi tools preserved]
   I --> J[Stream final assistant events to Pi]
   J --> K[done/error includes combined usage<br/>and gsd-moa.details for every inner call]
@@ -38,8 +38,8 @@ sequenceDiagram
     MoA->>Cache: read GPT-5.5 reference key
     MoA->>R: complete(tool-less sanitized context) if miss
   end
-  MoA->>S: complete(tool-less synthesis context) if synthesis enabled/cache miss
-  MoA->>GPT: stream(original tools + private reference guidance)
+  MoA->>S: complete(tool-less execution-memo context) if synthesis enabled/cache miss
+  MoA->>GPT: stream(original tools + private system reference guidance + public execution note when tools exist)
   GPT-->>MoA: final assistant stream / tool calls
   MoA-->>Pi: final stream events
   MoA-->>Pi: final done/error includes combined usage and diagnostics
@@ -52,10 +52,10 @@ sequenceDiagram
 - `synthesis`: GPT-5.5 through the Factory proxy, tool-less, summarizing reference responses into actionable guidance for the final actor.
 - `primary`: GPT-5.5 through the Factory proxy, tool-capable, owns all file/terminal actions.
 
-The reference models receive the same sanitized conversation rather than role-specific architect/reviewer/implementer prompts. Diversity comes from model differences first; GSD-specific behavior belongs primarily in `auto` routing, which decides when full MoA is worth the overhead.
+The reference models receive the same sanitized conversation rather than role-specific architect/reviewer/implementer prompts. They are framed as private advisors, not as user-facing answer writers. Diversity comes from model differences first; GSD-specific behavior belongs primarily in `auto` routing, which decides when full MoA is worth the overhead.
 
 Individual reference and synthesis routes can be overridden under `.pi/gsd-moa.json` using `fullMoa.proposers[].route` or `fullMoa.synthesis.route`.
 
 ## Safety invariant
 
-Full MoA expands judgment diversity, not autonomous writers. Reference models and the synthesizer are private and tool-less. Only the final primary model receives Pi tools and may act.
+Full MoA expands judgment diversity, not autonomous writers. Reference models and the synthesizer are private and tool-less. Their context is injected as privileged private guidance for the final actor. When tools are present, the provider may also append a short non-private execution note to the latest user message to make the live-environment/tool-use expectation salient without exposing private references. Only the final primary model receives Pi tools and may act.

@@ -191,7 +191,8 @@ describe("trace capture", () => {
       assert.equal(trace.referenceCalls.filter((call: any) => call.role === "synthesizer").length, 1);
       assert.match(JSON.stringify(trace.referenceCalls), /reference hidden thinking/);
       assert.match(JSON.stringify(trace.primaryEvents), /primary thinking/);
-      assert.match(JSON.stringify(trace.finalContext), /Independent reference responses/);
+      assert.match(JSON.stringify(trace.finalContext), /Mixture of Agents reference context/);
+      assert.match(trace.finalContext.systemPrompt ?? "", /Mixture of Agents reference context/);
       assert.match(JSON.stringify(trace.finalMessage), /final text/);
       assert.doesNotMatch(JSON.stringify(trace), /sk-secret-reference|Bearer secret/);
     } finally {

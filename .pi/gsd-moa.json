@@ -59,7 +59,7 @@
           "maxTokensField": "max_tokens"
         }
       },
-      "prompt": "Synthesize the reference responses into concise, actionable guidance for the final acting model. Focus on next steps, tool-use strategy, risks, and disagreements. Do not call tools or write patches."
+      "prompt": "Synthesize the reference responses into a private execution memo for the final acting model, not a user-facing answer. Include: goal, likely tool calls or commands, files/services to inspect, verification commands, risks, and disagreements. If tools are available and the task requires repository, file, terminal, or environment changes, tell the final actor to execute with tools rather than merely describe setup. Do not call tools or write patches."
     }
   },
   "aliases": {
@@ -116,6 +116,6 @@
   },
   "prompts": {
     "advisorVersion": "v1",
-    "fullMoaVersion": "v1"
+    "fullMoaVersion": "v2"
   }
 }

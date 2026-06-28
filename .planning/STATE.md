@@ -86,6 +86,7 @@ Recent decisions affecting current work:
 - Harbor custom agent now mounts/copies the repo into the task container and installs Node 24; local runs still require Factory proxy availability from Docker via `host.docker.internal`.
 - Full-MoA tool-loop traces showed first-turn live reference/synthesis calls and later cache hits; consider skipping advisory reruns after tool results or including tool-result state in cache policy.
 - Full-MoA design shifted away from architect/reviewer/implementer role prompts toward Hermes/OpenRouter-style reference-model fusion: same sanitized prompt to GLM-5.2 and GPT-5.5, GPT-5.5 synthesis, GPT-5.5 final tool-capable actor.
+- After `configure-git-webserver` still failed by answering instead of acting, aligned closer to Hermes where safe: reference models are private advisors rather than answer writers, synthesis is an execution memo, final guidance uses Hermes-style “answer or call tools as needed” framing, private context remains privileged rather than user-authored, and a short non-private execution note is appended when tools are present.
 
 ## Notes
 

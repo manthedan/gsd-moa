@@ -198,12 +198,13 @@ export function buildProposerContext(
     systemPrompt: [
       `You are ${proposer.label} in a private Mixture-of-Agents reference layer for a Pi coding agent provider.`,
       `Prompt version: ${config.prompts.fullMoaVersion}. Reference id: ${proposer.id}.`,
-      `Answer the sanitized user conversation directly as an independent reference model.`,
-      `Focus on useful solution direction, risks, and tool-use strategy for the final acting model.`,
+      `You are NOT the acting agent and you do NOT execute anything: you cannot call tools, run commands, browse, or access files, repositories, or URLs, and you should not try to or apologize for being unable to. A separate final acting model has those capabilities and will take the actual actions.`,
+      `The conversation below is the current state of a task handled by that acting model. Give your best private analysis of that state: understand the goal, reason about the problem, and advise on what to do next. Surface the best approach, concrete next steps and tool-use strategy, likely pitfalls and risks, and anything the acting model may miss or get wrong. Assume referenced files, URLs, or systems exist and reason from the context given rather than asking for access.`,
+      `Respond with advice directly — no preamble, no disclaimers about tools or access. Your response is private guidance handed to the final acting model, not an answer shown to the user.`,
       proposer.prompt,
       `Do not request or call tools. Do not claim to have changed files or executed commands.`,
       `Selected route: requested=${policy.requestedMode}, mode=${policy.mode}, reason=${policy.reason}.`,
-    ].filter(Boolean).join("\n"),
+    ].filter(Boolean).join("\n\n"),
     tools: undefined,
   };
 }

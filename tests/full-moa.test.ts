@@ -89,7 +89,8 @@ describe("full MoA orchestration", () => {
         },
         stream(seenModel, seenContext) {
           assert.equal(seenModel.provider, "factory-codex");
-          assert.match(seenContext.systemPrompt ?? "", /Independent reference responses/);
+          assert.match(seenContext.systemPrompt ?? "", /Mixture of Agents reference context/);
+          assert.match(seenContext.systemPrompt ?? "", /call tools as needed/);
           return streamText(seenModel, "final", usage(1, 1));
         },
       };
@@ -153,7 +154,13 @@ describe("full MoA orchestration", () => {
         async complete(seenModel, seenContext) {
           assert.ok(["zai", "factory-codex"].includes(seenModel.provider));
           assert.equal(seenContext.tools, undefined);
-          assert.match(seenContext.systemPrompt ?? "", /Do not request or call tools/);
+          if ((seenContext.systemPrompt ?? "").includes("private synthesizer layer")) {
+            assert.match(seenContext.systemPrompt ?? "", /private execution memo/);
+            assert.match(seenContext.systemPrompt ?? "", /not a user-facing answer/);
+          } else {
+            assert.match(seenContext.systemPrompt ?? "", /NOT the acting agent/);
+            assert.match(seenContext.systemPrompt ?? "", /private guidance handed to the final acting model/);
+          }
           assert.doesNotMatch(JSON.stringify(seenContext), /gsd-moa:full/);
           completePrompts.push(seenContext.systemPrompt ?? "");
           return message(seenModel, `reference-${completePrompts.length}`, usage(10, 5));
@@ -163,9 +170,12 @@ describe("full MoA orchestration", () => {
           assert.equal(seenModel.provider, "factory-codex");
           assert.equal(seenContext.tools?.[0]?.name, "Bash");
           assert.doesNotMatch(JSON.stringify(seenContext), /gsd-moa:full/);
-          assert.match(seenContext.systemPrompt ?? "", /Independent reference responses/);
+          assert.match(seenContext.systemPrompt ?? "", /Mixture of Agents reference context/);
+          assert.match(seenContext.systemPrompt ?? "", /Reference responses/);
           assert.match(seenContext.systemPrompt ?? "", /reference-1/);
-          assert.match(seenContext.systemPrompt ?? "", /Synthesis layer/);
+          assert.match(seenContext.systemPrompt ?? "", /Synthesis \/ execution memo/);
+          assert.match(seenContext.systemPrompt ?? "", /call tools rather than merely describing commands/);
+          assert.match(JSON.stringify(seenContext.messages), /Execution note from provider/);
           return streamText(seenModel, "final", usage(1, 2));
         },
       };
