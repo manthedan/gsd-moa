@@ -154,6 +154,8 @@ export function loadConfig(path = DEFAULT_CONFIG_PATH, cwd = process.cwd()): Gsd
 }
 
 function applyEnvOverrides(cfg: GsdMoaConfig): void {
+  if (process.env.GSD_MOA_PRIMARY_BASE_URL) cfg.primary.baseUrl = process.env.GSD_MOA_PRIMARY_BASE_URL;
+  if (process.env.GSD_MOA_REFERENCE_BASE_URL) cfg.reference.baseUrl = process.env.GSD_MOA_REFERENCE_BASE_URL;
   if (process.env.GSD_MOA_TRACE !== undefined) {
     cfg.trace.enabled = /^(1|true|yes|on)$/i.test(process.env.GSD_MOA_TRACE);
   }

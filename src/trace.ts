@@ -79,7 +79,7 @@ class JsonTraceRecorder implements TraceRecorder {
       model: { provider: model.provider, id: model.id, api: model.api },
       policy,
       config: redactedConfig(config),
-      ...(config.trace.includeContexts ? { inputContext: structuredClone(inputContext) } : {}),
+      ...(config.trace.includeContexts ? { inputContext: traceClone(inputContext) } : {}),
       referenceCalls: [],
       primaryEvents: [],
     };
@@ -88,7 +88,7 @@ class JsonTraceRecorder implements TraceRecorder {
 
   recordFinalContext(context: Context): void {
     if (!this.config.trace.includeContexts) return;
-    this.data.finalContext = structuredClone(context);
+    this.data.finalContext = traceClone(context);
     this.flush();
   }
 
@@ -125,7 +125,7 @@ class JsonTraceRecorder implements TraceRecorder {
   private finishWithStatus(status: "done" | "error", message: AssistantMessage, diagnostics: unknown): void {
     this.data.status = status;
     this.data.endedAt = new Date().toISOString();
-    if (this.config.trace.includeOutputs) this.data.finalMessage = structuredClone(message);
+    if (this.config.trace.includeOutputs) this.data.finalMessage = traceClone(message);
     this.data.diagnostics = diagnostics;
     this.flush();
   }
@@ -142,14 +142,14 @@ class JsonTraceRecorder implements TraceRecorder {
 }
 
 function cloneReferenceCall(entry: TraceReferenceCall): TraceReferenceCall {
-  const clone = structuredClone(entry);
+  const clone = traceClone(entry);
   redactRoute(clone.route);
   return clone;
 }
 
 function withoutOutputs(entry: TraceReferenceCall): TraceReferenceCall {
   const { context: _context, message: _message, cachedText: _cachedText, ...rest } = entry;
-  const clone = structuredClone(rest) as TraceReferenceCall;
+  const clone = traceClone(rest) as TraceReferenceCall;
   redactRoute(clone.route);
   return clone;
 }
@@ -170,21 +170,45 @@ function compactPrimaryEvent(event: AssistantMessageEvent, includeOutputs: boole
     case "toolcall_end":
       return { type: event.type, contentIndex: event.contentIndex, toolCall: event.toolCall };
     case "done":
-      return { type: event.type, reason: event.reason, message: event.message };
+      return { type: event.type, reason: event.reason, message: traceClone(event.message) };
     case "error":
-      return { type: event.type, reason: event.reason, error: event.error };
+      return { type: event.type, reason: event.reason, error: traceClone(event.error) };
     default:
       return "contentIndex" in event ? { type: event.type, contentIndex: event.contentIndex } : { type: event.type };
   }
 }
 
 function redactedConfig(config: GsdMoaConfig): unknown {
-  const copy = structuredClone(config);
+  const copy = traceClone(config);
   redactRoute(copy.primary);
   redactRoute(copy.reference);
   for (const proposer of copy.fullMoa.proposers) if (proposer.route) redactRoute(proposer.route as UpstreamRoute);
   if (copy.fullMoa.synthesis.route) redactRoute(copy.fullMoa.synthesis.route as UpstreamRoute);
   return copy;
+}
+
+function traceClone<T>(value: T): T {
+  return toTraceValue(value, new WeakSet<object>()) as T;
+}
+
+function toTraceValue(value: unknown, seen: WeakSet<object>): unknown {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "function") return `[Function${value.name ? `: ${value.name}` : ""}]`;
+  if (typeof value === "symbol" || typeof value === "undefined") return undefined;
+  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack };
+  if (typeof value !== "object") return String(value);
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => toTraceValue(item, seen));
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    const cloned = toTraceValue(child, seen);
+    if (cloned !== undefined) out[key] = cloned;
+  }
+  seen.delete(value);
+  return out;
 }
 
 function redactRoute(route: Partial<UpstreamRoute>): void {

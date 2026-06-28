@@ -35,7 +35,8 @@ Use the local proof runner to compare one prompt through `single` and `full`:
 ```bash
 npm run proof:pi -- \
   --prompt "Deeply review this repo's provider architecture and identify the highest-risk bug." \
-  --models gsd-moa/gpt55-glm52-single,gsd-moa/gpt55-glm52-full
+  --models gsd-moa/gpt55-glm52-single,gsd-moa/gpt55-glm52-full \
+  --no-tools
 ```
 
 Artifacts are written to `.proof/runs/<timestamp>/`:
@@ -63,36 +64,44 @@ harbor run -d terminal-bench/terminal-bench-2 -a oracle
 For a Pi custom agent, this repo includes a starter Harbor installed agent:
 
 ```text
-harbor/pi_gsd_moa_agent.py
+harbor_agents/pi_gsd_moa_agent.py
 ```
 
 Example baseline run:
 
 ```bash
+PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" \
 PI_GSD_MOA_MODEL=gsd-moa/gpt55-glm52-single \
-PI_GSD_MOA_EXTENSION=/workspace/gsd-moa/src/index.ts \
+PI_GSD_MOA_REPO=/workspace/gsd-moa \
+GSD_MOA_PRIMARY_BASE_URL=http://host.docker.internal:8317/v1 \
 harbor run \
   -d terminal-bench/terminal-bench-2 \
-  --agent harbor.pi_gsd_moa_agent:PiGsdMoaAgent \
-  -n 1
+  --agent harbor_agents.pi_gsd_moa_agent:PiGsdMoaAgent \
+  --mounts '[{"type":"bind","source":"'"$PWD"'","target":"/workspace/gsd-moa","read_only":true}]' \
+  --artifact /tmp/pi-gsd-moa \
+  -n 1 -i terminal-bench/fix-git -y
 ```
 
 Example full-MoA run:
 
 ```bash
+PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" \
 PI_GSD_MOA_MODEL=gsd-moa/gpt55-glm52-full \
-PI_GSD_MOA_EXTENSION=/workspace/gsd-moa/src/index.ts \
+PI_GSD_MOA_REPO=/workspace/gsd-moa \
+GSD_MOA_PRIMARY_BASE_URL=http://host.docker.internal:8317/v1 \
 harbor run \
   -d terminal-bench/terminal-bench-2 \
-  --agent harbor.pi_gsd_moa_agent:PiGsdMoaAgent \
-  -n 1
+  --agent harbor_agents.pi_gsd_moa_agent:PiGsdMoaAgent \
+  --mounts '[{"type":"bind","source":"'"$PWD"'","target":"/workspace/gsd-moa","read_only":true}]' \
+  --artifact /tmp/pi-gsd-moa \
+  -n 1 -i terminal-bench/fix-git -y
 ```
 
 Notes:
 
-- The Harbor agent assumes `PI_GSD_MOA_EXTENSION` resolves inside the task container. If Harbor does not mount this repo into the container, either mount it explicitly or install a published package version of `pi-gsd-moa` and point Pi at that extension.
-- Pass `FACTORY_GPT_API_KEY`, `ZAI_API_KEY`, and `GSD_MOA_TRACE=1` through the Harbor environment without committing secrets.
-- Keep initial runs small (`-n 1` or a selected task) until trace volume, cost, and latency are understood.
+- The Harbor agent copies `PI_GSD_MOA_REPO` from the mounted path into `/tmp/gsd-moa-ext`, installs Node 24 plus package deps, and loads `/tmp/gsd-moa-ext/src/index.ts` as the Pi extension.
+- Pass `FACTORY_GPT_API_KEY`, `ZAI_API_KEY`, and `GSD_MOA_TRACE=1` through the Harbor environment without committing secrets. Docker runs should use `GSD_MOA_PRIMARY_BASE_URL=http://host.docker.internal:8317/v1` for the Factory proxy.
+- Keep initial runs small (`-n 1` and `-l 1`, or a selected task) until trace volume, cost, and latency are understood.
 
 ## Evaluation loop
 

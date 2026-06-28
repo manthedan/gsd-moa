@@ -101,6 +101,27 @@ function tempConfig(): { cfg: GsdMoaConfig; dir: string; traceDir: string } {
 }
 
 describe("trace capture", () => {
+  it("serializes Pi tool definitions without cloning executable functions", async () => {
+    const { cfg, dir, traceDir } = tempConfig();
+    try {
+      const context: Context = {
+        tools: [{ name: "Bash", description: "run shell", parameters: { type: "object" } as any, execute: () => undefined } as any],
+        messages: [{ role: "user", content: "simple", timestamp: 1 }],
+      };
+      const upstream: UpstreamClient = {
+        async complete(seenModel) { return message(seenModel, "unused"); },
+        stream(seenModel) { return streamWithThinking(seenModel); },
+      };
+      await collect(streamGsdMoa(model("gpt55-glm52-single"), context, undefined, { config: cfg, upstream }));
+      const tracePath = join(traceDir, readdirSync(traceDir)[0]);
+      const trace = JSON.parse(readFileSync(tracePath, "utf8"));
+      assert.equal(trace.status, "done");
+      assert.match(JSON.stringify(trace.inputContext.tools), /\[Function/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("marks primary provider error events as trace errors", async () => {
     const { cfg, dir, traceDir } = tempConfig();
     try {

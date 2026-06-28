@@ -10,6 +10,7 @@ interface CliArgs {
   models: string[];
   outDir: string;
   skipPreflight: boolean;
+  noTools: boolean;
 }
 
 const DEFAULT_MODELS = ["gsd-moa/gpt55-glm52-single", "gsd-moa/gpt55-glm52-full"];
@@ -34,7 +35,7 @@ async function main() {
     const label = safeLabel(model);
     const modelDir = join(args.outDir, label);
     mkdirSync(modelDir, { recursive: true });
-    const command = ["pi", "-a", "-e", "./src/index.ts", "--model", model, "--mode", "json", "--no-session", "-p", prompt];
+    const command = ["pi", "-a", "-e", "./src/index.ts", "--model", model, "--mode", "json", "--no-session", ...(args.noTools ? ["--no-tools"] : []), "-p", prompt];
     const env = { GSD_MOA_TRACE: "1", GSD_MOA_TRACE_DIR: join(modelDir, "traces") };
     writeFileSync(join(modelDir, "command.txt"), `${command.map(shellQuote).join(" ")}\n`);
     const result = await run(command, env);
@@ -55,6 +56,7 @@ function parseArgs(argv: string[]): CliArgs {
     models: DEFAULT_MODELS,
     outDir: join(".proof", "runs", new Date().toISOString().replace(/[:.]/g, "-")),
     skipPreflight: false,
+    noTools: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -63,8 +65,9 @@ function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--models") args.models = argv[++i].split(",").map((m) => m.trim()).filter(Boolean);
     else if (arg === "--out") args.outDir = argv[++i];
     else if (arg === "--skip-preflight") args.skipPreflight = true;
+    else if (arg === "--no-tools") args.noTools = true;
     else if (arg === "--help" || arg === "-h") {
-      console.log("Usage: npm run proof:pi -- --prompt 'task' [--models gsd-moa/gpt55-glm52-single,gsd-moa/gpt55-glm52-full] [--out .proof/runs/name] [--skip-preflight]");
+      console.log("Usage: npm run proof:pi -- --prompt 'task' [--models gsd-moa/gpt55-glm52-single,gsd-moa/gpt55-glm52-full] [--out .proof/runs/name] [--skip-preflight] [--no-tools]");
       process.exit(0);
     } else throw new Error(`unknown arg: ${arg}`);
   }

@@ -10,7 +10,7 @@ Before the testing/proof milestone, `gsd-moa` should implement the full Hermes-s
 
 - [x] **Phase 5: Full MoA Feature Build-out** - Add explicit full-MoA alias, proposer fan-out, optional synthesis, diagnostics, cache behavior, and docs.
 - [x] **Phase 6: Proof Harness and Artifact Capture** - Add a local live-run harness that executes `single`, `advisor`, and `full_moa` through the configured Factory/Z.ai proxy routes and writes durable, redacted artifacts.
-- [ ] **Phase 7: Realistic Evaluation Task Suite and Rubric** - Define representative Pi/GSD tasks plus a usefulness rubric for comparing single vs advisor/full-MoA outputs.
+- [ ] **Phase 7: Realistic Evaluation Task Suite and Rubric** - Define representative Pi/GSD tasks plus a usefulness rubric for comparing single vs advisor/full-MoA outputs. First Harbor sample completed on `terminal-bench/fix-git`.
 - [ ] **Phase 8: Dogfood Run, Summary, and Decision Gate** - Run the suite, inspect results, document advisor/full-MoA value, and decide whether to harden, adjust, or pause.
 
 ## Phase Details
@@ -52,6 +52,7 @@ Before the testing/proof milestone, `gsd-moa` should implement the full Hermes-s
 **Mode:** mvp
 **Depends on**: Phase 6
 **Requirements**: [EVAL-01, EVAL-02]
+**Status**: In progress — Harbor installed, oracle smoke passed, `single` and `full_moa` both passed `terminal-bench/fix-git`.
 **Success Criteria**:
 
 1. The suite includes plan review, code review, debugging, architecture critique, and milestone audit cases.
@@ -83,5 +84,5 @@ Phases execute in numeric order: 5 → 6 → 7 → 8
 |-------|----------------|--------|-----------|
 | 5. Full MoA Feature Build-out | 1/1 | Complete | 2026-06-27 |
 | 6. Proof Harness and Artifact Capture | 3/3 | Complete | 2026-06-27 |
-| 7. Realistic Evaluation Task Suite and Rubric | 0/2 | Planned | - |
+| 7. Realistic Evaluation Task Suite and Rubric | 1/2 | In progress | - |
 | 8. Dogfood Run, Summary, and Decision Gate | 0/3 | Planned | - |

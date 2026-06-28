@@ -60,18 +60,23 @@ describe("mode policy", () => {
   it("allows proof runs to opt into tracing via env without mutating defaults", () => {
     const oldTrace = process.env.GSD_MOA_TRACE;
     const oldDir = process.env.GSD_MOA_TRACE_DIR;
+    const oldPrimaryBaseUrl = process.env.GSD_MOA_PRIMARY_BASE_URL;
     const dir = mkdtempSync(join(tmpdir(), "gsd-moa-trace-env-test-"));
     try {
       process.env.GSD_MOA_TRACE = "1";
       process.env.GSD_MOA_TRACE_DIR = join(dir, "traces");
+      process.env.GSD_MOA_PRIMARY_BASE_URL = "http://host.docker.internal:8317/v1";
       const cfg = loadConfig("missing.json", dir);
       assert.equal(cfg.trace.enabled, true);
       assert.equal(cfg.trace.dir, join(dir, "traces"));
+      assert.equal(cfg.primary.baseUrl, "http://host.docker.internal:8317/v1");
 
       if (oldTrace === undefined) delete process.env.GSD_MOA_TRACE;
       else process.env.GSD_MOA_TRACE = oldTrace;
       if (oldDir === undefined) delete process.env.GSD_MOA_TRACE_DIR;
       else process.env.GSD_MOA_TRACE_DIR = oldDir;
+      if (oldPrimaryBaseUrl === undefined) delete process.env.GSD_MOA_PRIMARY_BASE_URL;
+      else process.env.GSD_MOA_PRIMARY_BASE_URL = oldPrimaryBaseUrl;
 
       const cfgAfterEnvRestore = loadConfig("missing.json", dir);
       assert.equal(cfgAfterEnvRestore.trace.enabled, DEFAULT_CONFIG.trace.enabled);
@@ -81,6 +86,8 @@ describe("mode policy", () => {
       else process.env.GSD_MOA_TRACE = oldTrace;
       if (oldDir === undefined) delete process.env.GSD_MOA_TRACE_DIR;
       else process.env.GSD_MOA_TRACE_DIR = oldDir;
+      if (oldPrimaryBaseUrl === undefined) delete process.env.GSD_MOA_PRIMARY_BASE_URL;
+      else process.env.GSD_MOA_PRIMARY_BASE_URL = oldPrimaryBaseUrl;
       rmSync(dir, { recursive: true, force: true });
     }
   });
