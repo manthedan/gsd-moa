@@ -56,6 +56,25 @@ describe("mode policy", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("merges full MoA proposer overrides by id", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gsd-moa-proposer-test-"));
+    try {
+      writeFileSync(join(dir, "gsd-moa.json"), JSON.stringify({
+        fullMoa: {
+          proposers: [{ id: "architect", route: { provider: "other", model: "arch-model" } }],
+        },
+      }));
+      const cfg = loadConfig("gsd-moa.json", dir);
+      assert.equal(cfg.fullMoa.proposers.length, DEFAULT_CONFIG.fullMoa.proposers.length);
+      const architect = cfg.fullMoa.proposers.find((p) => p.id === "architect");
+      assert.equal(architect?.label, "Architecture proposer");
+      assert.equal(architect?.route?.provider, "other");
+      assert.equal(architect?.route?.model, "arch-model");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("reference context sanitization", () => {

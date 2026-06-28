@@ -180,9 +180,21 @@ function mergeFullMoa(defaults: FullMoaConfig, override: unknown): FullMoaConfig
   return {
     ...defaults,
     ...override,
-    proposers: Array.isArray(override.proposers) ? (override.proposers as FullMoaConfig["proposers"]) : defaults.proposers,
+    proposers: Array.isArray(override.proposers)
+      ? mergeProposers(defaults.proposers, override.proposers)
+      : defaults.proposers,
     synthesis,
   };
+}
+
+function mergeProposers(defaults: FullMoaConfig["proposers"], overrides: unknown[]): FullMoaConfig["proposers"] {
+  const byId = new Map(defaults.map((proposer) => [proposer.id, structuredClone(proposer)]));
+  for (const override of overrides) {
+    if (!isRecord(override) || typeof override.id !== "string") continue;
+    const existing = byId.get(override.id);
+    byId.set(override.id, existing ? { ...existing, ...override } as FullMoaConfig["proposers"][number] : override as unknown as FullMoaConfig["proposers"][number]);
+  }
+  return [...byId.values()];
 }
 
 function validateFullMoa(fullMoa: FullMoaConfig, reference: UpstreamRoute): void {
