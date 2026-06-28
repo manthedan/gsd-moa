@@ -167,7 +167,7 @@ export function buildSynthesisContext(
   const safe = sanitizeReferenceContext(context, policy);
   const proposalMessage: UserMessage = {
     role: "user",
-    content: formatProposalBundle(proposals),
+    content: formatProposalBundle(proposals, undefined, false),
     timestamp: Date.now(),
   };
   return {
@@ -185,12 +185,14 @@ export function buildSynthesisContext(
   };
 }
 
-function formatProposalBundle(proposals: FullMoaProposal[], synthesis?: string): string {
+function formatProposalBundle(proposals: FullMoaProposal[], synthesis?: string, includeRuntimeMetadata = true): string {
   return [
     "Full-MoA independent proposal bundle:",
     ...proposals.map((proposal, index) => [
       `## Proposal ${index + 1}: ${proposal.label}`,
-      `id=${proposal.id}; route=${proposal.provider}/${proposal.model}; cacheHit=${proposal.cacheHit}`,
+      includeRuntimeMetadata
+        ? `id=${proposal.id}; route=${proposal.provider}/${proposal.model}; cacheHit=${proposal.cacheHit}`
+        : `id=${proposal.id}; route=${proposal.provider}/${proposal.model}`,
       proposal.text.trim(),
     ].join("\n")),
     ...(synthesis ? ["## Synthesis", synthesis.trim()] : []),

@@ -106,6 +106,32 @@ describe("full MoA orchestration", () => {
     }
   });
 
+  it("reuses proposer and synthesis cache on identical repeated requests", async () => {
+    const { cfg, dir } = tempConfig();
+    try {
+      const context: Context = { messages: [{ role: "user", content: "deep review this architecture", timestamp: 1 }] };
+      let completeCalls = 0;
+      const upstream: UpstreamClient = {
+        async complete(seenModel) {
+          completeCalls++;
+          return message(seenModel, `reference-${completeCalls}`, usage(1, 1));
+        },
+        stream(seenModel) { return streamText(seenModel, "final", usage(1, 1)); },
+      };
+
+      await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
+      const firstRunCalls = completeCalls;
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      assert.equal(completeCalls, firstRunCalls);
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.cacheHit, true);
+      assert.equal(details.innerCalls.filter((call: any) => call.cacheHit === true).length, cfg.fullMoa.proposers.length + 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("runs multiple tool-less proposers, a tool-less synthesis layer, then one tool-capable primary call", async () => {
     const { cfg, dir } = tempConfig();
     try {
