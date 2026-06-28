@@ -27,31 +27,54 @@
     "enabled": true,
     "proposers": [
       {
-        "id": "architect",
-        "label": "Architecture proposer",
-        "prompt": "Propose a robust architecture or plan. Emphasize boundaries, interfaces, sequencing, and tradeoffs."
+        "id": "glm52",
+        "label": "GLM-5.2 reference"
       },
       {
-        "id": "reviewer",
-        "label": "Critical reviewer",
-        "prompt": "Critique the request and likely solution. Find bugs, missing requirements, risks, and tests that would fail."
-      },
-      {
-        "id": "implementer",
-        "label": "Implementation proposer",
-        "prompt": "Draft a practical implementation approach. Emphasize concrete steps, edge cases, and verification."
+        "id": "gpt55",
+        "label": "GPT-5.5 reference",
+        "route": {
+          "provider": "factory-codex",
+          "model": "gpt-5.5",
+          "api": "openai-completions",
+          "baseUrl": "http://127.0.0.1:8317/v1",
+          "apiKey": "$FACTORY_GPT_API_KEY",
+          "compat": {
+            "supportsDeveloperRole": false,
+            "maxTokensField": "max_tokens"
+          }
+        }
       }
     ],
     "synthesis": {
       "enabled": true,
-      "prompt": "Synthesize the proposal bundle into concise guidance for the final acting model. Preserve disagreements and important risks; do not call tools or write patches."
+      "route": {
+        "provider": "factory-codex",
+        "model": "gpt-5.5",
+        "api": "openai-completions",
+        "baseUrl": "http://127.0.0.1:8317/v1",
+        "apiKey": "$FACTORY_GPT_API_KEY",
+        "compat": {
+          "supportsDeveloperRole": false,
+          "maxTokensField": "max_tokens"
+        }
+      },
+      "prompt": "Synthesize the reference responses into concise, actionable guidance for the final acting model. Focus on next steps, tool-use strategy, risks, and disagreements. Do not call tools or write patches."
     }
   },
   "aliases": {
-    "gpt55-glm52-single": { "mode": "single" },
-    "gpt55-glm52-advisor": { "mode": "advisor" },
-    "gpt55-glm52-full": { "mode": "full_moa" },
-    "gpt55-glm52-auto": { "mode": "auto" }
+    "gpt55-glm52-single": {
+      "mode": "single"
+    },
+    "gpt55-glm52-advisor": {
+      "mode": "advisor"
+    },
+    "gpt55-glm52-full": {
+      "mode": "full_moa"
+    },
+    "gpt55-glm52-auto": {
+      "mode": "auto"
+    }
   },
   "auto": {
     "defaultMode": "single",

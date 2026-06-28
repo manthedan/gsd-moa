@@ -2,13 +2,13 @@
 
 ## Overview
 
-Before the testing/proof milestone, `gsd-moa` should implement the full Hermes-style feature delta: tool-less multi-proposer fan-out, optional tool-less synthesis, and one final tool-capable acting call. After that, the proof harness should compare `single`, `advisor`, and `full_moa` on realistic Pi/GSD work.
+Before the testing/proof milestone, `gsd-moa` should implement the full Hermes-style feature delta: tool-less reference-model fan-out, optional tool-less synthesis, and one final tool-capable acting call. After that, the proof harness should compare `single`, `advisor`, and `full_moa` on realistic Pi/GSD work.
 
 ## Phases
 
 **Phase Numbering:** Continuing from v1.0; archived phases 1–4 live under `.planning/milestones/v1.0-phases/`.
 
-- [x] **Phase 5: Full MoA Feature Build-out** - Add explicit full-MoA alias, proposer fan-out, optional synthesis, diagnostics, cache behavior, and docs.
+- [x] **Phase 5: Full MoA Feature Build-out** - Add explicit full-MoA alias, reference-model fan-out, optional synthesis, diagnostics, cache behavior, and docs.
 - [x] **Phase 6: Proof Harness and Artifact Capture** - Add a local live-run harness that executes `single`, `advisor`, and `full_moa` through the configured Factory/Z.ai proxy routes and writes durable, redacted artifacts.
 - [ ] **Phase 7: Realistic Evaluation Task Suite and Rubric** - Define representative Pi/GSD tasks plus a usefulness rubric for comparing single vs advisor/full-MoA outputs. First Harbor sample completed on `terminal-bench/fix-git`.
 - [ ] **Phase 8: Dogfood Run, Summary, and Decision Gate** - Run the suite, inspect results, document advisor/full-MoA value, and decide whether to harden, adjust, or pause.
@@ -25,10 +25,10 @@ Before the testing/proof milestone, `gsd-moa` should implement the full Hermes-s
 **Success Criteria**:
 
 1. `gpt55-glm52-full` is registered and selectable.
-2. Full MoA runs multiple tool-less proposers in parallel against sanitized context.
-3. Optional synthesis layer consumes proposer outputs without tools.
+2. Full MoA runs multiple tool-less reference models in parallel against sanitized context.
+3. Optional synthesis layer consumes reference outputs without tools.
 4. Final GPT receives original tools plus private proposal/synthesis guidance.
-5. Diagnostics include all proposer/synthesizer/primary inner calls, usage, and cache hit/miss.
+5. Diagnostics include all reference/synthesizer/primary inner calls, usage, and cache hit/miss.
 6. Routing markers are stripped before all upstream calls.
 
 ### Phase 6: Proof Harness and Artifact Capture

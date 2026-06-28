@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A prototype Pi extension/package that adds a `gsd-moa` model provider implementing a Hermes-inspired MoA/advisor/router facade for agentic coding workflows. Upstream Pi and Pi-derived GSD harnesses see normal model IDs like `gsd-moa/gpt55-glm52-auto`, while the provider decides whether to call GPT-5.5 directly, first obtain tool-less GLM-5.2 advisory feedback, or run a tool-less multi-proposer full-MoA layer before the final GPT-5.5 acting call.
+A prototype Pi extension/package that adds a `gsd-moa` model provider implementing a Hermes-inspired MoA/advisor/router facade for agentic coding workflows. Upstream Pi and Pi-derived GSD harnesses see normal model IDs like `gsd-moa/gpt55-glm52-auto`, while the provider decides whether to call GPT-5.5 directly, first obtain tool-less GLM-5.2 advisory feedback, or run a tool-less reference-model full-MoA layer before the final GPT-5.5 acting call.
 
 The project starts as a local Pi package-shaped prototype, with a clean path to publish as a reusable Pi package and later extract into an OpenAI-compatible local proxy if cross-runtime portability is needed.
 
@@ -12,12 +12,12 @@ Give GSD/Pi a normal-looking model provider that adds second-model judgment only
 
 ## Current Milestone: v1.1 Full MoA Build-out Before Testing
 
-**Goal:** Implement full multi-proposer MoA before the dogfood/testing milestone, then evaluate `single` vs `advisor` vs `full_moa`.
+**Goal:** Implement full reference-model MoA before the dogfood/testing milestone, then evaluate `single` vs `advisor` vs `full_moa`.
 
 **Target features:**
-- `gpt55-glm52-full` alias with tool-less multi-proposer fan-out.
-- Optional tool-less synthesis layer before the final GPT-5.5 acting call.
-- Diagnostics and cache behavior for every proposer/synthesizer inner call.
+- `gpt55-glm52-full` alias with tool-less GLM-5.2 + GPT-5.5 reference fan-out.
+- Optional GPT-5.5 tool-less synthesis layer before the final GPT-5.5 acting call.
+- Diagnostics and cache behavior for every reference/synthesizer inner call.
 - Preserve the single-writer tool boundary: only final GPT receives Pi tools.
 
 ## Requirements
@@ -27,7 +27,7 @@ Give GSD/Pi a normal-looking model provider that adds second-model judgment only
 - [x] v1.0 shipped a local Pi provider prototype with `single`, `advisor`, and `auto` aliases.
 - [x] v1.0 enforced the single-writer tool policy: GLM advisor calls are tool-less; final GPT calls keep Pi tools.
 - [x] v1.0 proved Factory GPT-5.5 proxy + Z.ai GLM-5.2 routes can work together locally.
-- [x] v1.1 added `gpt55-glm52-full`, tool-less proposer fan-out, optional tool-less synthesis, and per-inner-call diagnostics.
+- [x] v1.1 added `gpt55-glm52-full`, tool-less reference-model fan-out, optional tool-less synthesis, and per-inner-call diagnostics.
 
 ### Active
 
@@ -67,14 +67,14 @@ policy: single | advisor | full_moa | auto
 upstream calls:
   - single: GPT-5.5 only
   - advisor: GLM-5.2 tool-less critique → GPT-5.5 final acting call
-  - full_moa: multiple tool-less proposers → optional tool-less synthesis → GPT-5.5 final acting call
+  - full_moa: GLM-5.2 + GPT-5.5 tool-less references → optional GPT-5.5 tool-less synthesis → GPT-5.5 final acting call
 ```
 
 The provider aliases should be:
 
 - `gsd-moa/gpt55-glm52-single` — force direct GPT-5.5 call.
 - `gsd-moa/gpt55-glm52-advisor` — force GLM advisor then GPT final.
-- `gsd-moa/gpt55-glm52-full` — force tool-less multi-proposer MoA, optional synthesis, then GPT final.
+- `gsd-moa/gpt55-glm52-full` — force tool-less reference-model MoA, optional synthesis, then GPT final.
 - `gsd-moa/gpt55-glm52-auto` — deterministic router; chooses the cheapest useful mode using markers, keywords, and tool-loop state.
 
 `auto` means “choose the cheapest useful available mode,” not “run the most expensive MoA by default.” Full MoA is reserved for explicit markers/alias or high-leverage keywords like deep review, milestone audit, or threat model.
@@ -110,7 +110,7 @@ Z.ai / OpenRouter GLM-5.2
 | Implement MoA below GSD Core in the Pi provider layer | GSD should keep seeing a normal model ID; provider middleware is the clean abstraction for routing/fan-out. | — Pending |
 | Prototype as a Pi package-shaped extension | Faster iteration than a proxy, while keeping reuse/publishability. | — Pending |
 | Provider id is `gsd-moa`; package name is `pi-gsd-moa` | Clear model IDs and package identity. | — Pending |
-| Add `full_moa` before testing milestone | Expert review identified the main feature delta from Hermes/MoA as missing multi-proposer fan-out and synthesis. | Implemented in v1.1 |
+| Add `full_moa` before testing milestone | Expert review identified the main feature delta from Hermes/MoA as missing reference-model fan-out and synthesis. | Implemented in v1.1 |
 | `auto` may choose full MoA only for high-leverage keywords | Keeps normal turns cheap while allowing explicit/deep work to exercise the full feature. | Implemented in v1.1 |
 | Only final GPT-5.5 call can use tools | Prevents dueling tool calls, conflicting patches, and complex merge semantics. | — Pending |
 | Reuse Pi provider internals where possible | Avoid duplicating provider serialization/streaming logic and stay compatible with Pi's model registry. | — Pending |

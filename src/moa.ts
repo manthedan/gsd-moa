@@ -1,5 +1,5 @@
 import type { Context, SimpleStreamOptions, UserMessage } from "@earendil-works/pi-ai/compat";
-import { readAdvisorCache, writeAdvisorCache } from "./cache.js";
+import { readReferenceCache, writeAdvisorCache } from "./cache.js";
 import { mergeUpstreamRoute } from "./config.js";
 import { assistantText, sanitizeReferenceContext } from "./context.js";
 import type { TraceRecorder } from "./trace.js";
@@ -35,7 +35,7 @@ export async function runFullMoa(
     ? await runSynthesis(config, context, policy, proposals, upstream, options, trace)
     : undefined;
 
-  const guidance = formatProposalBundle(proposals, synthesis?.text);
+  const guidance = formatReferenceBundle(proposals, synthesis?.text);
   const usage = addUsage(...proposals.map((proposal) => proposal.usage), synthesis?.usage);
   const innerCalls: InnerCallDetails[] = [
     ...proposals.map((proposal) => ({
@@ -72,7 +72,7 @@ async function runProposer(
 ): Promise<FullMoaProposal> {
   const route = fullMoaRoute(config.reference, proposer.route);
   const proposerContext = buildProposerContext(config, context, policy, proposer, route);
-  const cache = readAdvisorCache(config, proposerContext);
+  const cache = readReferenceCache(config, proposerContext, route, `full_moa:reference:${proposer.id}`);
   const startedAt = Date.now();
   if (cache.hit) {
     trace?.recordReferenceCall({
@@ -138,7 +138,7 @@ async function runSynthesis(
 ): Promise<NonNullable<FullMoaResult["synthesis"]>> {
   const route = fullMoaRoute(config.reference, config.fullMoa.synthesis.route);
   const synthesisContext = buildSynthesisContext(config, context, policy, proposals, route);
-  const cache = readAdvisorCache(config, synthesisContext);
+  const cache = readReferenceCache(config, synthesisContext, route, "full_moa:synthesis");
   const startedAt = Date.now();
   if (cache.hit) {
     trace?.recordReferenceCall({
@@ -196,13 +196,14 @@ export function buildProposerContext(
   return {
     ...safe,
     systemPrompt: [
-      `You are ${proposer.label} in a private full-MoA layer for a Pi coding agent provider.`,
-      `Prompt version: ${config.prompts.fullMoaVersion}. Proposer id: ${proposer.id}.`,
-      `Reference route: ${route.provider}/${route.model}; api=${route.api ?? "default"}; baseUrl=${route.baseUrl ?? "default"}.`,
+      `You are ${proposer.label} in a private Mixture-of-Agents reference layer for a Pi coding agent provider.`,
+      `Prompt version: ${config.prompts.fullMoaVersion}. Reference id: ${proposer.id}.`,
+      `Answer the sanitized user conversation directly as an independent reference model.`,
+      `Focus on useful solution direction, risks, and tool-use strategy for the final acting model.`,
       proposer.prompt,
-      `Produce an independent proposal or critique. Do not request or call tools. Do not produce repository patches.`,
+      `Do not request or call tools. Do not claim to have changed files or executed commands.`,
       `Selected route: requested=${policy.requestedMode}, mode=${policy.mode}, reason=${policy.reason}.`,
-    ].join("\n"),
+    ].filter(Boolean).join("\n"),
     tools: undefined,
   };
 }
@@ -217,29 +218,28 @@ export function buildSynthesisContext(
   const safe = sanitizeReferenceContext(context, policy);
   const proposalMessage: UserMessage = {
     role: "user",
-    content: formatProposalBundle(proposals, undefined, false),
+    content: formatReferenceBundle(proposals, undefined, false),
     timestamp: Date.now(),
   };
   return {
     ...safe,
     messages: [...safe.messages, proposalMessage],
     systemPrompt: [
-      `You are the private synthesizer layer in a full-MoA provider for a Pi coding agent.`,
+      `You are the private synthesizer layer in a Mixture-of-Agents provider for a Pi coding agent.`,
       `Prompt version: ${config.prompts.fullMoaVersion}.`,
-      `Reference route: ${route.provider}/${route.model}; api=${route.api ?? "default"}; baseUrl=${route.baseUrl ?? "default"}.`,
       config.fullMoa.synthesis.prompt,
-      `Do not request or call tools. Do not produce repository patches.`,
+      `Do not request or call tools. Do not claim to have changed files or executed commands.`,
       `Selected route: requested=${policy.requestedMode}, mode=${policy.mode}, reason=${policy.reason}.`,
     ].join("\n"),
     tools: undefined,
   };
 }
 
-function formatProposalBundle(proposals: FullMoaProposal[], synthesis?: string, includeRuntimeMetadata = true): string {
+function formatReferenceBundle(proposals: FullMoaProposal[], synthesis?: string, includeRuntimeMetadata = true): string {
   return [
-    "Full-MoA independent proposal bundle:",
+    "Full-MoA independent reference bundle:",
     ...proposals.map((proposal, index) => [
-      `## Proposal ${index + 1}: ${proposal.label}`,
+      `## Reference ${index + 1}: ${proposal.label}`,
       includeRuntimeMetadata
         ? `id=${proposal.id}; route=${proposal.provider}/${proposal.model}; cacheHit=${proposal.cacheHit}`
         : `id=${proposal.id}; route=${proposal.provider}/${proposal.model}`,

@@ -2,7 +2,7 @@
 
 Hermes-inspired MoA/advisor/router provider for upstream Pi and Pi-derived GSD workflows.
 
-`pi-gsd-moa` registers a Pi custom provider named `gsd-moa`. The provider lets Pi select a normal model id while the provider decides whether to run a cheap single-writer primary call, a private GLM advisor pass, or a full tool-less multi-proposer MoA layer before the final GPT acting call.
+`pi-gsd-moa` registers a Pi custom provider named `gsd-moa`. The provider lets Pi select a normal model id while the provider decides whether to run a cheap single-writer primary call, a private GLM advisor pass, or a Hermes-style tool-less reference-model MoA layer before the final GPT acting call.
 
 ## Model Aliases
 
@@ -12,7 +12,7 @@ Use provider `gsd-moa` with one of these model ids:
 |---|---|
 | `gpt55-glm52-single` | Direct primary GPT-5.5 call. Fastest/cheapest. |
 | `gpt55-glm52-advisor` | Tool-less GLM-5.2 advisor call, then final GPT-5.5 acting call with normal tools. |
-| `gpt55-glm52-full` | Tool-less multi-proposer MoA fan-out, optional tool-less synthesis layer, then final GPT-5.5 acting call with normal tools. |
+| `gpt55-glm52-full` | Tool-less GLM-5.2 + GPT-5.5 reference fan-out, optional tool-less GPT-5.5 synthesis layer, then final GPT-5.5 acting call with normal tools. |
 | `gpt55-glm52-auto` | Deterministic policy chooses `single`, `advisor`, or `full_moa` from alias, markers, tool-loop state, and keywords. |
 
 ## Local Installation
@@ -67,24 +67,31 @@ Configuration is project-local at `.pi/gsd-moa.json`.
     "enabled": true,
     "proposers": [
       {
-        "id": "architect",
-        "label": "Architecture proposer",
-        "prompt": "Propose a robust architecture or plan. Emphasize boundaries, interfaces, sequencing, and tradeoffs."
+        "id": "glm52",
+        "label": "GLM-5.2 reference"
       },
       {
-        "id": "reviewer",
-        "label": "Critical reviewer",
-        "prompt": "Critique the request and likely solution. Find bugs, missing requirements, risks, and tests that would fail."
-      },
-      {
-        "id": "implementer",
-        "label": "Implementation proposer",
-        "prompt": "Draft a practical implementation approach. Emphasize concrete steps, edge cases, and verification."
+        "id": "gpt55",
+        "label": "GPT-5.5 reference",
+        "route": {
+          "provider": "factory-codex",
+          "model": "gpt-5.5",
+          "api": "openai-completions",
+          "baseUrl": "http://127.0.0.1:8317/v1",
+          "apiKey": "$FACTORY_GPT_API_KEY"
+        }
       }
     ],
     "synthesis": {
       "enabled": true,
-      "prompt": "Synthesize the proposal bundle into concise guidance for the final acting model. Preserve disagreements and important risks; do not call tools or write patches."
+      "route": {
+        "provider": "factory-codex",
+        "model": "gpt-5.5",
+        "api": "openai-completions",
+        "baseUrl": "http://127.0.0.1:8317/v1",
+        "apiKey": "$FACTORY_GPT_API_KEY"
+      },
+      "prompt": "Synthesize the reference responses into concise, actionable guidance for the final acting model. Focus on next steps, tool-use strategy, risks, and disagreements. Do not call tools or write patches."
     }
   },
   "trace": {
@@ -121,7 +128,7 @@ Markers are stripped before upstream model calls.
 
 ## Safety Model
 
-- GLM reference/advisor/proposer/synthesizer calls receive no tool schemas, no tool calls, no tool results, and no system prompt from Pi.
+- Reference/advisor/synthesizer calls receive no tool schemas, no tool calls, no tool results, and no system prompt from Pi.
 - Only the final GPT acting call receives normal Pi tools.
 - Upstream routes are validated so `gsd-moa` cannot call itself recursively.
 - Tool-less reference outputs are cached; final tool-capable responses are never cached.
@@ -135,7 +142,7 @@ Final assistant messages include a `gsd-moa.details` diagnostic containing:
 - selected mode and requested mode
 - routing reason
 - advisor/full-MoA cache hit/miss
-- inner call provider/model details for reference, proposer, synthesizer, and primary calls
+- inner call provider/model details for reference-model, synthesizer, and primary calls
 - combined current-turn usage
 
 ## Smoke Checklist
@@ -144,12 +151,12 @@ Final assistant messages include a `gsd-moa.details` diagnostic containing:
 2. `pi -a -e ./src/index.ts --list-models gpt55-glm52` shows provider `gsd-moa` with the four aliases.
 3. Selecting `gpt55-glm52-single` produces a normal streamed response.
 4. Selecting `gpt55-glm52-advisor` with `ZAI_API_KEY` set runs a GLM advisor call and then a GPT final response.
-5. Selecting `gpt55-glm52-full` runs multiple tool-less proposers, optional tool-less synthesis, and then one GPT final response.
+5. Selecting `gpt55-glm52-full` runs GLM-5.2 and GPT-5.5 as tool-less reference models, optional GPT-5.5 synthesis, and then one GPT final response.
 6. Tool calls, if any, come only from the final GPT call.
 
 ## Advisor and Full MoA Flows
 
-See [`docs/ADVISOR-MODE.md`](docs/ADVISOR-MODE.md) for advisor mode, [`docs/FULL-MOA.md`](docs/FULL-MOA.md) for full multi-proposer MoA flow diagrams, and [`docs/TERMINAL-BENCH.md`](docs/TERMINAL-BENCH.md) for the single-vs-full proof loop.
+See [`docs/ADVISOR-MODE.md`](docs/ADVISOR-MODE.md) for advisor mode, [`docs/FULL-MOA.md`](docs/FULL-MOA.md) for full reference-model MoA flow diagrams, and [`docs/TERMINAL-BENCH.md`](docs/TERMINAL-BENCH.md) for the single-vs-full proof loop.
 
 ## Future Work
 

@@ -164,7 +164,7 @@ describe("trace capture", () => {
     }
   });
 
-  it("writes full MoA proposer, synthesis, primary thinking, and diagnostics traces", async () => {
+  it("writes full MoA reference, synthesis, primary thinking, and diagnostics traces", async () => {
     const { cfg, dir, traceDir } = tempConfig();
     try {
       const context: Context = { messages: [{ role: "user", content: "<!-- gsd-moa:full --> deep review", timestamp: 1 }] };
@@ -187,11 +187,11 @@ describe("trace capture", () => {
       const trace = JSON.parse(readFileSync(details.tracePath, "utf8"));
       assert.equal(trace.status, "done");
       assert.equal(trace.policy.mode, "full_moa");
-      assert.equal(trace.referenceCalls.filter((call: any) => call.role === "proposer").length, 3);
+      assert.equal(trace.referenceCalls.filter((call: any) => call.role === "proposer").length, 2);
       assert.equal(trace.referenceCalls.filter((call: any) => call.role === "synthesizer").length, 1);
       assert.match(JSON.stringify(trace.referenceCalls), /reference hidden thinking/);
       assert.match(JSON.stringify(trace.primaryEvents), /primary thinking/);
-      assert.match(JSON.stringify(trace.finalContext), /Independent proposals/);
+      assert.match(JSON.stringify(trace.finalContext), /Independent reference responses/);
       assert.match(JSON.stringify(trace.finalMessage), /final text/);
       assert.doesNotMatch(JSON.stringify(trace), /sk-secret-reference|Bearer secret/);
     } finally {

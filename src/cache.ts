@@ -29,13 +29,24 @@ export interface AdvisorCacheMiss {
 export type AdvisorCacheResult = AdvisorCacheHit | AdvisorCacheMiss;
 
 export function advisorCacheKey(config: GsdMoaConfig, context: Context): string {
+  return referenceCacheKey(config, context, config.reference, "advisor", config.prompts.advisorVersion);
+}
+
+export function referenceCacheKey(
+  config: GsdMoaConfig,
+  context: Context,
+  route: Pick<GsdMoaConfig["reference"], "provider" | "model" | "api" | "baseUrl">,
+  scope: string,
+  promptVersion: string,
+): string {
   const payload = {
-    promptVersion: config.prompts.advisorVersion,
+    promptVersion,
+    scope,
     reference: {
-      provider: config.reference.provider,
-      model: config.reference.model,
-      api: config.reference.api,
-      baseUrl: config.reference.baseUrl,
+      provider: route.provider,
+      model: route.model,
+      api: route.api,
+      baseUrl: route.baseUrl,
     },
     taskDigest: normalizeContext(context),
     auto: config.auto,
@@ -44,7 +55,20 @@ export function advisorCacheKey(config: GsdMoaConfig, context: Context): string 
 }
 
 export function readAdvisorCache(config: GsdMoaConfig, context: Context, cwd = process.cwd()): AdvisorCacheResult {
-  const key = advisorCacheKey(config, context);
+  return readCacheByKey(config, advisorCacheKey(config, context), cwd);
+}
+
+export function readReferenceCache(
+  config: GsdMoaConfig,
+  context: Context,
+  route: Pick<GsdMoaConfig["reference"], "provider" | "model" | "api" | "baseUrl">,
+  scope: string,
+  cwd = process.cwd(),
+): AdvisorCacheResult {
+  return readCacheByKey(config, referenceCacheKey(config, context, route, scope, config.prompts.fullMoaVersion), cwd);
+}
+
+function readCacheByKey(config: GsdMoaConfig, key: string, cwd: string): AdvisorCacheResult {
   const path = cachePath(config, key, cwd);
   if (!config.cache.enabled || !existsSync(path)) return { hit: false, key, path };
 

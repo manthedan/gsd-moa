@@ -20,7 +20,7 @@ Each provider call writes `.proof/traces/<run-id>.json` containing:
 - selected policy/mode and reason
 - redacted provider config
 - input context
-- proposer contexts and outputs, including exposed `thinking` blocks if upstream returns them
+- reference contexts and outputs, including exposed `thinking` blocks if upstream returns them
 - synthesis context and output, including exposed `thinking` blocks if upstream returns them
 - final primary context with injected MoA guidance
 - compact primary stream events, including `thinking_delta` / `thinking_end`
@@ -109,8 +109,8 @@ Notes:
 2. Compare Harbor score/pass result.
 3. Read Pi JSON events and `.proof/traces/*`.
 4. Classify the outcome:
-   - MoA helped: proposer/synthesis found a critical issue or improved tool plan.
+   - MoA helped: reference/synthesis found a critical issue or improved tool plan.
    - MoA hurt: noisy guidance, wrong critique, too much latency/cost, or final model ignored useful guidance.
    - Implementation bug: wrong routing, cache issue, missing tools on final, leaked markers, missing trace.
-5. Tune proposer prompts and `auto.fullMoaKeywords` / `auto.advisorKeywords`.
+5. Tune reference portfolio, synthesis prompt, and `auto.fullMoaKeywords` / `auto.advisorKeywords`.
 6. Repeat on a broader Terminal-Bench slice and GSD-skill dogfood tasks.

@@ -80,11 +80,11 @@ export function withAdvisorGuidance(context: Context, guidance: string, policy: 
 
 export function withFullMoaGuidance(context: Context, result: FullMoaResult, policy: PolicyDecision): Context {
   const advice = [
-    "Private full-MoA proposal bundle. Use it as auxiliary judgment; do not mention internal routing unless useful.",
+    "Private full-MoA reference context. Use it as auxiliary judgment; do not mention internal routing unless useful.",
     `Routing: requested=${policy.requestedMode}, selected=${policy.mode}, reason=${policy.reason}.`,
-    "Independent proposals:",
+    "Independent reference responses:",
     ...result.proposals.map((proposal, index) => [
-      `Proposal ${index + 1}: ${proposal.label} (${proposal.provider}/${proposal.model}, cacheHit=${proposal.cacheHit})`,
+      `Reference ${index + 1}: ${proposal.label} (${proposal.provider}/${proposal.model}, cacheHit=${proposal.cacheHit})`,
       proposal.text.trim(),
     ].join("\n")),
     ...(result.synthesis
@@ -93,7 +93,7 @@ export function withFullMoaGuidance(context: Context, result: FullMoaResult, pol
           result.synthesis.text.trim(),
         ]
       : []),
-    "Final instruction: synthesize one coherent answer/action path. Only you may use tools.",
+    "Final instruction: synthesize one coherent answer/action path. Only you may use tools; if the task requires repository or terminal execution, execute with tools rather than merely describing the setup.",
   ].join("\n\n");
 
   return {

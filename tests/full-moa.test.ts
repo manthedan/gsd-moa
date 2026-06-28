@@ -89,7 +89,7 @@ describe("full MoA orchestration", () => {
         },
         stream(seenModel, seenContext) {
           assert.equal(seenModel.provider, "factory-codex");
-          assert.match(seenContext.systemPrompt ?? "", /Independent proposals/);
+          assert.match(seenContext.systemPrompt ?? "", /Independent reference responses/);
           return streamText(seenModel, "final", usage(1, 1));
         },
       };
@@ -106,7 +106,7 @@ describe("full MoA orchestration", () => {
     }
   });
 
-  it("reuses proposer and synthesis cache on identical repeated requests", async () => {
+  it("reuses reference and synthesis cache on identical repeated requests", async () => {
     const { cfg, dir } = tempConfig();
     try {
       const context: Context = { messages: [{ role: "user", content: "deep review this architecture", timestamp: 1 }] };
@@ -127,12 +127,20 @@ describe("full MoA orchestration", () => {
       const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
       assert.equal(details.cacheHit, true);
       assert.equal(details.innerCalls.filter((call: any) => call.cacheHit === true).length, cfg.fullMoa.proposers.length + 1);
+
+      const gptReference = cfg.fullMoa.proposers.find((p) => p.id === "gpt55");
+      assert.ok(gptReference?.route);
+      gptReference.route.baseUrl = "http://other-gpt-reference/v1";
+      assert.ok(cfg.fullMoa.synthesis.route);
+      cfg.fullMoa.synthesis.route.baseUrl = "http://other-gpt-synthesis/v1";
+      await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
+      assert.ok(completeCalls > firstRunCalls, "route changes should not reuse stale full-MoA cache entries");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("runs multiple tool-less proposers, a tool-less synthesis layer, then one tool-capable primary call", async () => {
+  it("runs multiple tool-less references, a tool-less synthesis layer, then one tool-capable primary call", async () => {
     const { cfg, dir } = tempConfig();
     try {
       const context: Context = {
@@ -143,7 +151,7 @@ describe("full MoA orchestration", () => {
       let primaryCalls = 0;
       const upstream: UpstreamClient = {
         async complete(seenModel, seenContext) {
-          assert.equal(seenModel.provider, "zai");
+          assert.ok(["zai", "factory-codex"].includes(seenModel.provider));
           assert.equal(seenContext.tools, undefined);
           assert.match(seenContext.systemPrompt ?? "", /Do not request or call tools/);
           assert.doesNotMatch(JSON.stringify(seenContext), /gsd-moa:full/);
@@ -155,7 +163,7 @@ describe("full MoA orchestration", () => {
           assert.equal(seenModel.provider, "factory-codex");
           assert.equal(seenContext.tools?.[0]?.name, "Bash");
           assert.doesNotMatch(JSON.stringify(seenContext), /gsd-moa:full/);
-          assert.match(seenContext.systemPrompt ?? "", /Independent proposals/);
+          assert.match(seenContext.systemPrompt ?? "", /Independent reference responses/);
           assert.match(seenContext.systemPrompt ?? "", /reference-1/);
           assert.match(seenContext.systemPrompt ?? "", /Synthesis layer/);
           return streamText(seenModel, "final", usage(1, 2));
@@ -167,10 +175,10 @@ describe("full MoA orchestration", () => {
       const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
       assert.equal(completePrompts.length, cfg.fullMoa.proposers.length + 1);
       assert.equal(primaryCalls, 1);
-      assert.equal(done.message.usage.totalTokens, 63);
+      assert.equal(done.message.usage.totalTokens, 48);
       const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
       assert.equal(details.mode, "full_moa");
-      assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 3);
+      assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 2);
       assert.equal(details.innerCalls.filter((call: any) => call.role === "synthesizer").length, 1);
       assert.equal(details.innerCalls.filter((call: any) => call.role === "primary").length, 1);
     } finally {

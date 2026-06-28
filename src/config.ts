@@ -44,24 +44,49 @@ export const DEFAULT_CONFIG: GsdMoaConfig = {
     enabled: true,
     proposers: [
       {
-        id: "architect",
-        label: "Architecture proposer",
-        prompt: "Propose a robust architecture or plan. Emphasize boundaries, interfaces, sequencing, and tradeoffs.",
+        id: "glm52",
+        label: "GLM-5.2 reference",
       },
       {
-        id: "reviewer",
-        label: "Critical reviewer",
-        prompt: "Critique the request and likely solution. Find bugs, missing requirements, risks, and tests that would fail.",
-      },
-      {
-        id: "implementer",
-        label: "Implementation proposer",
-        prompt: "Draft a practical implementation approach. Emphasize concrete steps, edge cases, and verification.",
+        id: "gpt55",
+        label: "GPT-5.5 reference",
+        route: {
+          provider: "factory-codex",
+          model: "gpt-5.5",
+          api: "openai-completions",
+          baseUrl: "http://127.0.0.1:8317/v1",
+          apiKey: "$FACTORY_GPT_API_KEY",
+          reasoning: true,
+          input: ["text", "image"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 128000,
+          maxTokens: 16384,
+          compat: {
+            supportsDeveloperRole: false,
+            maxTokensField: "max_tokens",
+          },
+        },
       },
     ],
     synthesis: {
       enabled: true,
-      prompt: "Synthesize the proposal bundle into concise guidance for the final acting model. Preserve disagreements and important risks; do not call tools or write patches.",
+      route: {
+        provider: "factory-codex",
+        model: "gpt-5.5",
+        api: "openai-completions",
+        baseUrl: "http://127.0.0.1:8317/v1",
+        apiKey: "$FACTORY_GPT_API_KEY",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128000,
+        maxTokens: 16384,
+        compat: {
+          supportsDeveloperRole: false,
+          maxTokensField: "max_tokens",
+        },
+      },
+      prompt: "Synthesize the reference responses into concise, actionable guidance for the final acting model. Focus on next steps, tool-use strategy, risks, and disagreements. Do not call tools or write patches.",
     },
   },
   aliases: {
@@ -154,8 +179,18 @@ export function loadConfig(path = DEFAULT_CONFIG_PATH, cwd = process.cwd()): Gsd
 }
 
 function applyEnvOverrides(cfg: GsdMoaConfig): void {
-  if (process.env.GSD_MOA_PRIMARY_BASE_URL) cfg.primary.baseUrl = process.env.GSD_MOA_PRIMARY_BASE_URL;
-  if (process.env.GSD_MOA_REFERENCE_BASE_URL) cfg.reference.baseUrl = process.env.GSD_MOA_REFERENCE_BASE_URL;
+  const originalPrimaryProvider = cfg.primary.provider;
+  const originalPrimaryModel = cfg.primary.model;
+  const originalReferenceProvider = cfg.reference.provider;
+  const originalReferenceModel = cfg.reference.model;
+  if (process.env.GSD_MOA_PRIMARY_BASE_URL) {
+    cfg.primary.baseUrl = process.env.GSD_MOA_PRIMARY_BASE_URL;
+    applyRouteBaseUrlOverride(cfg.fullMoa, originalPrimaryProvider, originalPrimaryModel, process.env.GSD_MOA_PRIMARY_BASE_URL);
+  }
+  if (process.env.GSD_MOA_REFERENCE_BASE_URL) {
+    cfg.reference.baseUrl = process.env.GSD_MOA_REFERENCE_BASE_URL;
+    applyRouteBaseUrlOverride(cfg.fullMoa, originalReferenceProvider, originalReferenceModel, process.env.GSD_MOA_REFERENCE_BASE_URL);
+  }
   if (process.env.GSD_MOA_TRACE !== undefined) {
     cfg.trace.enabled = /^(1|true|yes|on)$/i.test(process.env.GSD_MOA_TRACE);
   }
@@ -165,6 +200,15 @@ function applyEnvOverrides(cfg: GsdMoaConfig): void {
   }
   if (process.env.GSD_MOA_TRACE_INCLUDE_OUTPUTS !== undefined) {
     cfg.trace.includeOutputs = /^(1|true|yes|on)$/i.test(process.env.GSD_MOA_TRACE_INCLUDE_OUTPUTS);
+  }
+}
+
+function applyRouteBaseUrlOverride(fullMoa: FullMoaConfig, provider: string, model: string, baseUrl: string): void {
+  for (const proposer of fullMoa.proposers) {
+    if (proposer.route?.provider === provider && proposer.route?.model === model) proposer.route.baseUrl = baseUrl;
+  }
+  if (fullMoa.synthesis.route?.provider === provider && fullMoa.synthesis.route?.model === model) {
+    fullMoa.synthesis.route.baseUrl = baseUrl;
   }
 }
 
@@ -203,14 +247,20 @@ export function mergeUpstreamRoute(base: UpstreamRoute, override: Partial<Upstre
 function mergeFullMoa(defaults: FullMoaConfig, override: unknown): FullMoaConfig {
   if (!isRecord(override)) return structuredClone(defaults);
   const synthesis = isRecord(override.synthesis)
-    ? { ...defaults.synthesis, ...override.synthesis }
-    : defaults.synthesis;
+    ? {
+        ...structuredClone(defaults.synthesis),
+        ...override.synthesis,
+        route: isRecord(override.synthesis.route)
+          ? mergePartialRoute(defaults.synthesis.route, override.synthesis.route)
+          : structuredClone(defaults.synthesis.route),
+      }
+    : structuredClone(defaults.synthesis);
   return {
     ...defaults,
     ...override,
     proposers: Array.isArray(override.proposers)
       ? mergeProposers(defaults.proposers, override.proposers)
-      : defaults.proposers,
+      : structuredClone(defaults.proposers),
     synthesis,
   };
 }
@@ -220,9 +270,23 @@ function mergeProposers(defaults: FullMoaConfig["proposers"], overrides: unknown
   for (const override of overrides) {
     if (!isRecord(override) || typeof override.id !== "string") continue;
     const existing = byId.get(override.id);
-    byId.set(override.id, existing ? { ...existing, ...override } as FullMoaConfig["proposers"][number] : override as unknown as FullMoaConfig["proposers"][number]);
+    if (existing) {
+      byId.set(override.id, {
+        ...existing,
+        ...override,
+        route: isRecord(override.route) ? mergePartialRoute(existing.route, override.route) : existing.route,
+      } as FullMoaConfig["proposers"][number]);
+    } else {
+      byId.set(override.id, override as unknown as FullMoaConfig["proposers"][number]);
+    }
   }
   return [...byId.values()];
+}
+
+function mergePartialRoute(defaults: Partial<UpstreamRoute> | undefined, override: unknown): Partial<UpstreamRoute> | undefined {
+  if (!isRecord(override)) return defaults ? structuredClone(defaults) : undefined;
+  if (!defaults) return override as Partial<UpstreamRoute>;
+  return mergeRoute(defaults as UpstreamRoute, override);
 }
 
 function validateFullMoa(fullMoa: FullMoaConfig, reference: UpstreamRoute): void {
@@ -236,7 +300,6 @@ function validateFullMoa(fullMoa: FullMoaConfig, reference: UpstreamRoute): void
     if (ids.has(proposer.id)) throw new Error(`duplicate fullMoa proposer id: ${proposer.id}`);
     ids.add(proposer.id);
     if (!proposer.label?.trim()) throw new Error(`fullMoa proposer ${proposer.id} label is required`);
-    if (!proposer.prompt?.trim()) throw new Error(`fullMoa proposer ${proposer.id} prompt is required`);
     validateRoute(`fullMoa.proposers.${proposer.id}.route`, mergeUpstreamRoute(reference, proposer.route));
   }
   if (typeof fullMoa.synthesis.enabled !== "boolean") throw new Error("fullMoa.synthesis.enabled must be boolean");

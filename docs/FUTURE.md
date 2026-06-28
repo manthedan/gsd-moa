@@ -2,15 +2,15 @@
 
 ## Full MoA Hardening
 
-`gpt55-glm52-full` now implements tool-less multi-proposer fan-out, optional tool-less synthesis, and one final tool-capable acting call. Future hardening should focus on:
+`gpt55-glm52-full` now implements tool-less reference-model fan-out, optional tool-less synthesis, and one final tool-capable acting call. Future hardening should focus on:
 
 1. Budget and latency gates so `auto` selects full MoA only for high-leverage work.
-2. More configurable proposer portfolios, including optional heterogeneous routes.
+2. More configurable reference portfolios, including optional heterogeneous routes.
 3. Better per-inner-call status reporting if Pi exposes provider progress events.
 4. Proof artifacts that show when full MoA beats advisor mode enough to justify cost.
 5. Optional output-shape contracts for planner/reviewer/debugger use cases.
 
-The single-writer invariant should remain non-negotiable: proposers and synthesizers advise only; final primary owns tools.
+The single-writer invariant should remain non-negotiable: reference models and synthesizers advise only; final primary owns tools.
 
 ## CLIProxyAPI / OpenAI-Compatible Proxy Extraction
 
@@ -28,9 +28,9 @@ This should not be started until the Pi provider prototype has real workflow evi
 If Pi gains provider-level progress/status events, `gsd-moa` can surface:
 
 - `Running GLM advisor...`
-- `Running full MoA proposers...`
-- `Advisor/proposer cache hit/miss`
-- `Synthesizing proposal bundle...`
+- `Running full MoA references...`
+- `Advisor/reference cache hit/miss`
+- `Synthesizing reference bundle...`
 - `Streaming final GPT response...`
 
 Until then, status is recorded in final diagnostics rather than emitted as extra assistant text.

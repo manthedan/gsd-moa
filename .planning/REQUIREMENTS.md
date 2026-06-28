@@ -55,11 +55,11 @@ Requirements for completing full MoA before the testing/proof milestone, then pr
 
 ### Full MoA Build-out
 
-- [x] **MOA-01**: Provider supports tool-less multi-proposer fan-out before one final tool-capable primary call.
-- [x] **MOA-02**: Provider supports an optional tool-less synthesis layer over proposer outputs.
+- [x] **MOA-01**: Provider supports tool-less reference-model fan-out before one final tool-capable primary call.
+- [x] **MOA-02**: Provider supports an optional tool-less synthesis layer over reference outputs.
 - [x] **MOA-03**: Provider exposes a `gpt55-glm52-full` alias and explicit full-MoA markers.
 - [x] **MOA-04**: `auto` can choose full MoA only for configured high-leverage keywords while tool-loop continuations stay single.
-- [x] **MOA-05**: Diagnostics include proposer/synthesizer inner-call provider/model, usage, and cache hit/miss.
+- [x] **MOA-05**: Diagnostics include reference/synthesizer inner-call provider/model, usage, and cache hit/miss.
 
 ### Proof Harness
 
@@ -75,7 +75,7 @@ Requirements for completing full MoA before the testing/proof milestone, then pr
 
 ### Safety & Observability
 
-- [ ] **SAFE-01**: Proof artifacts demonstrate that GLM advisor/proposer/synthesizer calls remain tool-less and final GPT calls are the only tool-capable calls.
+- [ ] **SAFE-01**: Proof artifacts demonstrate that advisor/reference/synthesizer calls remain tool-less and final GPT calls are the only tool-capable calls.
 - [x] **OBS-03**: Proof artifacts expose `gsd-moa.details` and route metadata sufficiently to debug advisor/full-MoA influence and cache behavior.
 - [x] **DOC-03**: Documentation includes current advisor-mode and full-MoA flow diagrams plus proof-harness usage instructions.
 

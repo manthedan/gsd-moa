@@ -53,7 +53,7 @@ export interface PromptConfig {
 export interface FullMoaProposerConfig {
   id: string;
   label: string;
-  prompt: string;
+  prompt?: string;
   route?: Partial<UpstreamRoute>;
 }
 

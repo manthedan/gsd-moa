@@ -70,6 +70,8 @@ describe("mode policy", () => {
       assert.equal(cfg.trace.enabled, true);
       assert.equal(cfg.trace.dir, join(dir, "traces"));
       assert.equal(cfg.primary.baseUrl, "http://host.docker.internal:8317/v1");
+      assert.equal(cfg.fullMoa.proposers.find((p) => p.id === "gpt55")?.route?.baseUrl, "http://host.docker.internal:8317/v1");
+      assert.equal(cfg.fullMoa.synthesis.route?.baseUrl, "http://host.docker.internal:8317/v1");
 
       if (oldTrace === undefined) delete process.env.GSD_MOA_TRACE;
       else process.env.GSD_MOA_TRACE = oldTrace;
@@ -81,6 +83,8 @@ describe("mode policy", () => {
       const cfgAfterEnvRestore = loadConfig("missing.json", dir);
       assert.equal(cfgAfterEnvRestore.trace.enabled, DEFAULT_CONFIG.trace.enabled);
       assert.equal(cfgAfterEnvRestore.trace.dir, DEFAULT_CONFIG.trace.dir);
+      assert.equal(cfgAfterEnvRestore.fullMoa.proposers.find((p) => p.id === "gpt55")?.route?.baseUrl, DEFAULT_CONFIG.primary.baseUrl);
+      assert.equal(DEFAULT_CONFIG.fullMoa.proposers.find((p) => p.id === "gpt55")?.route?.baseUrl, DEFAULT_CONFIG.primary.baseUrl);
     } finally {
       if (oldTrace === undefined) delete process.env.GSD_MOA_TRACE;
       else process.env.GSD_MOA_TRACE = oldTrace;
@@ -92,20 +96,25 @@ describe("mode policy", () => {
     }
   });
 
-  it("merges full MoA proposer overrides by id", () => {
+  it("merges full MoA reference overrides by id", () => {
     const dir = mkdtempSync(join(tmpdir(), "gsd-moa-proposer-test-"));
     try {
       writeFileSync(join(dir, "gsd-moa.json"), JSON.stringify({
         fullMoa: {
-          proposers: [{ id: "architect", route: { provider: "other", model: "arch-model" } }],
+          proposers: [{ id: "gpt55", route: { baseUrl: "http://override.example/v1" } }],
+          synthesis: { route: { baseUrl: "http://synthesis.example/v1" } },
         },
       }));
       const cfg = loadConfig("gsd-moa.json", dir);
       assert.equal(cfg.fullMoa.proposers.length, DEFAULT_CONFIG.fullMoa.proposers.length);
-      const architect = cfg.fullMoa.proposers.find((p) => p.id === "architect");
-      assert.equal(architect?.label, "Architecture proposer");
-      assert.equal(architect?.route?.provider, "other");
-      assert.equal(architect?.route?.model, "arch-model");
+      const gpt = cfg.fullMoa.proposers.find((p) => p.id === "gpt55");
+      assert.equal(gpt?.label, "GPT-5.5 reference");
+      assert.equal(gpt?.route?.provider, "factory-codex");
+      assert.equal(gpt?.route?.model, "gpt-5.5");
+      assert.equal(gpt?.route?.baseUrl, "http://override.example/v1");
+      assert.equal(cfg.fullMoa.synthesis.route?.provider, "factory-codex");
+      assert.equal(cfg.fullMoa.synthesis.route?.model, "gpt-5.5");
+      assert.equal(cfg.fullMoa.synthesis.route?.baseUrl, "http://synthesis.example/v1");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

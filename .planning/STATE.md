@@ -23,7 +23,7 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-06-27)
 
-**Core value:** Give GSD/Pi a normal-looking model provider that adds second-model/multi-proposer judgment only when it is worth the latency/cost, while preserving safe single-writer tool execution.
+**Core value:** Give GSD/Pi a normal-looking model provider that adds second-model/reference-model judgment only when it is worth the latency/cost, while preserving safe single-writer tool execution.
 **Current focus:** v1.1 — Full MoA Build-out and Dogfood Evaluation
 
 ## Current Position
@@ -68,7 +68,7 @@ Recent decisions affecting current work:
 
 - v1.0 shipped the provider prototype and archived phases 1–4.
 - Use Factory Droid's local GPT-5.5 Codex proxy for primary calls when appropriate.
-- Use Z.ai Coding Plan GLM-5.2 for reference/advisor/proposer/synthesis calls by default.
+- Use Z.ai Coding Plan GLM-5.2 plus Factory GPT-5.5 as full-MoA reference models; use GPT-5.5 for synthesis and final acting by default.
 - Implement full MoA before testing based on expert review; testing now compares `single`, `advisor`, and `full_moa`.
 - Preserve single-writer invariant: only final GPT gets tools.
 
@@ -84,7 +84,8 @@ Recent decisions affecting current work:
 - Full MoA has higher latency/cost; proof needs judge whether quality justifies it.
 - Need avoid benchmark theater; evidence should support a human decision about usefulness.
 - Harbor custom agent now mounts/copies the repo into the task container and installs Node 24; local runs still require Factory proxy availability from Docker via `host.docker.internal`.
-- Full-MoA tool-loop traces showed first-turn live proposer/synthesis calls and later cache hits; consider skipping advisory reruns after tool results or including tool-result state in cache policy.
+- Full-MoA tool-loop traces showed first-turn live reference/synthesis calls and later cache hits; consider skipping advisory reruns after tool results or including tool-result state in cache policy.
+- Full-MoA design shifted away from architect/reviewer/implementer role prompts toward Hermes/OpenRouter-style reference-model fusion: same sanitized prompt to GLM-5.2 and GPT-5.5, GPT-5.5 synthesis, GPT-5.5 final tool-capable actor.
 
 ## Notes
 
