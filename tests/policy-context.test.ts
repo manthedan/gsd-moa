@@ -57,6 +57,34 @@ describe("mode policy", () => {
     }
   });
 
+  it("allows proof runs to opt into tracing via env without mutating defaults", () => {
+    const oldTrace = process.env.GSD_MOA_TRACE;
+    const oldDir = process.env.GSD_MOA_TRACE_DIR;
+    const dir = mkdtempSync(join(tmpdir(), "gsd-moa-trace-env-test-"));
+    try {
+      process.env.GSD_MOA_TRACE = "1";
+      process.env.GSD_MOA_TRACE_DIR = join(dir, "traces");
+      const cfg = loadConfig("missing.json", dir);
+      assert.equal(cfg.trace.enabled, true);
+      assert.equal(cfg.trace.dir, join(dir, "traces"));
+
+      if (oldTrace === undefined) delete process.env.GSD_MOA_TRACE;
+      else process.env.GSD_MOA_TRACE = oldTrace;
+      if (oldDir === undefined) delete process.env.GSD_MOA_TRACE_DIR;
+      else process.env.GSD_MOA_TRACE_DIR = oldDir;
+
+      const cfgAfterEnvRestore = loadConfig("missing.json", dir);
+      assert.equal(cfgAfterEnvRestore.trace.enabled, DEFAULT_CONFIG.trace.enabled);
+      assert.equal(cfgAfterEnvRestore.trace.dir, DEFAULT_CONFIG.trace.dir);
+    } finally {
+      if (oldTrace === undefined) delete process.env.GSD_MOA_TRACE;
+      else process.env.GSD_MOA_TRACE = oldTrace;
+      if (oldDir === undefined) delete process.env.GSD_MOA_TRACE_DIR;
+      else process.env.GSD_MOA_TRACE_DIR = oldDir;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("merges full MoA proposer overrides by id", () => {
     const dir = mkdtempSync(join(tmpdir(), "gsd-moa-proposer-test-"));
     try {

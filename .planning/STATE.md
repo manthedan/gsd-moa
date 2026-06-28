@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Full MoA Build-out and Dogfood Evaluation
-current_phase: 6
-current_phase_name: Proof Harness and Artifact Capture
+current_phase: 7
+current_phase_name: Realistic Evaluation Task Suite and Rubric
 status: planning
-stopped_at: Full MoA build-out complete; ready to plan proof harness
-last_updated: "2026-06-27T08:45:00.000Z"
+stopped_at: Trace/proof harness complete; ready to run Terminal-Bench and define evaluation rubric
+last_updated: "2026-06-27T21:05:00.000Z"
 last_activity: 2026-06-27
-last_activity_desc: Added full_moa alias, proposer fan-out, synthesis, diagnostics, docs, and tests
+last_activity_desc: Added provider trace capture, Pi proof runner, and Terminal-Bench integration notes
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 9
-  completed_plans: 1
-  percent: 25
+  completed_plans: 4
+  percent: 50
 ---
 
 # Project State
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-06-27)
 
 ## Current Position
 
-Phase: 6 of 8 (Proof Harness and Artifact Capture)
+Phase: 7 of 8 (Realistic Evaluation Task Suite and Rubric)
 Plan: Not started
 Status: Planning
-Last activity: 2026-06-27 — Full MoA feature build-out completed before testing milestone
+Last activity: 2026-06-27 — Trace/proof harness completed for Pi and Terminal-Bench experiments
 
-Progress: [██░░░░░░░░] 25%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -48,14 +48,14 @@ Progress: [██░░░░░░░░] 25%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 5 | 1/1 | - | - |
-| 6 | 0/3 | - | - |
+| 6 | 3/3 | - | - |
 | 7 | 0/2 | - | - |
 | 8 | 0/3 | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: Phase 5 full MoA build-out complete
-- Trend: Feature scope expanded before testing/proof
+- Last 5 plans: Phase 5 full MoA build-out complete; Phase 6 trace/proof harness complete
+- Trend: Ready to move from plumbing to live benchmark evidence
 
 *Updated after each plan completion*
 
@@ -74,15 +74,16 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- Plan Phase 6 proof harness.
-- Build artifact schema that redacts secrets but preserves route/usage/latency evidence.
-- Include `single`, `advisor`, and `full_moa` in proof comparisons.
+- Install/configure Harbor if needed and run oracle smoke.
+- Run first Terminal-Bench sample with `single` and `full_moa`.
+- Define the human usefulness rubric for Terminal-Bench plus GSD skill tasks.
 
 ### Blockers/Concerns
 
 - Live proof runs require Factory proxy availability and valid `FACTORY_GPT_API_KEY` / `ZAI_API_KEY`.
 - Full MoA has higher latency/cost; proof needs judge whether quality justifies it.
 - Need avoid benchmark theater; evidence should support a human decision about usefulness.
+- Harbor custom agent currently assumes the gsd-moa extension path is visible inside the task container or a package version is installed.
 
 ## Notes
 

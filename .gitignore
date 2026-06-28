@@ -1,7 +1,7 @@
 node_modules/
 .ralph/
 .pi/gsd-moa-cache/
-.proof/runs/
+.proof/
 coverage/
 dist/
 .env

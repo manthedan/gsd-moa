@@ -85,6 +85,12 @@
     "dir": ".pi/gsd-moa-cache",
     "ttlSeconds": 604800
   },
+  "trace": {
+    "enabled": false,
+    "dir": ".proof/traces",
+    "includeContexts": true,
+    "includeOutputs": true
+  },
   "prompts": {
     "advisorVersion": "v1",
     "fullMoaVersion": "v1"

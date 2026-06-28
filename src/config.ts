@@ -81,6 +81,12 @@ export const DEFAULT_CONFIG: GsdMoaConfig = {
     dir: ".pi/gsd-moa-cache",
     ttlSeconds: 7 * 24 * 60 * 60,
   },
+  trace: {
+    enabled: false,
+    dir: ".proof/traces",
+    includeContexts: true,
+    includeOutputs: true,
+  },
   prompts: {
     advisorVersion: "v1",
     fullMoaVersion: "v1",
@@ -107,6 +113,7 @@ export function loadConfig(path = DEFAULT_CONFIG_PATH, cwd = process.cwd()): Gsd
   const fullPath = resolve(cwd, path);
   if (!existsSync(fullPath)) {
     const cfg = structuredClone(DEFAULT_CONFIG);
+    applyEnvOverrides(cfg);
     validateConfig(cfg);
     return cfg;
   }
@@ -137,11 +144,26 @@ export function loadConfig(path = DEFAULT_CONFIG_PATH, cwd = process.cwd()): Gsd
             : DEFAULT_CONFIG.auto.singleKeywords,
         }
       : DEFAULT_CONFIG.auto,
-    cache: isRecord(parsed.cache) ? { ...DEFAULT_CONFIG.cache, ...parsed.cache } as GsdMoaConfig["cache"] : DEFAULT_CONFIG.cache,
-    prompts: isRecord(parsed.prompts) ? { ...DEFAULT_CONFIG.prompts, ...parsed.prompts } as GsdMoaConfig["prompts"] : DEFAULT_CONFIG.prompts,
+    cache: isRecord(parsed.cache) ? { ...DEFAULT_CONFIG.cache, ...parsed.cache } as GsdMoaConfig["cache"] : structuredClone(DEFAULT_CONFIG.cache),
+    trace: isRecord(parsed.trace) ? { ...DEFAULT_CONFIG.trace, ...parsed.trace } as GsdMoaConfig["trace"] : structuredClone(DEFAULT_CONFIG.trace),
+    prompts: isRecord(parsed.prompts) ? { ...DEFAULT_CONFIG.prompts, ...parsed.prompts } as GsdMoaConfig["prompts"] : structuredClone(DEFAULT_CONFIG.prompts),
   };
+  applyEnvOverrides(cfg);
   validateConfig(cfg);
   return cfg;
+}
+
+function applyEnvOverrides(cfg: GsdMoaConfig): void {
+  if (process.env.GSD_MOA_TRACE !== undefined) {
+    cfg.trace.enabled = /^(1|true|yes|on)$/i.test(process.env.GSD_MOA_TRACE);
+  }
+  if (process.env.GSD_MOA_TRACE_DIR) cfg.trace.dir = process.env.GSD_MOA_TRACE_DIR;
+  if (process.env.GSD_MOA_TRACE_INCLUDE_CONTEXTS !== undefined) {
+    cfg.trace.includeContexts = /^(1|true|yes|on)$/i.test(process.env.GSD_MOA_TRACE_INCLUDE_CONTEXTS);
+  }
+  if (process.env.GSD_MOA_TRACE_INCLUDE_OUTPUTS !== undefined) {
+    cfg.trace.includeOutputs = /^(1|true|yes|on)$/i.test(process.env.GSD_MOA_TRACE_INCLUDE_OUTPUTS);
+  }
 }
 
 export function validateConfig(cfg: GsdMoaConfig): void {
@@ -163,6 +185,10 @@ export function validateConfig(cfg: GsdMoaConfig): void {
   if (!Number.isFinite(cfg.cache.ttlSeconds) || cfg.cache.ttlSeconds < 0) {
     throw new Error("cache.ttlSeconds must be a non-negative number");
   }
+  if (typeof cfg.trace.enabled !== "boolean") throw new Error("trace.enabled must be boolean");
+  if (!cfg.trace.dir) throw new Error("trace.dir is required");
+  if (typeof cfg.trace.includeContexts !== "boolean") throw new Error("trace.includeContexts must be boolean");
+  if (typeof cfg.trace.includeOutputs !== "boolean") throw new Error("trace.includeOutputs must be boolean");
   if (!cfg.prompts.advisorVersion) throw new Error("prompts.advisorVersion is required");
   if (!cfg.prompts.fullMoaVersion) throw new Error("prompts.fullMoaVersion is required");
 }

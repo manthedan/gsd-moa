@@ -12,6 +12,7 @@ import { loadConfig } from "./config.js";
 import { hasRecentToolResults, latestUserText, stripMarkersFromContext, withAdvisorGuidance, withFullMoaGuidance } from "./context.js";
 import { runFullMoa } from "./moa.js";
 import { chooseMode } from "./policy.js";
+import { createTraceRecorder } from "./trace.js";
 import type { AdvisorResult, FullMoaResult, GsdMoaConfig, MoaRunDetails } from "./types.js";
 import { routeToModel, streamOptionsForRoute, type UpstreamClient, compatUpstreamClient } from "./upstream.js";
 import { addUsage } from "./usage.js";
@@ -30,51 +31,60 @@ export function streamGsdMoa(
   const stream = createAssistantMessageEventStream();
 
   (async () => {
-    const config = deps.config ?? loadConfig();
-    const upstream = deps.upstream ?? compatUpstreamClient;
-    const policy = chooseMode(config, {
-      alias: model.id,
-      latestUserText: latestUserText(context, true),
-      hasToolResults: hasRecentToolResults(context),
-    });
-
+    let trace: ReturnType<typeof createTraceRecorder>;
     try {
+      const config = deps.config ?? loadConfig();
+      const upstream = deps.upstream ?? compatUpstreamClient;
+      const policy = chooseMode(config, {
+        alias: model.id,
+        latestUserText: latestUserText(context, true),
+        hasToolResults: hasRecentToolResults(context),
+      });
+      trace = createTraceRecorder(config, model, context, policy);
+
       const primaryContext = stripMarkersFromContext(context);
       let finalContext = primaryContext;
       let advisor: AdvisorResult | undefined;
       let fullMoa: FullMoaResult | undefined;
       if (policy.mode === "advisor") {
-        advisor = await runAdvisor(config, context, policy, upstream, options);
+        advisor = await runAdvisor(config, context, policy, upstream, options, trace);
         finalContext = withAdvisorGuidance(primaryContext, advisor.text, policy);
       } else if (policy.mode === "full_moa") {
-        fullMoa = await runFullMoa(config, context, policy, upstream, options);
+        fullMoa = await runFullMoa(config, context, policy, upstream, options, trace);
         finalContext = withFullMoaGuidance(primaryContext, fullMoa, policy);
       }
 
+      trace?.recordFinalContext(finalContext);
       const primaryModel = routeToModel(config.primary);
       const inner = upstream.stream(primaryModel, finalContext, streamOptionsForRoute(config.primary, options));
       for await (const event of inner) {
+        trace?.recordPrimaryEvent(event);
         if (event.type === "done") {
           const primaryUsage = event.message.usage;
           const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
           event.message.usage = combinedUsage;
+          const diagnostic = moaDiagnostic(config, policy, advisor, fullMoa, primaryUsage, combinedUsage, trace?.filePath);
           event.message.diagnostics = [
             ...(event.message.diagnostics ?? []),
-            moaDiagnostic(config, policy, advisor, fullMoa, primaryUsage, combinedUsage),
+            diagnostic,
           ];
+          trace?.finish(event.message, diagnostic.details);
         } else if (event.type === "error") {
           const primaryUsage = event.error.usage;
           const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
           event.error.usage = combinedUsage;
+          const diagnostic = moaDiagnostic(config, policy, advisor, fullMoa, primaryUsage, combinedUsage, trace?.filePath);
           event.error.diagnostics = [
             ...(event.error.diagnostics ?? []),
-            moaDiagnostic(config, policy, advisor, fullMoa, primaryUsage, combinedUsage),
+            diagnostic,
           ];
+          trace?.finishError(event.error, diagnostic.details);
         }
         stream.push(event);
       }
       stream.end();
     } catch (error) {
+      trace?.fail(error);
       stream.push({
         type: "error",
         reason: options?.signal?.aborted ? "aborted" : "error",
@@ -94,8 +104,9 @@ function moaDiagnostic(
   fullMoa: FullMoaResult | undefined,
   primaryUsage: AssistantMessage["usage"],
   combinedUsage: AssistantMessage["usage"],
+  tracePath?: string,
 ): NonNullable<AssistantMessage["diagnostics"]>[number] {
-  const details: MoaRunDetails & { combinedUsage: AssistantMessage["usage"] } = {
+  const details: MoaRunDetails & { combinedUsage: AssistantMessage["usage"]; tracePath?: string } = {
     mode: policy.mode,
     requestedMode: policy.requestedMode,
     reason: policy.reason,
@@ -110,6 +121,7 @@ function moaDiagnostic(
       { role: "primary" as const, provider: config.primary.provider, model: config.primary.model, usage: primaryUsage },
     ],
     combinedUsage,
+    ...(tracePath ? { tracePath } : {}),
   };
   return { type: "gsd-moa.details", timestamp: Date.now(), details: details as unknown as Record<string, unknown> };
 }

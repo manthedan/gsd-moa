@@ -63,9 +63,9 @@ Requirements for completing full MoA before the testing/proof milestone, then pr
 
 ### Proof Harness
 
-- [ ] **PROOF-01**: A local command/script runs live proof tasks through `gsd-moa` using the Factory GPT-5.5 proxy and Z.ai GLM-5.2 route.
-- [ ] **PROOF-02**: Each proof task can run `gpt55-glm52-single`, `gpt55-glm52-advisor`, and `gpt55-glm52-full` against the same input.
-- [ ] **PROOF-03**: Proof runs write durable artifacts under a gitignored run directory with prompts, outputs, diagnostics, latency, usage, cache hit/miss, and redacted config.
+- [x] **PROOF-01**: A local command/script runs live proof tasks through `gsd-moa` using the Factory GPT-5.5 proxy and Z.ai GLM-5.2 route.
+- [x] **PROOF-02**: Each proof task can run `gpt55-glm52-single`, `gpt55-glm52-advisor`, and `gpt55-glm52-full` against the same input.
+- [x] **PROOF-03**: Proof runs write durable artifacts under a gitignored run directory with prompts, outputs, diagnostics, latency, usage, cache hit/miss, and redacted config.
 
 ### Evaluation Tasks & Rubric
 
@@ -76,8 +76,8 @@ Requirements for completing full MoA before the testing/proof milestone, then pr
 ### Safety & Observability
 
 - [ ] **SAFE-01**: Proof artifacts demonstrate that GLM advisor/proposer/synthesizer calls remain tool-less and final GPT calls are the only tool-capable calls.
-- [ ] **OBS-03**: Proof artifacts expose `gsd-moa.details` and route metadata sufficiently to debug advisor/full-MoA influence and cache behavior.
-- [ ] **DOC-03**: Documentation includes current advisor-mode and full-MoA flow diagrams plus proof-harness usage instructions.
+- [x] **OBS-03**: Proof artifacts expose `gsd-moa.details` and route metadata sufficiently to debug advisor/full-MoA influence and cache behavior.
+- [x] **DOC-03**: Documentation includes current advisor-mode and full-MoA flow diagrams plus proof-harness usage instructions.
 
 ## v2 Requirements
 
@@ -139,22 +139,22 @@ Deferred to a future milestone.
 | MOA-03 | Phase 5 | Complete |
 | MOA-04 | Phase 5 | Complete |
 | MOA-05 | Phase 5 | Complete |
-| PROOF-01 | Phase 6 | Planned |
-| PROOF-02 | Phase 6 | Planned |
-| PROOF-03 | Phase 6 | Planned |
+| PROOF-01 | Phase 6 | Complete |
+| PROOF-02 | Phase 6 | Complete |
+| PROOF-03 | Phase 6 | Complete |
 | EVAL-01 | Phase 7 | Planned |
 | EVAL-02 | Phase 7 | Planned |
 | EVAL-03 | Phase 8 | Planned |
 | SAFE-01 | Phase 8 | Planned |
-| OBS-03 | Phase 8 | Planned |
-| DOC-03 | Phase 8 | Planned |
+| OBS-03 | Phase 8 | Complete |
+| DOC-03 | Phase 8 | Complete |
 
 **Coverage:**
 
 - v1 requirements: 27 total, complete
-- v1.1 requirements: 14 total, 5 complete and 9 mapped to planned phases
+- v1.1 requirements: 14 total, 10 complete and 4 mapped to planned phases
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-27*
-*Last updated: 2026-06-27 after full MoA build-out*
+*Last updated: 2026-06-27 after trace/proof harness build-out*

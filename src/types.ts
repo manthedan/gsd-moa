@@ -38,6 +38,13 @@ export interface CacheConfig {
   ttlSeconds: number;
 }
 
+export interface TraceConfig {
+  enabled: boolean;
+  dir: string;
+  includeContexts: boolean;
+  includeOutputs: boolean;
+}
+
 export interface PromptConfig {
   advisorVersion: string;
   fullMoaVersion: string;
@@ -69,6 +76,7 @@ export interface GsdMoaConfig {
   aliases: Record<string, AliasConfig>;
   auto: AutoPolicyConfig;
   cache: CacheConfig;
+  trace: TraceConfig;
   prompts: PromptConfig;
 }
 

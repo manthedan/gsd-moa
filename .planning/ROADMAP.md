@@ -9,7 +9,7 @@ Before the testing/proof milestone, `gsd-moa` should implement the full Hermes-s
 **Phase Numbering:** Continuing from v1.0; archived phases 1–4 live under `.planning/milestones/v1.0-phases/`.
 
 - [x] **Phase 5: Full MoA Feature Build-out** - Add explicit full-MoA alias, proposer fan-out, optional synthesis, diagnostics, cache behavior, and docs.
-- [ ] **Phase 6: Proof Harness and Artifact Capture** - Add a local live-run harness that executes `single`, `advisor`, and `full_moa` through the configured Factory/Z.ai proxy routes and writes durable, redacted artifacts.
+- [x] **Phase 6: Proof Harness and Artifact Capture** - Add a local live-run harness that executes `single`, `advisor`, and `full_moa` through the configured Factory/Z.ai proxy routes and writes durable, redacted artifacts.
 - [ ] **Phase 7: Realistic Evaluation Task Suite and Rubric** - Define representative Pi/GSD tasks plus a usefulness rubric for comparing single vs advisor/full-MoA outputs.
 - [ ] **Phase 8: Dogfood Run, Summary, and Decision Gate** - Run the suite, inspect results, document advisor/full-MoA value, and decide whether to harden, adjust, or pause.
 
@@ -37,6 +37,7 @@ Before the testing/proof milestone, `gsd-moa` should implement the full Hermes-s
 **Mode:** mvp
 **Depends on**: Phase 5
 **Requirements**: [PROOF-01, PROOF-02, PROOF-03]
+**Status**: Complete
 **Success Criteria**:
 
 1. A local command/script runs live proof cases through `gsd-moa` using the configured Factory GPT-5.5 proxy and Z.ai GLM-5.2 route.
@@ -81,6 +82,6 @@ Phases execute in numeric order: 5 → 6 → 7 → 8
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 5. Full MoA Feature Build-out | 1/1 | Complete | 2026-06-27 |
-| 6. Proof Harness and Artifact Capture | 0/3 | Planned | - |
+| 6. Proof Harness and Artifact Capture | 3/3 | Complete | 2026-06-27 |
 | 7. Realistic Evaluation Task Suite and Rubric | 0/2 | Planned | - |
 | 8. Dogfood Run, Summary, and Decision Gate | 0/3 | Planned | - |

@@ -2,6 +2,7 @@ import type { Context, SimpleStreamOptions, UserMessage } from "@earendil-works/
 import { readAdvisorCache, writeAdvisorCache } from "./cache.js";
 import { mergeUpstreamRoute } from "./config.js";
 import { assistantText, sanitizeReferenceContext } from "./context.js";
+import type { TraceRecorder } from "./trace.js";
 import type {
   FullMoaProposal,
   FullMoaProposerConfig,
@@ -20,17 +21,18 @@ export async function runFullMoa(
   policy: PolicyDecision,
   upstream: UpstreamClient,
   options?: SimpleStreamOptions,
+  trace?: TraceRecorder,
 ): Promise<FullMoaResult> {
   if (!config.fullMoa.enabled) {
     throw new Error("full_moa mode requested but fullMoa.enabled is false");
   }
 
   const proposals = await Promise.all(
-    config.fullMoa.proposers.map((proposer) => runProposer(config, context, policy, proposer, upstream, options)),
+    config.fullMoa.proposers.map((proposer) => runProposer(config, context, policy, proposer, upstream, options, trace)),
   );
 
   const synthesis = config.fullMoa.synthesis.enabled
-    ? await runSynthesis(config, context, policy, proposals, upstream, options)
+    ? await runSynthesis(config, context, policy, proposals, upstream, options, trace)
     : undefined;
 
   const guidance = formatProposalBundle(proposals, synthesis?.text);
@@ -66,11 +68,25 @@ async function runProposer(
   proposer: FullMoaProposerConfig,
   upstream: UpstreamClient,
   options?: SimpleStreamOptions,
+  trace?: TraceRecorder,
 ): Promise<FullMoaProposal> {
   const route = fullMoaRoute(config.reference, proposer.route);
   const proposerContext = buildProposerContext(config, context, policy, proposer, route);
   const cache = readAdvisorCache(config, proposerContext);
+  const startedAt = Date.now();
   if (cache.hit) {
+    trace?.recordReferenceCall({
+      role: "proposer",
+      id: proposer.id,
+      label: proposer.label,
+      route,
+      context: proposerContext,
+      cacheHit: true,
+      cacheKey: cache.key,
+      cachedText: cache.text,
+      startedAt,
+      endedAt: Date.now(),
+    });
     return {
       id: proposer.id,
       label: proposer.label,
@@ -87,6 +103,18 @@ async function runProposer(
   const message = await upstream.complete(model, proposerContext, streamOptionsForRoute(route, options));
   const text = assistantText(message).trim();
   writeAdvisorCache(config, cache.key, text, message.usage);
+  trace?.recordReferenceCall({
+    role: "proposer",
+    id: proposer.id,
+    label: proposer.label,
+    route,
+    context: proposerContext,
+    message,
+    cacheHit: false,
+    cacheKey: cache.key,
+    startedAt,
+    endedAt: Date.now(),
+  });
   return {
     id: proposer.id,
     label: proposer.label,
@@ -106,11 +134,23 @@ async function runSynthesis(
   proposals: FullMoaProposal[],
   upstream: UpstreamClient,
   options?: SimpleStreamOptions,
+  trace?: TraceRecorder,
 ): Promise<NonNullable<FullMoaResult["synthesis"]>> {
   const route = fullMoaRoute(config.reference, config.fullMoa.synthesis.route);
   const synthesisContext = buildSynthesisContext(config, context, policy, proposals, route);
   const cache = readAdvisorCache(config, synthesisContext);
+  const startedAt = Date.now();
   if (cache.hit) {
+    trace?.recordReferenceCall({
+      role: "synthesizer",
+      route,
+      context: synthesisContext,
+      cacheHit: true,
+      cacheKey: cache.key,
+      cachedText: cache.text,
+      startedAt,
+      endedAt: Date.now(),
+    });
     return {
       text: cache.text,
       usage: undefined,
@@ -125,6 +165,16 @@ async function runSynthesis(
   const message = await upstream.complete(model, synthesisContext, streamOptionsForRoute(route, options));
   const text = assistantText(message).trim();
   writeAdvisorCache(config, cache.key, text, message.usage);
+  trace?.recordReferenceCall({
+    role: "synthesizer",
+    route,
+    context: synthesisContext,
+    message,
+    cacheHit: false,
+    cacheKey: cache.key,
+    startedAt,
+    endedAt: Date.now(),
+  });
   return {
     text,
     usage: message.usage,

@@ -86,6 +86,12 @@ Configuration is project-local at `.pi/gsd-moa.json`.
       "enabled": true,
       "prompt": "Synthesize the proposal bundle into concise guidance for the final acting model. Preserve disagreements and important risks; do not call tools or write patches."
     }
+  },
+  "trace": {
+    "enabled": false,
+    "dir": ".proof/traces",
+    "includeContexts": true,
+    "includeOutputs": true
   }
 }
 ```
@@ -122,6 +128,8 @@ Markers are stripped before upstream model calls.
 
 ## Observability
 
+Tracing is disabled for normal checked-in config. Set `GSD_MOA_TRACE=1` or use `npm run proof:pi` to opt in. When tracing is enabled, provider traces are written to the configured trace dir and linked from `gsd-moa.details.tracePath`. Exposed `thinking` blocks from upstream responses are preserved in trace files.
+
 Final assistant messages include a `gsd-moa.details` diagnostic containing:
 
 - selected mode and requested mode
@@ -141,7 +149,7 @@ Final assistant messages include a `gsd-moa.details` diagnostic containing:
 
 ## Advisor and Full MoA Flows
 
-See [`docs/ADVISOR-MODE.md`](docs/ADVISOR-MODE.md) for advisor mode and [`docs/FULL-MOA.md`](docs/FULL-MOA.md) for full multi-proposer MoA flow diagrams.
+See [`docs/ADVISOR-MODE.md`](docs/ADVISOR-MODE.md) for advisor mode, [`docs/FULL-MOA.md`](docs/FULL-MOA.md) for full multi-proposer MoA flow diagrams, and [`docs/TERMINAL-BENCH.md`](docs/TERMINAL-BENCH.md) for the single-vs-full proof loop.
 
 ## Future Work
 
