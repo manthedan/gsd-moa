@@ -119,7 +119,9 @@ export function loadConfig(path = DEFAULT_CONFIG_PATH, cwd = process.cwd()): Gsd
     primary: mergeRoute(DEFAULT_CONFIG.primary, parsed.primary),
     reference: mergeRoute(DEFAULT_CONFIG.reference, parsed.reference),
     fullMoa: mergeFullMoa(DEFAULT_CONFIG.fullMoa, parsed.fullMoa),
-    aliases: isRecord(parsed.aliases) ? (parsed.aliases as GsdMoaConfig["aliases"]) : DEFAULT_CONFIG.aliases,
+    aliases: isRecord(parsed.aliases)
+      ? { ...DEFAULT_CONFIG.aliases, ...(parsed.aliases as GsdMoaConfig["aliases"]) }
+      : DEFAULT_CONFIG.aliases,
     auto: isRecord(parsed.auto)
       ? {
           ...DEFAULT_CONFIG.auto,

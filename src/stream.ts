@@ -34,7 +34,7 @@ export function streamGsdMoa(
     const upstream = deps.upstream ?? compatUpstreamClient;
     const policy = chooseMode(config, {
       alias: model.id,
-      latestUserText: latestUserText(context),
+      latestUserText: latestUserText(context, true),
       hasToolResults: hasRecentToolResults(context),
     });
 

@@ -1,10 +1,10 @@
 import type { AssistantMessage, Context, Message, TextContent, UserMessage } from "@earendil-works/pi-ai/compat";
 import type { FullMoaResult, PolicyDecision } from "./types.js";
 
-export function latestUserText(context: Context): string {
+export function latestUserText(context: Context, preserveMarkers = false): string {
   for (let i = context.messages.length - 1; i >= 0; i--) {
     const msg = context.messages[i];
-    if (msg.role === "user") return messageText(msg);
+    if (msg.role === "user") return preserveMarkers ? rawMessageText(msg) : messageText(msg);
   }
   return "";
 }
@@ -103,10 +103,14 @@ export function withFullMoaGuidance(context: Context, result: FullMoaResult, pol
 }
 
 export function messageText(message: UserMessage): string {
-  if (typeof message.content === "string") return stripKnownMarkers(message.content);
+  return stripKnownMarkers(rawMessageText(message));
+}
+
+export function rawMessageText(message: UserMessage): string {
+  if (typeof message.content === "string") return message.content;
   return message.content
     .filter((item): item is TextContent => item.type === "text")
-    .map((item) => stripKnownMarkers(item.text))
+    .map((item) => item.text)
     .join("\n");
 }
 

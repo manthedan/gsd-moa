@@ -75,6 +75,37 @@ function tempConfig(): { cfg: GsdMoaConfig; dir: string } {
 }
 
 describe("full MoA orchestration", () => {
+  it("honors full MoA prompt markers through the real streaming entry point", async () => {
+    const { cfg, dir } = tempConfig();
+    try {
+      const context: Context = { messages: [{ role: "user", content: "<!-- gsd-moa:full --> deep review", timestamp: 1 }] };
+      let completeCalls = 0;
+      const upstream: UpstreamClient = {
+        async complete(seenModel, seenContext) {
+          completeCalls++;
+          assert.equal(seenContext.tools, undefined);
+          assert.doesNotMatch(JSON.stringify(seenContext), /gsd-moa:full/);
+          return message(seenModel, `reference-${completeCalls}`, usage(1, 1));
+        },
+        stream(seenModel, seenContext) {
+          assert.equal(seenModel.provider, "factory-codex");
+          assert.match(seenContext.systemPrompt ?? "", /Independent proposals/);
+          return streamText(seenModel, "final", usage(1, 1));
+        },
+      };
+
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-single"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      assert.equal(done.type, "done");
+      assert.equal(completeCalls, cfg.fullMoa.proposers.length + 1);
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.mode, "full_moa");
+      assert.equal(details.reason, "explicit full MoA marker");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("runs multiple tool-less proposers, a tool-less synthesis layer, then one tool-capable primary call", async () => {
     const { cfg, dir } = tempConfig();
     try {

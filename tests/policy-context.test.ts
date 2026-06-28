@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { Context } from "@earendil-works/pi-ai/compat";
-import { DEFAULT_CONFIG, validateConfig } from "../src/config.ts";
+import { DEFAULT_CONFIG, loadConfig, validateConfig } from "../src/config.ts";
 import { hasRecentToolResults, latestUserText, sanitizeReferenceContext } from "../src/context.ts";
 import { chooseMode, stripMoaMarkers } from "../src/policy.ts";
 
@@ -31,6 +34,23 @@ describe("mode policy", () => {
 
   it("rejects recursive upstream routes", () => {
     assert.throws(() => validateConfig({ ...DEFAULT_CONFIG, primary: { provider: "gsd-moa", model: "x" } }), /recursion guard/);
+  });
+
+  it("merges project aliases with new default aliases", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gsd-moa-config-test-"));
+    try {
+      writeFileSync(join(dir, "gsd-moa.json"), JSON.stringify({
+        aliases: {
+          "gpt55-glm52-single": { mode: "single" },
+          "gpt55-glm52-advisor": { mode: "advisor" },
+          "gpt55-glm52-auto": { mode: "auto" },
+        },
+      }));
+      const cfg = loadConfig("gsd-moa.json", dir);
+      assert.equal(cfg.aliases["gpt55-glm52-full"]?.mode, "full_moa");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
