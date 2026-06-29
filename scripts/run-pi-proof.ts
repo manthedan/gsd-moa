@@ -91,7 +91,8 @@ async function preflight(models: string[]): Promise<void> {
   if (needsCliproxy && !process.env.CLIPROXY_API_KEY) {
     throw new Error("CLIPROXY_API_KEY is required for Gemini/CLIProxyAPI Codex routes. Export it or pass --skip-preflight if your config does not use it.");
   }
-  if (needsFactory || needsCliproxy) await checkTcp("127.0.0.1", 8317, "local OpenAI-compatible proxy http://127.0.0.1:8317/v1");
+  if (needsFactory) await checkTcp("127.0.0.1", 8317, "Factory GPT proxy http://127.0.0.1:8317/v1");
+  if (needsCliproxy) await checkTcp("127.0.0.1", 8318, "CLIProxyAPI http://127.0.0.1:8318/v1");
 }
 
 function checkTcp(host: string, port: number, label: string): Promise<void> {

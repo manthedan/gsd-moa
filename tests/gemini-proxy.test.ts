@@ -7,11 +7,11 @@ describe("Gemini Flash proxy preset", () => {
   it("applies the Gemini Flash preset for Gemini alias ids", () => {
     const cfg = applyModelPreset(structuredClone(DEFAULT_CONFIG), "gpt55-gemini35flash-advisor");
     assert.equal(cfg.reference.provider, "antigravity");
-    assert.equal(cfg.reference.model, "gemini-3.5-flash");
+    assert.equal(cfg.reference.model, "gemini-3-flash");
     assert.equal(cfg.reference.api, "openai-completions");
-    assert.equal(cfg.reference.baseUrl, "http://127.0.0.1:8317/v1");
+    assert.equal(cfg.reference.baseUrl, "http://127.0.0.1:8318/v1");
     const specialist = cfg.fullMoa.proposers.find((proposer) => proposer.id === "gemini35flash");
-    assert.equal(specialist?.modelRef, "antigravity/gemini-3.5-flash");
+    assert.equal(specialist?.modelRef, "antigravity/gemini-3-flash");
     assert.equal(specialist?.routePreset, "cliproxyapi");
     assert.deepEqual(specialist?.when?.anyCapability, ["image", "video", "audio"]);
     const claude = cfg.fullMoa.proposers.find((proposer) => proposer.id === "claude46");
@@ -33,13 +33,13 @@ describe("Gemini Flash proxy preset", () => {
     assert.ok(gemini);
     assert.equal(gemini.enabled, true);
     assert.equal(gemini.when, undefined);
-    assert.equal(gemini.modelRef, "antigravity/gemini-3.5-flash");
+    assert.equal(gemini.modelRef, "antigravity/gemini-3-flash");
     assert.equal(gemini.routePreset, "cliproxyapi");
 
     const geminiRoute = resolveProposerRoute(cfg.reference, gemini, cfg.routePresets);
     assert.equal(geminiRoute.provider, "antigravity");
-    assert.equal(geminiRoute.model, "gemini-3.5-flash");
-    assert.equal(geminiRoute.baseUrl, "http://127.0.0.1:8317/v1");
+    assert.equal(geminiRoute.model, "gemini-3-flash");
+    assert.equal(geminiRoute.baseUrl, "http://127.0.0.1:8318/v1");
   });
 
   it("keeps partial overrides on inherited GLM references pinned to GLM", () => {

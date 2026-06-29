@@ -22,6 +22,8 @@ Configure with environment variables passed to Harbor/the task container:
   PI_GSD_MOA_ENV_FILE=/workspace/gsd-moa/.proof/gsd-moa.env  # preferred for secrets
   PI_GSD_MOA_THINKING_LEVEL=high
   GSD_MOA_PRIMARY_BASE_URL=http://host.docker.internal:8317/v1
+  GSD_MOA_GEMINI_BASE_URL=http://host.docker.internal:8318/v1
+  GSD_MOA_CODEX_BASE_URL=http://host.docker.internal:8318/v1
 
 Legacy quick-run fallback, only when PI_GSD_MOA_ENV_FILE is not set:
   FACTORY_GPT_API_KEY=...  # may appear in Harbor/docker exec argv
@@ -152,6 +154,8 @@ class PiGsdMoaAgent(BaseInstalledAgent):
         env.setdefault("GSD_MOA_TRACE", "1")
         env.setdefault("GSD_MOA_TRACE_DIR", f"{out_dir}/traces")
         env.setdefault("GSD_MOA_PRIMARY_BASE_URL", "http://host.docker.internal:8317/v1")
+        env.setdefault("GSD_MOA_GEMINI_BASE_URL", "http://host.docker.internal:8318/v1")
+        env.setdefault("GSD_MOA_CODEX_BASE_URL", "http://host.docker.internal:8318/v1")
         return env
 
     async def _prepare_secret_env(self, environment: BaseEnvironment, secret_env_file: str) -> str:

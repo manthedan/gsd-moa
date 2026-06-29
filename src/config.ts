@@ -44,7 +44,7 @@ export const DEFAULT_ROUTE_PRESETS: GsdMoaConfig["routePresets"] = {
   },
   cliproxyapi: {
     api: "openai-completions",
-    baseUrl: "http://127.0.0.1:8317/v1",
+    baseUrl: "http://127.0.0.1:8318/v1",
     apiKey: "$CLIPROXY_API_KEY",
     compat: {
       supportsDeveloperRole: false,
@@ -53,7 +53,7 @@ export const DEFAULT_ROUTE_PRESETS: GsdMoaConfig["routePresets"] = {
   },
   "cliproxyapi-codex": {
     api: "openai-completions",
-    baseUrl: "http://127.0.0.1:8317/v1",
+    baseUrl: "http://127.0.0.1:8318/v1",
     apiKey: "$CLIPROXY_API_KEY",
     compat: {
       supportsDeveloperRole: false,

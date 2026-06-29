@@ -30,8 +30,8 @@ The current config splits model identity from route details with `modelRef` + `r
 {
   "routePresets": {
     "factory-codex-local": { "baseUrl": "http://127.0.0.1:8317/v1", "apiKey": "$FACTORY_GPT_API_KEY" },
-    "cliproxyapi": { "baseUrl": "http://127.0.0.1:8317/v1", "apiKey": "$CLIPROXY_API_KEY" },
-    "cliproxyapi-codex": { "baseUrl": "http://127.0.0.1:8317/v1", "apiKey": "$CLIPROXY_API_KEY" }
+    "cliproxyapi": { "baseUrl": "http://127.0.0.1:8318/v1", "apiKey": "$CLIPROXY_API_KEY" },
+    "cliproxyapi-codex": { "baseUrl": "http://127.0.0.1:8318/v1", "apiKey": "$CLIPROXY_API_KEY" }
   },
   "primary": { "provider": "factory-codex", "model": "gpt-5.5" },
   "fullMoa": {
@@ -50,7 +50,7 @@ The current config splits model identity from route details with `modelRef` + `r
       {
         "id": "gemini-multimodal",
         "label": "Gemini multimodal reference",
-        "modelRef": "antigravity/gemini-3.5-flash"
+        "modelRef": "antigravity/gemini-3-flash"
         "routePreset": "cliproxyapi",
         "when": {
           "anyCapability": ["image", "video", "audio"],

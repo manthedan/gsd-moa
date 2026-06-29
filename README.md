@@ -124,7 +124,7 @@ To route GPT/Codex calls through CLIProxyAPI instead of Factory, select one of t
 
 ```bash
 export GSD_MOA_CODEX_MODEL=gpt-5.5
-export GSD_MOA_CODEX_BASE_URL=http://127.0.0.1:8317/v1
+export GSD_MOA_CODEX_BASE_URL=http://127.0.0.1:8318/v1
 export CLIPROXY_API_KEY=your-cli-proxy-api-key
 ```
 
@@ -145,7 +145,7 @@ Full-MoA proposers can now be unconditional references or conditional specialist
       {
         "id": "gemini35flash",
         "label": "Gemini multimodal specialist",
-        "modelRef": "antigravity/gemini-3.5-flash",
+        "modelRef": "antigravity/gemini-3-flash",
         "routePreset": "cliproxyapi",
         "route": { "maxTokens": 65536 },
         "when": {
@@ -192,19 +192,19 @@ brew install cliproxyapi
 # One-time Antigravity OAuth login. The local callback uses port 51121.
 cliproxyapi --antigravity-login
 
-# Run the local proxy. Default endpoint is http://127.0.0.1:8317/v1.
+# Run the local proxy. Default endpoint is http://127.0.0.1:8318/v1 in this repo setup.
 cliproxyapi
 
 # If your CLIProxyAPI config uses api-keys, export one before launching Pi.
 export CLIPROXY_API_KEY=your-cli-proxy-api-key
 
 # In another shell, confirm which Gemini model id the proxy exposes.
-curl -s http://127.0.0.1:8317/v1/models \
+curl -s http://127.0.0.1:8318/v1/models \
   ${CLIPROXY_API_KEY:+-H "Authorization: Bearer $CLIPROXY_API_KEY"} | jq '.data[].id'
 
 # The preset defaults to the Antigravity model id seen in current CLIProxyAPI installs.
-export GSD_MOA_GEMINI_MODEL=gemini-3.5-flash
-export GSD_MOA_GEMINI_BASE_URL=http://127.0.0.1:8317/v1
+export GSD_MOA_GEMINI_MODEL=gemini-3-flash
+export GSD_MOA_GEMINI_BASE_URL=http://127.0.0.1:8318/v1
 
 # Then select one of the Gemini aliases in Pi.
 /model gpt55-gemini35flash-advisor --provider gsd-moa
@@ -213,7 +213,7 @@ export GSD_MOA_GEMINI_BASE_URL=http://127.0.0.1:8317/v1
 Notes:
 
 - A Google AI Pro/Ultra subscription is not the same thing as Gemini API billing. Direct API-key use should configure a normal `google` route with `api: "google-generative-ai"` and `apiKey: "$GEMINI_API_KEY"`.
-- The subscription-oriented aliases point at CLIProxyAPI's local OpenAI-compatible server. The default Antigravity model id is `gemini-3.5-flash`; set `GSD_MOA_GEMINI_MODEL` if `/v1/models` reports a different id or if you intentionally want a lower/higher tier exposed by your proxy.
+- The subscription-oriented aliases point at CLIProxyAPI's local OpenAI-compatible server. The default Antigravity model id is `gemini-3-flash`; set `GSD_MOA_GEMINI_MODEL` if `/v1/models` reports a different id or if you intentionally want a lower/higher tier exposed by your proxy.
 - Advisor mode uses Gemini directly as the private reference. Full-MoA mode keeps the normal GLM-5.2 + GPT-5.5 portfolio and adds Gemini only when the request looks multimodal/video/OCR/transcription-related. The final acting call remains GPT-5.5 through Pi, so normal Pi tools stay single-writer.
 - If you configure CLIProxyAPI with a non-default API key, export `CLIPROXY_API_KEY` before launching Pi.
 

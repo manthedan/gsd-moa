@@ -1,9 +1,9 @@
 import { mergeUpstreamRoute } from "./config.js";
 import type { FullMoaProposerConfig, GsdMoaConfig, UpstreamRoute } from "./types.js";
 
-const DEFAULT_CLIPROXY_BASE_URL = "http://127.0.0.1:8317/v1";
+const DEFAULT_CLIPROXY_BASE_URL = "http://127.0.0.1:8318/v1";
 const DEFAULT_CODEX_MODEL = "gpt-5.5";
-const DEFAULT_GEMINI_FLASH_MODEL = "gemini-3.5-flash";
+const DEFAULT_GEMINI_FLASH_MODEL = "gemini-3-flash";
 const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6";
 
 const CLIPROXY_ROUTE_PRESET: Partial<UpstreamRoute> = {

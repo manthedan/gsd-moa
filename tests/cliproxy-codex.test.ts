@@ -10,7 +10,7 @@ describe("CLIProxyAPI Codex preset", () => {
     assert.equal(cfg.primary.provider, "openai-codex");
     assert.equal(cfg.primary.model, "gpt-5.5");
     assert.equal(cfg.primary.api, "openai-completions");
-    assert.equal(cfg.primary.baseUrl, "http://127.0.0.1:8317/v1");
+    assert.equal(cfg.primary.baseUrl, "http://127.0.0.1:8318/v1");
     assert.equal(cfg.primary.apiKey, "$CLIPROXY_API_KEY");
 
     const glm = cfg.fullMoa.proposers.find((proposer) => proposer.id === "glm52");
@@ -26,13 +26,13 @@ describe("CLIProxyAPI Codex preset", () => {
     const gptRoute = resolveProposerRoute(cfg.reference, gpt, cfg.routePresets);
     assert.equal(gptRoute.provider, "openai-codex");
     assert.equal(gptRoute.model, "gpt-5.5");
-    assert.equal(gptRoute.baseUrl, "http://127.0.0.1:8317/v1");
+    assert.equal(gptRoute.baseUrl, "http://127.0.0.1:8318/v1");
     assert.equal(gptRoute.apiKey, "$CLIPROXY_API_KEY");
 
     const synthesisRoute = resolveSynthesisRoute(cfg.reference, cfg.fullMoa.synthesis, cfg.routePresets);
     assert.equal(synthesisRoute.provider, "openai-codex");
     assert.equal(synthesisRoute.model, "gpt-5.5");
-    assert.equal(synthesisRoute.baseUrl, "http://127.0.0.1:8317/v1");
+    assert.equal(synthesisRoute.baseUrl, "http://127.0.0.1:8318/v1");
   });
 
   it("honors local Codex model and endpoint overrides", () => {
@@ -75,7 +75,7 @@ describe("CLIProxyAPI Codex preset", () => {
     const cfg = applyModelPreset(base, "gpt55-cliproxycodex-full");
     const routed = resolveProposerRoute(cfg.reference, cfg.fullMoa.proposers.find((proposer) => proposer.id === "gpt55")!, cfg.routePresets);
     assert.equal(routed.provider, "openai-codex");
-    assert.equal(routed.baseUrl, "http://127.0.0.1:8317/v1");
+    assert.equal(routed.baseUrl, "http://127.0.0.1:8318/v1");
     assert.equal(routed.apiKey, "$CLIPROXY_API_KEY");
     assert.equal(routed.maxTokens, 4096);
   });
