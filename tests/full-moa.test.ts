@@ -107,6 +107,118 @@ describe("full MoA orchestration", () => {
     }
   });
 
+  it("skips conditional Gemini specialists for routine coding prompts", async () => {
+    const { cfg, dir } = tempConfig();
+    try {
+      const context: Context = { messages: [{ role: "user", content: "<!-- gsd-moa:full --> review this TypeScript module", timestamp: 1 }] };
+      const completeProviders: string[] = [];
+      const upstream: UpstreamClient = {
+        async complete(seenModel) {
+          completeProviders.push(seenModel.provider);
+          return message(seenModel, `reference-${completeProviders.length}`, usage(1, 1));
+        },
+        stream(seenModel) { return streamText(seenModel, "final", usage(1, 1)); },
+      };
+
+      const events = await collect(streamGsdMoa(model("gpt55-gemini35flash-full"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      assert.deepEqual(completeProviders, ["zai", "factory-codex", "factory-codex"]);
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.portfolio.find((p: any) => p.id === "gemini35flash")?.selected, false);
+      assert.equal(details.portfolio.find((p: any) => p.id === "claude46")?.selected, false);
+      assert.equal(details.portfolio.find((p: any) => p.id === "claude46")?.reason, "disabled");
+      assert.equal(details.innerCalls.some((call: any) => call.provider === "antigravity"), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not select Gemini on OCR substrings inside unrelated words", async () => {
+    const { cfg, dir } = tempConfig();
+    try {
+      const context: Context = { messages: [{ role: "user", content: "<!-- gsd-moa:full --> review the democracy-related data model", timestamp: 1 }] };
+      const completeProviders: string[] = [];
+      const upstream: UpstreamClient = {
+        async complete(seenModel) {
+          completeProviders.push(seenModel.provider);
+          return message(seenModel, `reference-${completeProviders.length}`, usage(1, 1));
+        },
+        stream(seenModel) { return streamText(seenModel, "final", usage(1, 1)); },
+      };
+
+      const events = await collect(streamGsdMoa(model("gpt55-gemini35flash-full"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      assert.deepEqual(completeProviders, ["zai", "factory-codex", "factory-codex"]);
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.portfolio.find((p: any) => p.id === "gemini35flash")?.selected, false);
+      assert.equal(details.portfolio.find((p: any) => p.id === "gemini35flash")?.reason, "conditional predicates did not match");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves image blocks for selected image-capable specialists", async () => {
+    const { cfg, dir } = tempConfig();
+    try {
+      const context: Context = {
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: "<!-- gsd-moa:full --> analyze this screenshot" },
+            { type: "image", data: "aW1hZ2U=", mimeType: "image/png" } as any,
+          ],
+          timestamp: 1,
+        }],
+      };
+      let geminiSawImage = false;
+      const textOnlyProvidersWithImage: string[] = [];
+      const upstream: UpstreamClient = {
+        async complete(seenModel, seenContext) {
+          const sawImage = JSON.stringify(seenContext.messages).includes('"type":"image"');
+          if (seenModel.provider === "antigravity") geminiSawImage = sawImage;
+          if (!seenModel.input.includes("image") && sawImage) textOnlyProvidersWithImage.push(seenModel.provider);
+          return message(seenModel, "reference", usage(1, 1));
+        },
+        stream(seenModel) { return streamText(seenModel, "final", usage(1, 1)); },
+      };
+
+      await collect(streamGsdMoa(model("gpt55-gemini35flash-full"), context, undefined, { config: cfg, upstream }));
+      assert.equal(geminiSawImage, true);
+      assert.deepEqual(textOnlyProvidersWithImage, []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("includes conditional Gemini specialists for multimodal prompts", async () => {
+    const { cfg, dir } = tempConfig();
+    try {
+      const context: Context = { messages: [{ role: "user", content: "<!-- gsd-moa:full --> transcribe this YouTube video and extract terminal moves", timestamp: 1 }] };
+      const completeProviders: string[] = [];
+      const upstream: UpstreamClient = {
+        async complete(seenModel, seenContext) {
+          completeProviders.push(seenModel.provider);
+          if (seenModel.provider === "antigravity") {
+            assert.match(seenContext.systemPrompt ?? "", /Portfolio selection: keyword: youtube|Portfolio selection: capability: video/i);
+          }
+          return message(seenModel, `reference-${completeProviders.length}`, usage(1, 1));
+        },
+        stream(seenModel) { return streamText(seenModel, "final", usage(1, 1)); },
+      };
+
+      const events = await collect(streamGsdMoa(model("gpt55-gemini35flash-full"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      assert.deepEqual(completeProviders, ["zai", "factory-codex", "antigravity", "factory-codex"]);
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.portfolio.find((p: any) => p.id === "gemini35flash")?.selected, true);
+      assert.equal(details.portfolio.find((p: any) => p.id === "claude46")?.selected, false);
+      assert.equal(details.portfolio.find((p: any) => p.id === "claude46")?.reason, "disabled");
+      assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("reuses reference and synthesis cache on identical repeated requests", async () => {
     const { cfg, dir } = tempConfig();
     try {

@@ -13,17 +13,18 @@ export function hasRecentToolResults(context: Context): boolean {
   return context.messages.slice(-4).some((m) => m.role === "toolResult");
 }
 
-export function sanitizeReferenceContext(context: Context, decision?: PolicyDecision): Context {
+export interface ReferenceSanitizeOptions {
+  preserveImages?: boolean;
+}
+
+export function sanitizeReferenceContext(context: Context, decision?: PolicyDecision, options: ReferenceSanitizeOptions = {}): Context {
   const messages: Message[] = [];
 
   for (const msg of context.messages) {
     if (msg.role === "toolResult") continue;
     if (msg.role === "user") {
-      const content = messageText(msg);
-      const text = decision ? stripKnownMarkers(content) : content;
-      if (text.trim()) {
-        messages.push({ role: "user", content: text, timestamp: msg.timestamp } satisfies UserMessage);
-      }
+      const content = sanitizeUserContent(msg, decision, options);
+      if (content !== undefined) messages.push({ role: "user", content, timestamp: msg.timestamp } satisfies UserMessage);
       continue;
     }
     if (msg.role === "assistant") {
@@ -46,6 +47,21 @@ export function sanitizeReferenceContext(context: Context, decision?: PolicyDeci
   return { messages };
 }
 
+function sanitizeUserContent(message: UserMessage, _decision?: PolicyDecision, options: ReferenceSanitizeOptions = {}): UserMessage["content"] | undefined {
+  if (typeof message.content === "string") {
+    const text = stripKnownMarkers(message.content);
+    return text.trim() ? text : undefined;
+  }
+  const content = message.content
+    .map((item) => {
+      if (item.type === "text") return { ...item, text: stripKnownMarkers(item.text) } satisfies TextContent;
+      if (options.preserveImages && item.type === "image") return item;
+      return undefined;
+    })
+    .filter((item): item is Exclude<typeof item, undefined> => item !== undefined && (item.type !== "text" || Boolean(item.text.trim())));
+  return content.length ? content as UserMessage["content"] : undefined;
+}
+
 export function stripMarkersFromContext(context: Context): Context {
   return {
     ...context,
@@ -66,7 +82,7 @@ export function stripMarkersFromContext(context: Context): Context {
 
 export function withAdvisorGuidance(context: Context, guidance: string, policy: PolicyDecision): Context {
   const advice = [
-    "Private advisor guidance from GLM-5.2. Use it as optional critique; do not mention it unless useful.",
+    "Private advisor guidance from the configured reference model. Use it as optional critique; do not mention it unless useful.",
     `Routing: requested=${policy.requestedMode}, selected=${policy.mode}, reason=${policy.reason}.`,
     "Guidance:",
     guidance.trim(),

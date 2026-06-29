@@ -16,12 +16,13 @@ export default function gsdMoaExtension(pi: ExtensionAPI) {
 
 export { runAdvisor, buildAdvisorContext } from "./advisor.js";
 export { advisorCacheKey, readAdvisorCache, writeAdvisorCache } from "./cache.js";
-export { loadConfig, mergeUpstreamRoute, validateConfig } from "./config.js";
+export { loadConfig, mergeUpstreamRoute, parseModelRef, resolveProposerRoute, resolveSynthesisRoute, validateConfig } from "./config.js";
 export { sanitizeReferenceContext, withAdvisorGuidance, withFullMoaGuidance } from "./context.js";
-export { buildProposerContext, buildSynthesisContext, runFullMoa } from "./moa.js";
+export { buildProposerContext, buildSynthesisContext, runFullMoa, selectPortfolio } from "./moa.js";
 export { GSD_MOA_MODELS, GSD_MOA_MODEL_IDS } from "./models.js";
 export { chooseMode, stripMoaMarkers } from "./policy.js";
+export { applyModelPreset } from "./presets.js";
 export { streamGsdMoa } from "./stream.js";
 export { createTraceRecorder } from "./trace.js";
 export { PROVIDER_ID } from "./types.js";
-export type { FullMoaProposal, FullMoaResult, GsdMoaConfig, MoaMode, PolicyDecision, TraceConfig, UpstreamRoute } from "./types.js";
+export type { FullMoaProposal, FullMoaResult, GsdMoaConfig, ModelRef, MoaMode, PolicyDecision, PortfolioDecision, ReferenceWhenConfig, TraceConfig, UpstreamRoute } from "./types.js";

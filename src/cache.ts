@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { Context, Usage } from "@earendil-works/pi-ai/compat";
+import type { Context, Usage, UserMessage } from "@earendil-works/pi-ai/compat";
 import { assistantText, messageText } from "./context.js";
 import type { GsdMoaConfig } from "./types.js";
 
@@ -105,11 +105,24 @@ function cachePath(config: GsdMoaConfig, key: string, cwd: string): string {
   return join(resolve(cwd, config.cache.dir), `${key}.json`);
 }
 
+function normalizeUserMessage(message: UserMessage): string {
+  if (typeof message.content === "string") return messageText(message);
+  return message.content.map((item) => {
+    if (item.type === "text") return item.text;
+    if (item.type === "image") {
+      const data = "data" in item ? String(item.data) : "";
+      const digest = createHash("sha256").update(data).digest("hex").slice(0, 24);
+      return `[image:${item.mimeType ?? "unknown"}:${digest}]`;
+    }
+    return "[content]";
+  }).join("\n");
+}
+
 function normalizeContext(context: Context): string {
   return [context.systemPrompt ? `system:${context.systemPrompt}` : "", context.messages
     .slice(-12)
     .map((msg) => {
-      if (msg.role === "user") return `user:${messageText(msg)}`;
+      if (msg.role === "user") return `user:${normalizeUserMessage(msg)}`;
       if (msg.role === "assistant") return `assistant:${assistantText(msg)}`;
       return `tool:${msg.toolName}:${msg.content.map((c) => (c.type === "text" ? c.text : "[image]")).join("\n")}`;
     })
