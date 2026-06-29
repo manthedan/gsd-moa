@@ -107,6 +107,7 @@ function claudeSpecialist(): FullMoaProposerConfig {
 
 export function applyModelPreset(config: GsdMoaConfig, alias: string): GsdMoaConfig {
   let cfg = alias.startsWith("gpt55-cliproxycodex-") ? applyCliproxyCodexPreset(config) : config;
+  if (alias.startsWith("gpt55-cliproxycodex-glm52-gemini35flash-")) return applyUnconditionalGeminiPreset(cfg);
   if (alias.startsWith("gpt55-glm52-gemini35flash-")) return applyUnconditionalGeminiPreset(cfg);
   if (!alias.startsWith("gpt55-gemini35flash-")) return cfg;
 

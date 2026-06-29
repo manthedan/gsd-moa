@@ -14,6 +14,7 @@ export const GSD_MOA_MODEL_IDS = [
   "gpt55-cliproxycodex-advisor",
   "gpt55-cliproxycodex-full",
   "gpt55-cliproxycodex-auto",
+  "gpt55-cliproxycodex-glm52-gemini35flash-full",
 ] as const;
 
 export type GsdMoaModelId = (typeof GSD_MOA_MODEL_IDS)[number];
@@ -130,6 +131,15 @@ export const GSD_MOA_MODELS: ProviderModelConfig[] = [
   {
     id: "gpt55-cliproxycodex-auto",
     name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (Auto)",
+    reasoning: true,
+    input: ["text", "image"],
+    cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
+    contextWindow: 272000,
+    maxTokens: 128000,
+  },
+  {
+    id: "gpt55-cliproxycodex-glm52-gemini35flash-full",
+    name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 + Gemini Flash (Full MoA)",
     reasoning: true,
     input: ["text", "image"],
     cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },

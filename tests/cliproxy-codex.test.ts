@@ -35,6 +35,41 @@ describe("CLIProxyAPI Codex preset", () => {
     assert.equal(synthesisRoute.baseUrl, "http://127.0.0.1:8318/v1");
   });
 
+  it("can combine CLIProxy Codex GPT with GLM and unconditional Gemini", () => {
+    const cfg = applyModelPreset(structuredClone(DEFAULT_CONFIG), "gpt55-cliproxycodex-glm52-gemini35flash-full");
+
+    assert.equal(cfg.primary.provider, "openai-codex");
+    assert.equal(cfg.primary.model, "gpt-5.5");
+    assert.equal(cfg.primary.baseUrl, "http://127.0.0.1:8318/v1");
+
+    const glm = cfg.fullMoa.proposers.find((proposer) => proposer.id === "glm52");
+    const gpt = cfg.fullMoa.proposers.find((proposer) => proposer.id === "gpt55");
+    const gemini = cfg.fullMoa.proposers.find((proposer) => proposer.id === "gemini35flash");
+    assert.ok(glm);
+    assert.ok(gpt);
+    assert.ok(gemini);
+
+    const glmRoute = resolveProposerRoute(cfg.reference, glm, cfg.routePresets);
+    assert.equal(glmRoute.provider, "zai");
+    assert.equal(glmRoute.model, "glm-5.2");
+
+    const gptRoute = resolveProposerRoute(cfg.reference, gpt, cfg.routePresets);
+    assert.equal(gptRoute.provider, "openai-codex");
+    assert.equal(gptRoute.model, "gpt-5.5");
+    assert.equal(gptRoute.baseUrl, "http://127.0.0.1:8318/v1");
+
+    assert.equal(gemini.enabled, true);
+    assert.equal(gemini.when, undefined);
+    const geminiRoute = resolveProposerRoute(cfg.reference, gemini, cfg.routePresets);
+    assert.equal(geminiRoute.provider, "antigravity");
+    assert.equal(geminiRoute.model, "gemini-3-flash");
+    assert.equal(geminiRoute.baseUrl, "http://127.0.0.1:8318/v1");
+
+    const synthesisRoute = resolveSynthesisRoute(cfg.reference, cfg.fullMoa.synthesis, cfg.routePresets);
+    assert.equal(synthesisRoute.provider, "openai-codex");
+    assert.equal(synthesisRoute.baseUrl, "http://127.0.0.1:8318/v1");
+  });
+
   it("honors local Codex model and endpoint overrides", () => {
     const oldModel = process.env.GSD_MOA_CODEX_MODEL;
     const oldBaseUrl = process.env.GSD_MOA_CODEX_BASE_URL;

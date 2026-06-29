@@ -23,6 +23,7 @@ Use provider `gsd-moa` with one of these model ids:
 | `gpt55-cliproxycodex-advisor` | GLM-5.2 advisor plus final GPT-5.5 acting call through CLIProxyAPI Codex. |
 | `gpt55-cliproxycodex-full` | GLM-5.2 + GPT-5.5 full-MoA where GPT reference, synthesis, and final actor use CLIProxyAPI Codex. |
 | `gpt55-cliproxycodex-auto` | Same deterministic routing policy as `auto`, with GPT/Codex calls routed through CLIProxyAPI. |
+| `gpt55-cliproxycodex-glm52-gemini35flash-full` | GLM-5.2 direct Z.ai + GPT-5.5 via CLIProxyAPI Codex + Gemini Flash via CLIProxyAPI as unconditional full-MoA references. Avoids Factory for GPT calls. |
 
 ## Local Installation
 

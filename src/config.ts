@@ -103,6 +103,7 @@ export const DEFAULT_CONFIG: GsdMoaConfig = {
     "gpt55-cliproxycodex-advisor": { mode: "advisor" },
     "gpt55-cliproxycodex-full": { mode: "full_moa" },
     "gpt55-cliproxycodex-auto": { mode: "auto" },
+    "gpt55-cliproxycodex-glm52-gemini35flash-full": { mode: "full_moa" },
   },
   auto: {
     defaultMode: "single",
