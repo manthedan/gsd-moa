@@ -140,6 +140,10 @@ harbor run ...
 
 The repo mount already maps local `.proof/gsd-moa.env` to `/workspace/gsd-moa/.proof/gsd-moa.env`; `.proof/` is gitignored. The Harbor agent copies this file inside the task container, changes ownership to the agent user, and keeps it owner-readable only before sourcing it, so host-side `0600` permissions are okay even when the container agent UID differs from the host UID.
 
+## Current results
+
+See [`TERMINAL-BENCH-RESULTS.md`](TERMINAL-BENCH-RESULTS.md) for the current A/B evidence snapshot. As of 2026-06-28, the strongest non-multimodal MoA wins are `torch-tensor-parallelism` and `overfull-hbox`: single GPT-5.5 failed both one-trial runs, while current Hermes-aligned full-MoA passed both.
+
 ## Evaluation loop
 
 See [`EVALUATION.md`](EVALUATION.md) for the human rubric and current sanitized evidence snapshot.
