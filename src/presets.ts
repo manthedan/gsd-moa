@@ -5,6 +5,7 @@ const DEFAULT_CLIPROXY_BASE_URL = "http://127.0.0.1:8318/v1";
 const DEFAULT_CODEX_MODEL = "gpt-5.5";
 const DEFAULT_GEMINI_FLASH_MODEL = "gemini-3-flash";
 const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6";
+const DEFAULT_CLAUDE_OPUS_MODEL = "claude-opus-4-8";
 
 const CLIPROXY_ROUTE_PRESET: Partial<UpstreamRoute> = {
   api: "openai-completions",
@@ -56,6 +57,10 @@ function claudeModelRef(): string {
   return `antigravity/${process.env.GSD_MOA_CLAUDE_MODEL || DEFAULT_CLAUDE_MODEL}`;
 }
 
+function claudeOpusModelRef(): string {
+  return `antigravity/${process.env.GSD_MOA_CLAUDE_OPUS_MODEL || process.env.GSD_MOA_CLAUDE_MODEL || DEFAULT_CLAUDE_OPUS_MODEL}`;
+}
+
 function geminiReferenceRoute(cfg: GsdMoaConfig): UpstreamRoute {
   return mergeUpstreamRoute(
     mergeUpstreamRoute({ provider: "antigravity", model: process.env.GSD_MOA_GEMINI_MODEL || DEFAULT_GEMINI_FLASH_MODEL }, cfg.routePresets.cliproxyapi),
@@ -105,8 +110,23 @@ function claudeSpecialist(): FullMoaProposerConfig {
   };
 }
 
+function claudeOpusUnconditionalReference(): FullMoaProposerConfig {
+  return {
+    id: "claudeopus48",
+    label: "Claude Opus 4.8 reference via CLIProxyAPI Antigravity OAuth",
+    enabled: true,
+    modelRef: claudeOpusModelRef(),
+    routePreset: "cliproxyapi",
+    route: {
+      ...CLAUDE_METADATA,
+      ...(process.env.GSD_MOA_CLAUDE_BASE_URL ? { baseUrl: process.env.GSD_MOA_CLAUDE_BASE_URL } : {}),
+    },
+  };
+}
+
 export function applyModelPreset(config: GsdMoaConfig, alias: string): GsdMoaConfig {
   let cfg = alias.startsWith("gpt55-cliproxycodex-") ? applyCliproxyCodexPreset(config) : config;
+  if (alias.startsWith("gpt55-cliproxycodex-glm52-claudeopus48-")) return applyUnconditionalClaudeOpusPreset(cfg);
   if (alias.startsWith("gpt55-cliproxycodex-glm52-gemini35flash-")) return applyUnconditionalGeminiPreset(cfg);
   if (alias.startsWith("gpt55-glm52-gemini35flash-")) return applyUnconditionalGeminiPreset(cfg);
   if (!alias.startsWith("gpt55-gemini35flash-")) return cfg;
@@ -152,6 +172,28 @@ function applyUnconditionalGeminiPreset(config: GsdMoaConfig): GsdMoaConfig {
   if (gemini) {
     gemini.enabled = true;
     gemini.when = undefined;
+  }
+
+  return cfg;
+}
+
+function applyUnconditionalClaudeOpusPreset(config: GsdMoaConfig): GsdMoaConfig {
+  const cfg = structuredClone(config);
+  cfg.routePresets.cliproxyapi = {
+    ...CLIPROXY_ROUTE_PRESET,
+    ...(cfg.routePresets.cliproxyapi ?? {}),
+    ...(process.env.GSD_MOA_CLAUDE_BASE_URL ? { baseUrl: process.env.GSD_MOA_CLAUDE_BASE_URL } : {}),
+  };
+
+  const existingClaude = cfg.fullMoa.proposers.find((proposer) => proposer.id === "claudeopus48");
+  cfg.fullMoa.proposers = [
+    ...cfg.fullMoa.proposers.filter((proposer) => proposer.id !== "gemini35flash" && proposer.id !== "claudeopus48"),
+    mergePresetSpecialist(claudeOpusUnconditionalReference(), existingClaude),
+  ];
+  const claude = cfg.fullMoa.proposers.find((proposer) => proposer.id === "claudeopus48");
+  if (claude) {
+    claude.enabled = true;
+    claude.when = undefined;
   }
 
   return cfg;
