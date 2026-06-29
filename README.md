@@ -1,33 +1,111 @@
-# pi-gsd-moa
+# gsd-moa
 
-Hermes-inspired MoA/advisor/router provider for upstream Pi and Pi-derived GSD workflows.
+A Pi custom provider for running GPT-5.5 normally, with optional Mixture-of-Agents support from GLM-5.2, Gemini, Claude, and other private reference models.
 
-`pi-gsd-moa` registers a Pi custom provider named `gsd-moa`. The provider lets Pi select a normal model id while the provider decides whether to run a cheap single-writer primary call, a private GLM advisor pass, or a Hermes-style tool-less reference-model MoA layer before the final GPT acting call.
+`gsd-moa` is designed for Pi and GSD-style coding workflows where most turns should stay fast and single-model, but harder turns benefit from private second opinions before the final acting model uses tools.
 
-## Model Aliases
+## What it does
 
-Use provider `gsd-moa` with one of these model ids:
+`gsd-moa` registers a provider named `gsd-moa`.
 
-| Model | Behavior |
+From Pi’s point of view, it behaves like a normal model provider:
+
+```text
+/model gpt55-glm52-auto --provider gsd-moa
+```
+
+Internally, the provider can route each request through one of three modes:
+
+| Mode | What happens | Use when |
+|---|---|---|
+| `single` | GPT-5.5 answers directly. | Normal coding turns, tool loops, quick edits. |
+| `advisor` | A private tool-less reference model gives advice, then GPT-5.5 acts with normal Pi tools. | Planning, debugging, risky changes, review. |
+| `full_moa` | Multiple tool-less reference models respond first; their outputs can be synthesized into private guidance for the final acting call. | Expensive final checks or hard tasks where multiple perspectives are worth the cost. |
+
+Only the final acting model receives Pi tools. Reference models never receive tool schemas, tool calls, tool results, or the Pi system prompt.
+
+## How the MoA flow works
+
+The core design is single-writer, multi-advisor:
+
+```text
+Pi/GSD request
+  ↓
+gsd-moa provider
+  ↓
+choose mode: single | advisor | full_moa
+  ↓
+reference/advisor calls, if needed
+  - no tools
+  - sanitized context
+  - cached when safe
+  ↓
+private guidance is appended to the final model context
+  ↓
+final acting call
+  - normal Pi tools preserved
+  - streams back to Pi
+```
+
+### Single mode
+
+```text
+request → GPT-5.5 → response/tool call
+```
+
+This is the default cheap path.
+
+### Advisor mode
+
+```text
+request
+  ├─ private advisor call, no tools
+  ↓
+GPT-5.5 final acting call, with tools
+  ↓
+response/tool call
+```
+
+Advisor outputs are cached by normalized context and prompt version. Final tool-capable responses are not cached.
+
+### Full MoA mode
+
+```text
+request
+  ├─ GLM-5.2 reference
+  ├─ GPT-5.5 reference
+  ├─ optional specialist references
+  ↓
+optional synthesis memo
+  ↓
+final acting call, with tools
+```
+
+This is intentionally more expensive and should be used sparingly.
+
+## Model aliases
+
+The main aliases are:
+
+| Alias | Mode |
 |---|---|
-| `gpt55-glm52-single` | Direct primary GPT-5.5 call. Fastest/cheapest. |
-| `gpt55-glm52-advisor` | Tool-less GLM-5.2 advisor call, then final GPT-5.5 acting call with normal tools. |
-| `gpt55-glm52-full` | Tool-less GLM-5.2 + GPT-5.5 reference fan-out, optional tool-less GPT-5.5 execution-memo synthesis layer, then final GPT-5.5 acting call with normal tools. |
-| `gpt55-glm52-auto` | Deterministic policy chooses `single`, `advisor`, or `full_moa` from alias, markers, tool-loop state, and keywords. |
-| `gpt55-gemini35flash-single` | Direct primary GPT-5.5 call, with Gemini preset metadata for side-by-side selection. |
-| `gpt55-gemini35flash-advisor` | Gemini 3.5 Flash reference/advisor via CLIProxyAPI Antigravity OAuth, then final GPT-5.5 acting call with normal tools. |
-| `gpt55-gemini35flash-full` | Default GLM-5.2 + GPT-5.5 full-MoA portfolio, plus a conditional Gemini 3.5 Flash specialist for multimodal/video/OCR/transcription prompts. |
-| `gpt55-gemini35flash-auto` | Same deterministic routing policy as `auto`; advisor uses Gemini, while full-MoA conditionally adds the Gemini specialist when predicates match. |
-| `gpt55-glm52-gemini35flash-full` | GLM-5.2 + GPT-5.5 + Gemini 3.5 Flash as unconditional full-MoA references, then final GPT-5.5 acting call. |
-| `gpt55-cliproxycodex-single` | Direct GPT-5.5 acting call through the CLIProxyAPI Codex transport preset. |
-| `gpt55-cliproxycodex-advisor` | GLM-5.2 advisor plus final GPT-5.5 acting call through CLIProxyAPI Codex. |
-| `gpt55-cliproxycodex-full` | GLM-5.2 + GPT-5.5 full-MoA where GPT reference, synthesis, and final actor use CLIProxyAPI Codex. |
-| `gpt55-cliproxycodex-auto` | Same deterministic routing policy as `auto`, with GPT/Codex calls routed through CLIProxyAPI. |
-| `gpt55-cliproxycodex-glm52-gemini35flash-full` | GLM-5.2 direct Z.ai + GPT-5.5 via CLIProxyAPI Codex + Gemini Flash via CLIProxyAPI as unconditional full-MoA references. Avoids Factory for GPT calls. |
+| `gpt55-glm52-single` | Force GPT-5.5 only. |
+| `gpt55-glm52-advisor` | Force GLM-5.2 advisor + GPT-5.5 final call. |
+| `gpt55-glm52-full` | Force full reference-model MoA. |
+| `gpt55-glm52-auto` | Let the provider choose the mode deterministically. |
 
-## Local Installation
+Additional alias families are available for local subscription/proxy setups:
 
-From this repository:
+| Family | Purpose |
+|---|---|
+| `gpt55-gemini35flash-*` | Use Gemini Flash via CLIProxyAPI/Antigravity as advisor or conditional specialist. |
+| `gpt55-cliproxycodex-*` | Route GPT/Codex calls through CLIProxyAPI instead of Factory. |
+| `gpt55-*-full` portfolio aliases | Force specific full-MoA reference portfolios, including Gemini or Claude variants. |
+| `glm52-zai-gpt55-cliproxycodex-*` | Experimental GLM-5.2 acting model with GPT-5.5/Codex references. |
+
+See `src/models.ts` for the exact registered model IDs.
+
+## Install
 
 ```bash
 npm install
@@ -35,46 +113,26 @@ npm run check
 pi -a -e ./src/index.ts
 ```
 
-Then select the provider/model in Pi, for example:
+Then select the provider in Pi:
 
 ```text
 /model gpt55-glm52-auto --provider gsd-moa
 ```
 
-The package is intentionally shaped for publishing against upstream Pi (`@earendil-works/pi-*`): `package.json` declares the Pi extension entry under `pi.extensions`. For day-to-day local smoke tests, load `./src/index.ts` directly with `-e`.
+For local development, load `./src/index.ts` directly with `-e`.
 
 ## Configuration
 
-Configuration is project-local at `.pi/gsd-moa.json`.
+Project-local config lives at:
+
+```text
+.pi/gsd-moa.json
+```
+
+Minimal example:
 
 ```jsonc
 {
-  "routePresets": {
-    "factory-codex-local": {
-      "api": "openai-completions",
-      "baseUrl": "http://127.0.0.1:8317/v1",
-      "apiKey": "$FACTORY_GPT_API_KEY",
-      "compat": { "supportsDeveloperRole": false, "maxTokensField": "max_tokens" }
-    },
-    "zai-coding-plan": {
-      "api": "openai-completions",
-      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
-      "apiKey": "$ZAI_API_KEY",
-      "compat": { "thinkingFormat": "zai", "zaiToolStream": true, "supportsDeveloperRole": false, "maxTokensField": "max_tokens" }
-    },
-    "cliproxyapi": {
-      "api": "openai-completions",
-      "baseUrl": "http://127.0.0.1:8317/v1",
-      "apiKey": "$CLIPROXY_API_KEY",
-      "compat": { "supportsDeveloperRole": false, "maxTokensField": "max_tokens" }
-    },
-    "cliproxyapi-codex": {
-      "api": "openai-completions",
-      "baseUrl": "http://127.0.0.1:8317/v1",
-      "apiKey": "$CLIPROXY_API_KEY",
-      "compat": { "supportsDeveloperRole": false, "maxTokensField": "max_tokens" }
-    }
-  },
   "primary": {
     "provider": "factory-codex",
     "model": "gpt-5.5"
@@ -83,61 +141,35 @@ Configuration is project-local at `.pi/gsd-moa.json`.
     "provider": "zai",
     "model": "glm-5.2"
   },
-  "fullMoa": {
-    "enabled": true,
-    "proposers": [
-      { "id": "glm52", "label": "GLM-5.2 reference" },
-      {
-        "id": "gpt55",
-        "label": "GPT-5.5 reference",
-        "modelRef": "factory-codex/gpt-5.5",
-        "routePreset": "factory-codex-local"
-      }
-    ],
-    "synthesis": {
-      "enabled": true,
-      "modelRef": "factory-codex/gpt-5.5",
-      "routePreset": "factory-codex-local",
-      "prompt": "Synthesize the reference responses into concise, actionable guidance for the final acting model. Focus on next steps, tool-use strategy, risks, and disagreements. Do not call tools or write patches."
-    }
-  },
   "trace": {
     "enabled": false,
-    "dir": ".proof/traces",
-    "includeContexts": true,
-    "includeOutputs": true
+    "dir": ".proof/traces"
   }
 }
 ```
 
-Set the Factory proxy key and Z.ai key before running locally:
+Common environment variables:
 
 ```bash
-export FACTORY_GPT_API_KEY=... # Factory Droid custom GPT-5.5 Codex-subscription route
-export ZAI_API_KEY=...         # Factory Droid custom GLM-5.2 Z.ai Coding Plan route
+export FACTORY_GPT_API_KEY=...
+export ZAI_API_KEY=...
+export CLIPROXY_API_KEY=...          # for CLIProxyAPI presets
+export GSD_MOA_CODEX_MODEL=gpt-5.5   # optional Codex preset override
+export GSD_MOA_GEMINI_MODEL=gemini-3-flash
 ```
 
-You can extract them from `~/.factory/settings.json` without committing secrets.
+The default GPT-5.5 route expects a local OpenAI-compatible Codex/Factory-style proxy. The default GLM-5.2 route expects a Z.ai-compatible endpoint. CLIProxyAPI route presets default to `http://127.0.0.1:8318/v1`. Override route presets in `.pi/gsd-moa.json` when using a different provider, proxy, port, model ID, or subscription path.
 
-The default primary route uses Factory Droid's local OpenAI-compatible Codex subscription proxy (`http://127.0.0.1:8317/v1`) for GPT-5.5. The default reference route uses Z.ai's GLM Coding Plan/OpenAI-compatible endpoint. If you are not using a Coding Plan subscription, change `baseUrl` to the general Z.ai endpoint your account supports.
+## Modular specialists
 
-To route GPT/Codex calls through CLIProxyAPI instead of Factory, select one of the `gpt55-cliproxycodex-*` aliases. Those aliases preserve logical route identity as `openai-codex/<model>` while using the `cliproxyapi-codex` OpenAI-compatible transport. Override the exposed Codex model or endpoint with:
+Full MoA can include unconditional references or conditional specialists. A proposer can use:
 
-```bash
-export GSD_MOA_CODEX_MODEL=gpt-5.5
-export GSD_MOA_CODEX_BASE_URL=http://127.0.0.1:8318/v1
-export CLIPROXY_API_KEY=your-cli-proxy-api-key
-```
+- `modelRef` for the logical model, such as `provider/model`
+- `routePreset` for transport/auth/compat settings
+- `route` for exceptional per-model overrides
+- `when` predicates to run only for matching prompts
 
 Example:
-
-```text
-/model gpt55-cliproxycodex-full --provider gsd-moa
-```
-
-### Modular reference portfolios
-
-Full-MoA proposers can now be unconditional references or conditional specialists. Routing is standardized as `modelRef` + `routePreset` + optional `route` overrides: `modelRef` names the logical model, `routePreset` names the transport/auth/compat profile, and `route` only overrides exceptional fields.
 
 ```jsonc
 {
@@ -148,7 +180,6 @@ Full-MoA proposers can now be unconditional references or conditional specialist
         "label": "Gemini multimodal specialist",
         "modelRef": "antigravity/gemini-3-flash",
         "routePreset": "cliproxyapi",
-        "route": { "maxTokens": 65536 },
         "when": {
           "anyCapability": ["image", "video", "audio"],
           "anyKeyword": ["youtube", "video", "transcribe", "screenshot", "diagram", "ocr"]
@@ -159,110 +190,79 @@ Full-MoA proposers can now be unconditional references or conditional specialist
 }
 ```
 
-Conditional proposers are included when any keyword or detected capability matches. Unconditional proposers still have no `when`. Set `enabled: false` to park a specialist in the portfolio without running it; diagnostics will report it as skipped with reason `disabled`. The `gsd-moa.details` diagnostic includes a `portfolio` array explaining which references were selected or skipped and why.
+Conditional proposers are included when a keyword or detected capability matches. Set `enabled: false` to park a specialist without running it. The `gsd-moa.details` diagnostic records which references were selected or skipped and why.
 
-The Gemini preset also parks a Claude specialist for A/B tests without enabling it by default:
+See [`docs/MODULAR-MOA.md`](docs/MODULAR-MOA.md) for the modular portfolio design.
 
-```jsonc
-{
-  "fullMoa": {
-    "proposers": [
-      {
-        "id": "claude46",
-        "label": "Claude Sonnet 4.6 specialist",
-        "enabled": true,
-        "modelRef": "antigravity/claude-sonnet-4-6",
-        "routePreset": "cliproxyapi"
-      }
-    ]
-  }
-}
-```
+## Prompt controls
 
-Override the parked Claude model with `GSD_MOA_CLAUDE_MODEL`, `modelRef`, or route fields. Current CLIProxyAPI/Antigravity installs may expose model IDs such as `claude-sonnet-4-6` and `claude-opus-4-6-thinking`.
-
-## Gemini Flash via Antigravity / CLIProxyAPI
-
-The `gpt55-gemini35flash-*` aliases use CLIProxyAPI's OpenAI-compatible endpoint as a local proxy to Antigravity OAuth. This replaces the legacy Gemini CLI path, which no longer supports Gemini Code Assist for individual subscriptions.
-
-Setup:
-
-```bash
-brew install cliproxyapi
-
-# One-time Antigravity OAuth login. The local callback uses port 51121.
-cliproxyapi --antigravity-login
-
-# Run the local proxy. Default endpoint is http://127.0.0.1:8318/v1 in this repo setup.
-cliproxyapi
-
-# If your CLIProxyAPI config uses api-keys, export one before launching Pi.
-export CLIPROXY_API_KEY=your-cli-proxy-api-key
-
-# In another shell, confirm which Gemini model id the proxy exposes.
-curl -s http://127.0.0.1:8318/v1/models \
-  ${CLIPROXY_API_KEY:+-H "Authorization: Bearer $CLIPROXY_API_KEY"} | jq '.data[].id'
-
-# The preset defaults to the Antigravity model id seen in current CLIProxyAPI installs.
-export GSD_MOA_GEMINI_MODEL=gemini-3-flash
-export GSD_MOA_GEMINI_BASE_URL=http://127.0.0.1:8318/v1
-
-# Then select one of the Gemini aliases in Pi.
-/model gpt55-gemini35flash-advisor --provider gsd-moa
-```
-
-Notes:
-
-- A Google AI Pro/Ultra subscription is not the same thing as Gemini API billing. Direct API-key use should configure a normal `google` route with `api: "google-generative-ai"` and `apiKey: "$GEMINI_API_KEY"`.
-- The subscription-oriented aliases point at CLIProxyAPI's local OpenAI-compatible server. The default Antigravity model id is `gemini-3-flash`; set `GSD_MOA_GEMINI_MODEL` if `/v1/models` reports a different id or if you intentionally want a lower/higher tier exposed by your proxy.
-- Advisor mode uses Gemini directly as the private reference. Full-MoA mode keeps the normal GLM-5.2 + GPT-5.5 portfolio and adds Gemini only when the request looks multimodal/video/OCR/transcription-related. The final acting call remains GPT-5.5 through Pi, so normal Pi tools stay single-writer.
-- If you configure CLIProxyAPI with a non-default API key, export `CLIPROXY_API_KEY` before launching Pi.
-
-## Routing Controls
-
-Prompt markers can override the selected alias for a single turn:
+You can force a mode for one turn with HTML markers:
 
 | Marker | Effect |
 |---|---|
+| `<!-- gsd-moa:single -->` or `<!-- gsd-moa:off -->` | Force single mode. |
 | `<!-- gsd-moa:advisor -->` or `<!-- gsd-moa:on -->` | Force advisor mode. |
 | `<!-- gsd-moa:full -->` or `<!-- gsd-moa:full_moa -->` | Force full MoA mode. |
-| `<!-- gsd-moa:single -->` or `<!-- gsd-moa:off -->` | Force single mode. |
 
 Markers are stripped before upstream model calls.
 
-## Safety Model
+Specialists can also be forced with an include marker in the prompt text:
 
-- Reference/advisor/synthesizer calls receive no tool schemas, no tool calls, no tool results, and no system prompt from Pi.
-- Only the final GPT acting call receives normal Pi tools.
-- Upstream routes are validated so `gsd-moa` cannot call itself recursively.
-- Tool-less reference outputs are cached; final tool-capable responses are never cached.
+```text
+gsd-moa:include=gemini35flash
+```
+
+## Safety model
+
+- Reference models are private advisors only.
+- Reference models receive sanitized context with no tool schemas, tool calls, tool results, or Pi system prompt.
+- Only the final acting call can call tools.
+- The provider prevents recursive `gsd-moa` calls.
+- Advisor/reference outputs may be cached.
+- Final tool-capable responses are never cached.
 
 ## Observability
 
-Tracing is disabled for normal checked-in config. Set `GSD_MOA_TRACE=1` or use `npm run proof:pi` to opt in. When tracing is enabled, provider traces are written to the configured trace dir and linked from `gsd-moa.details.tracePath`. Exposed `thinking` blocks from upstream responses are preserved in trace files.
+Final assistant messages include `gsd-moa.details`, which records:
 
-Final assistant messages include a `gsd-moa.details` diagnostic containing:
-
-- selected mode and requested mode
+- selected mode
 - routing reason
-- advisor/full-MoA cache hit/miss
-- inner call provider/model details for reference-model, synthesizer, and primary calls
-- full-MoA portfolio selection/skipping reasons
-- combined current-turn usage
+- cache hit/miss
+- inner provider/model calls
+- selected or skipped MoA references
+- combined usage for the current turn
 
-## Smoke Checklist
+Tracing is disabled by default. Enable it with:
 
-1. `npm run check` passes.
-2. `pi -a -e ./src/index.ts --list-models gpt55-glm52` shows provider `gsd-moa` with the four aliases.
-3. Selecting `gpt55-glm52-single` produces a normal streamed response.
-4. Selecting `gpt55-glm52-advisor` with `ZAI_API_KEY` set runs a GLM advisor call and then a GPT final response.
-5. Selecting `gpt55-glm52-full` runs GLM-5.2 and GPT-5.5 as tool-less private advisors, optional GPT-5.5 execution-memo synthesis, injects that private context as privileged guidance, adds a non-private execution note when tools are present, and then runs one GPT final response.
-6. Tool calls, if any, come only from the final GPT call.
+```bash
+export GSD_MOA_TRACE=1
+```
 
-## Advisor and Full MoA Flows
+or run:
 
-See [`docs/ADVISOR-MODE.md`](docs/ADVISOR-MODE.md) for advisor mode, [`docs/FULL-MOA.md`](docs/FULL-MOA.md) for full reference-model MoA flow diagrams, [`docs/TERMINAL-BENCH.md`](docs/TERMINAL-BENCH.md) for the single-vs-full proof loop, and [`docs/EVALUATION.md`](docs/EVALUATION.md) for the human rubric plus current evidence snapshot.
+```bash
+npm run proof:pi
+```
 
-## Future Work
+Trace files are written to the configured trace directory.
 
-See [`docs/FUTURE.md`](docs/FUTURE.md) for OpenAI-compatible proxy extraction and future hardening notes.
+## Docs
+
+- [`docs/ADVISOR-MODE.md`](docs/ADVISOR-MODE.md) — advisor mode flow
+- [`docs/FULL-MOA.md`](docs/FULL-MOA.md) — full MoA flow
+- [`docs/MODULAR-MOA.md`](docs/MODULAR-MOA.md) — modular specialists and model references
+- [`docs/TERMINAL-BENCH.md`](docs/TERMINAL-BENCH.md) — benchmark/proof loop notes
+- [`docs/EVALUATION.md`](docs/EVALUATION.md) — current evidence snapshot
+- [`docs/FUTURE.md`](docs/FUTURE.md) — hardening and proxy extraction ideas
+
+## Development
+
+```bash
+npm run typecheck
+npm test
+npm run check
+```
+
+## License
+
+MIT
