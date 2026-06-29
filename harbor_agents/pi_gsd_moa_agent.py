@@ -106,9 +106,12 @@ class PiGsdMoaAgent(BaseInstalledAgent):
         )
         await self._copy_extension_repo(environment, nvm_prefix)
 
+    def _env_value(self, key: str, default: str | None = None) -> str | None:
+        return self.extra_env.get(key) or os.environ.get(key) or default
+
     async def _copy_extension_repo(self, environment: BaseEnvironment, nvm_prefix: str) -> None:
-        repo = os.environ.get("PI_GSD_MOA_REPO", "/workspace/gsd-moa")
-        workdir = os.environ.get("PI_GSD_MOA_WORKDIR", "/tmp/gsd-moa-ext")
+        repo = self._env_value("PI_GSD_MOA_REPO", "/workspace/gsd-moa")
+        workdir = self._env_value("PI_GSD_MOA_WORKDIR", "/tmp/gsd-moa-ext")
         await self.exec_as_agent(
             environment,
             command=" ".join(
@@ -139,8 +142,8 @@ class PiGsdMoaAgent(BaseInstalledAgent):
 
     @with_prompt_template
     async def run(self, instruction: str, environment: BaseEnvironment, context: AgentContext) -> None:
-        out_dir = os.environ.get("PI_GSD_MOA_OUT", DEFAULT_OUT_DIR)
-        secret_env_file = os.environ.get("PI_GSD_MOA_ENV_FILE")
+        out_dir = self._env_value("PI_GSD_MOA_OUT", DEFAULT_OUT_DIR) or DEFAULT_OUT_DIR
+        secret_env_file = self._env_value("PI_GSD_MOA_ENV_FILE")
         env = self._run_env(secret_env_file, out_dir)
         source_env = await self._prepare_secret_env(environment, secret_env_file) if secret_env_file else ""
         command = self._run_command(instruction, out_dir, source_env)
@@ -150,7 +153,7 @@ class PiGsdMoaAgent(BaseInstalledAgent):
         env_keys = list(NON_SECRET_ENV_KEYS)
         if not secret_env_file:
             env_keys.extend(LEGACY_SECRET_ENV_KEYS)
-        env = {key: value for key in env_keys if (value := os.environ.get(key))}
+        env = {key: value for key in env_keys if (value := self._env_value(key))}
         env.setdefault("GSD_MOA_TRACE", "1")
         env.setdefault("GSD_MOA_TRACE_DIR", f"{out_dir}/traces")
         env.setdefault("GSD_MOA_PRIMARY_BASE_URL", "http://host.docker.internal:8317/v1")
@@ -199,7 +202,7 @@ class PiGsdMoaAgent(BaseInstalledAgent):
         return " ".join(["set -a; .", quoted_container_env_file, "; set +a;"])
 
     def _resolve_model_name(self) -> str:
-        env_model = os.environ.get("PI_GSD_MOA_MODEL")
+        env_model = self._env_value("PI_GSD_MOA_MODEL")
         if env_model:
             return env_model
         harbor_model = getattr(self, "model_name", None)
@@ -208,7 +211,7 @@ class PiGsdMoaAgent(BaseInstalledAgent):
         return "gsd-moa/gpt55-glm52-single"
 
     def _thinking_args(self) -> list[str]:
-        level = os.environ.get("PI_GSD_MOA_THINKING_LEVEL")
+        level = self._env_value("PI_GSD_MOA_THINKING_LEVEL")
         if not level:
             return []
         allowed = {"off", "minimal", "low", "medium", "high", "xhigh"}
@@ -218,10 +221,10 @@ class PiGsdMoaAgent(BaseInstalledAgent):
 
     def _run_command(self, instruction: str, out_dir: str, source_env: str) -> str:
         model = self._resolve_model_name()
-        extension = os.environ.get("PI_GSD_MOA_EXTENSION", "/tmp/gsd-moa-ext/src/index.ts")
-        workdir = os.environ.get("PI_GSD_MOA_WORKDIR", "/tmp/gsd-moa-ext")
-        converter = os.environ.get("PI_GSD_MOA_ATIF_CONVERTER", f"{workdir}/harbor_agents/atif_converter.py")
-        trajectory_file = os.environ.get("PI_GSD_MOA_TRAJECTORY", "/logs/agent/trajectory.json")
+        extension = self._env_value("PI_GSD_MOA_EXTENSION", "/tmp/gsd-moa-ext/src/index.ts") or "/tmp/gsd-moa-ext/src/index.ts"
+        workdir = self._env_value("PI_GSD_MOA_WORKDIR", "/tmp/gsd-moa-ext") or "/tmp/gsd-moa-ext"
+        converter = self._env_value("PI_GSD_MOA_ATIF_CONVERTER", f"{workdir}/harbor_agents/atif_converter.py") or f"{workdir}/harbor_agents/atif_converter.py"
+        trajectory_file = self._env_value("PI_GSD_MOA_TRAJECTORY", "/logs/agent/trajectory.json") or "/logs/agent/trajectory.json"
         output_file = f"{out_dir}/{PI_OUTPUT_NAME}"
         events_file = f"{out_dir}/{EVENTS_NAME}"
         session_file = f"{out_dir}/{SESSION_NAME}"
