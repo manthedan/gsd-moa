@@ -30,7 +30,8 @@ The current config splits model identity from route details with `modelRef` + `r
 {
   "routePresets": {
     "factory-codex-local": { "baseUrl": "http://127.0.0.1:8317/v1", "apiKey": "$FACTORY_GPT_API_KEY" },
-    "cliproxyapi": { "baseUrl": "http://127.0.0.1:8317/v1", "apiKey": "$CLIPROXY_API_KEY" }
+    "cliproxyapi": { "baseUrl": "http://127.0.0.1:8317/v1", "apiKey": "$CLIPROXY_API_KEY" },
+    "cliproxyapi-codex": { "baseUrl": "http://127.0.0.1:8317/v1", "apiKey": "$CLIPROXY_API_KEY" }
   },
   "primary": { "provider": "factory-codex", "model": "gpt-5.5" },
   "fullMoa": {
@@ -65,7 +66,7 @@ The current config splits model identity from route details with `modelRef` + `r
 }
 ```
 
-Implemented syntax: `modelRef` accepts `provider/model` or `{ "provider": "...", "model": "..." }`. `routePreset` names the reusable transport/auth/compat profile. Internally this resolves to provider/model, applies the preset, then applies explicit route overrides; upstream conversion still consults Pi's configured model registry for missing model metadata.
+Implemented syntax: `modelRef` accepts `provider/model` or `{ "provider": "...", "model": "..." }`. `routePreset` names the reusable transport/auth/compat profile. Internally this resolves to provider/model, applies the preset, then applies explicit route overrides; upstream conversion still consults Pi's configured model registry for missing model metadata. The `gpt55-cliproxycodex-*` aliases use `cliproxyapi-codex` for GPT/Codex primary, reference, and synthesis calls while preserving logical route identity as `openai-codex/<model>`.
 
 ## Capability matching
 

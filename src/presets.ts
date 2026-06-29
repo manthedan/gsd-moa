@@ -2,6 +2,7 @@ import { mergeUpstreamRoute } from "./config.js";
 import type { FullMoaProposerConfig, GsdMoaConfig, UpstreamRoute } from "./types.js";
 
 const DEFAULT_CLIPROXY_BASE_URL = "http://127.0.0.1:8317/v1";
+const DEFAULT_CODEX_MODEL = "gpt-5.5";
 const DEFAULT_GEMINI_FLASH_MODEL = "gemini-3.5-flash-low";
 const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6";
 
@@ -13,6 +14,14 @@ const CLIPROXY_ROUTE_PRESET: Partial<UpstreamRoute> = {
     supportsDeveloperRole: false,
     maxTokensField: "max_tokens",
   },
+};
+
+const CODEX_METADATA: Partial<UpstreamRoute> = {
+  reasoning: true,
+  input: ["text", "image"],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 128_000,
+  maxTokens: 16_384,
 };
 
 const GEMINI_METADATA: Partial<UpstreamRoute> = {
@@ -30,6 +39,14 @@ const CLAUDE_METADATA: Partial<UpstreamRoute> = {
   contextWindow: 200_000,
   maxTokens: 32_000,
 };
+
+function codexModel(): string {
+  return process.env.GSD_MOA_CODEX_MODEL || DEFAULT_CODEX_MODEL;
+}
+
+function codexModelRef(): string {
+  return `openai-codex/${codexModel()}`;
+}
 
 function geminiModelRef(): string {
   return `antigravity/${process.env.GSD_MOA_GEMINI_MODEL || DEFAULT_GEMINI_FLASH_MODEL}`;
@@ -78,9 +95,10 @@ function claudeSpecialist(): FullMoaProposerConfig {
 }
 
 export function applyModelPreset(config: GsdMoaConfig, alias: string): GsdMoaConfig {
-  if (!alias.startsWith("gpt55-gemini35flash-")) return config;
+  let cfg = alias.startsWith("gpt55-cliproxycodex-") ? applyCliproxyCodexPreset(config) : config;
+  if (!alias.startsWith("gpt55-gemini35flash-")) return cfg;
 
-  const cfg = structuredClone(config);
+  cfg = structuredClone(cfg);
   cfg.routePresets.cliproxyapi = {
     ...CLIPROXY_ROUTE_PRESET,
     ...(cfg.routePresets.cliproxyapi ?? {}),
@@ -102,6 +120,50 @@ export function applyModelPreset(config: GsdMoaConfig, alias: string): GsdMoaCon
   ];
 
   return cfg;
+}
+
+function applyCliproxyCodexPreset(config: GsdMoaConfig): GsdMoaConfig {
+  const cfg = structuredClone(config);
+  cfg.routePresets["cliproxyapi-codex"] = {
+    ...CLIPROXY_ROUTE_PRESET,
+    ...(cfg.routePresets["cliproxyapi-codex"] ?? {}),
+    ...(process.env.GSD_MOA_CODEX_BASE_URL ? { baseUrl: process.env.GSD_MOA_CODEX_BASE_URL } : {}),
+  };
+
+  const codexRoute = mergeUpstreamRoute(
+    mergeUpstreamRoute({ provider: "openai-codex", model: codexModel() }, cfg.routePresets["cliproxyapi-codex"]),
+    CODEX_METADATA,
+  );
+  cfg.primary = codexRoute;
+
+  const gptReference = cfg.fullMoa.proposers.find((proposer) => proposer.id === "gpt55");
+  if (gptReference) {
+    gptReference.modelRef = codexModelRef();
+    gptReference.routePreset = "cliproxyapi-codex";
+    gptReference.route = { ...CODEX_METADATA, ...nonTransportRouteOverrides(gptReference.route) };
+  }
+
+  cfg.fullMoa.synthesis.modelRef = codexModelRef();
+  cfg.fullMoa.synthesis.routePreset = "cliproxyapi-codex";
+  cfg.fullMoa.synthesis.route = { ...CODEX_METADATA, ...nonTransportRouteOverrides(cfg.fullMoa.synthesis.route) };
+
+  return cfg;
+}
+
+function nonTransportRouteOverrides(route: Partial<UpstreamRoute> | undefined): Partial<UpstreamRoute> {
+  if (!route) return {};
+  const {
+    provider: _provider,
+    model: _model,
+    api: _api,
+    baseUrl: _baseUrl,
+    apiKey: _apiKey,
+    headers: _headers,
+    authHeader: _authHeader,
+    compat: _compat,
+    ...rest
+  } = route;
+  return rest;
 }
 
 function pinInheritedReferenceProposer(proposer: FullMoaProposerConfig, originalReference: UpstreamRoute): FullMoaProposerConfig {

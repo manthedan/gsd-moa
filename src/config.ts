@@ -51,6 +51,15 @@ export const DEFAULT_ROUTE_PRESETS: GsdMoaConfig["routePresets"] = {
       maxTokensField: "max_tokens",
     },
   },
+  "cliproxyapi-codex": {
+    api: "openai-completions",
+    baseUrl: "http://127.0.0.1:8317/v1",
+    apiKey: "$CLIPROXY_API_KEY",
+    compat: {
+      supportsDeveloperRole: false,
+      maxTokensField: "max_tokens",
+    },
+  },
 };
 
 export const DEFAULT_CONFIG: GsdMoaConfig = {
@@ -89,6 +98,10 @@ export const DEFAULT_CONFIG: GsdMoaConfig = {
     "gpt55-gemini35flash-advisor": { mode: "advisor" },
     "gpt55-gemini35flash-full": { mode: "full_moa" },
     "gpt55-gemini35flash-auto": { mode: "auto" },
+    "gpt55-cliproxycodex-single": { mode: "single" },
+    "gpt55-cliproxycodex-advisor": { mode: "advisor" },
+    "gpt55-cliproxycodex-full": { mode: "full_moa" },
+    "gpt55-cliproxycodex-auto": { mode: "auto" },
   },
   auto: {
     defaultMode: "single",

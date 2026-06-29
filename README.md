@@ -18,6 +18,10 @@ Use provider `gsd-moa` with one of these model ids:
 | `gpt55-gemini35flash-advisor` | Gemini 3.5 Flash reference/advisor via CLIProxyAPI Antigravity OAuth, then final GPT-5.5 acting call with normal tools. |
 | `gpt55-gemini35flash-full` | Default GLM-5.2 + GPT-5.5 full-MoA portfolio, plus a conditional Gemini 3.5 Flash specialist for multimodal/video/OCR/transcription prompts. |
 | `gpt55-gemini35flash-auto` | Same deterministic routing policy as `auto`; advisor uses Gemini, while full-MoA conditionally adds the Gemini specialist when predicates match. |
+| `gpt55-cliproxycodex-single` | Direct GPT-5.5 acting call through the CLIProxyAPI Codex transport preset. |
+| `gpt55-cliproxycodex-advisor` | GLM-5.2 advisor plus final GPT-5.5 acting call through CLIProxyAPI Codex. |
+| `gpt55-cliproxycodex-full` | GLM-5.2 + GPT-5.5 full-MoA where GPT reference, synthesis, and final actor use CLIProxyAPI Codex. |
+| `gpt55-cliproxycodex-auto` | Same deterministic routing policy as `auto`, with GPT/Codex calls routed through CLIProxyAPI. |
 
 ## Local Installation
 
@@ -57,6 +61,12 @@ Configuration is project-local at `.pi/gsd-moa.json`.
       "compat": { "thinkingFormat": "zai", "zaiToolStream": true, "supportsDeveloperRole": false, "maxTokensField": "max_tokens" }
     },
     "cliproxyapi": {
+      "api": "openai-completions",
+      "baseUrl": "http://127.0.0.1:8317/v1",
+      "apiKey": "$CLIPROXY_API_KEY",
+      "compat": { "supportsDeveloperRole": false, "maxTokensField": "max_tokens" }
+    },
+    "cliproxyapi-codex": {
       "api": "openai-completions",
       "baseUrl": "http://127.0.0.1:8317/v1",
       "apiKey": "$CLIPROXY_API_KEY",
@@ -108,6 +118,20 @@ export ZAI_API_KEY=...         # Factory Droid custom GLM-5.2 Z.ai Coding Plan r
 You can extract them from `~/.factory/settings.json` without committing secrets.
 
 The default primary route uses Factory Droid's local OpenAI-compatible Codex subscription proxy (`http://127.0.0.1:8317/v1`) for GPT-5.5. The default reference route uses Z.ai's GLM Coding Plan/OpenAI-compatible endpoint. If you are not using a Coding Plan subscription, change `baseUrl` to the general Z.ai endpoint your account supports.
+
+To route GPT/Codex calls through CLIProxyAPI instead of Factory, select one of the `gpt55-cliproxycodex-*` aliases. Those aliases preserve logical route identity as `openai-codex/<model>` while using the `cliproxyapi-codex` OpenAI-compatible transport. Override the exposed Codex model or endpoint with:
+
+```bash
+export GSD_MOA_CODEX_MODEL=gpt-5.5
+export GSD_MOA_CODEX_BASE_URL=http://127.0.0.1:8317/v1
+export CLIPROXY_API_KEY=your-cli-proxy-api-key
+```
+
+Example:
+
+```text
+/model gpt55-cliproxycodex-full --provider gsd-moa
+```
 
 ### Modular reference portfolios
 

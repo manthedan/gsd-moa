@@ -9,6 +9,10 @@ export const GSD_MOA_MODEL_IDS = [
   "gpt55-gemini35flash-advisor",
   "gpt55-gemini35flash-full",
   "gpt55-gemini35flash-auto",
+  "gpt55-cliproxycodex-single",
+  "gpt55-cliproxycodex-advisor",
+  "gpt55-cliproxycodex-full",
+  "gpt55-cliproxycodex-auto",
 ] as const;
 
 export type GsdMoaModelId = (typeof GSD_MOA_MODEL_IDS)[number];
@@ -80,6 +84,42 @@ export const GSD_MOA_MODELS: ProviderModelConfig[] = [
   {
     id: "gpt55-gemini35flash-auto",
     name: "GSD MoA: GPT-5.5 + Gemini 3.5 Flash (Auto)",
+    reasoning: true,
+    input: ["text", "image"],
+    cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
+    contextWindow: 272000,
+    maxTokens: 128000,
+  },
+  {
+    id: "gpt55-cliproxycodex-single",
+    name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex (Single)",
+    reasoning: true,
+    input: ["text", "image"],
+    cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
+    contextWindow: 272000,
+    maxTokens: 128000,
+  },
+  {
+    id: "gpt55-cliproxycodex-advisor",
+    name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (Advisor)",
+    reasoning: true,
+    input: ["text", "image"],
+    cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
+    contextWindow: 272000,
+    maxTokens: 128000,
+  },
+  {
+    id: "gpt55-cliproxycodex-full",
+    name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (Full MoA)",
+    reasoning: true,
+    input: ["text", "image"],
+    cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
+    contextWindow: 272000,
+    maxTokens: 128000,
+  },
+  {
+    id: "gpt55-cliproxycodex-auto",
+    name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (Auto)",
     reasoning: true,
     input: ["text", "image"],
     cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
