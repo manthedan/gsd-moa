@@ -12,6 +12,7 @@ import { loadConfig } from "./config.js";
 import { hasRecentToolResults, latestUserText, stripMarkersFromContext, withAdvisorGuidance, withFullMoaGuidance } from "./context.js";
 import { runFullMoa } from "./moa.js";
 import { chooseMode } from "./policy.js";
+import { applyModelPreset } from "./presets.js";
 import { createTraceRecorder } from "./trace.js";
 import type { AdvisorResult, FullMoaResult, GsdMoaConfig, MoaRunDetails } from "./types.js";
 import { routeToModel, streamOptionsForRoute, type UpstreamClient, compatUpstreamClient } from "./upstream.js";
@@ -33,7 +34,7 @@ export function streamGsdMoa(
   (async () => {
     let trace: ReturnType<typeof createTraceRecorder>;
     try {
-      const config = deps.config ?? loadConfig();
+      const config = applyModelPreset(deps.config ?? loadConfig(), model.id);
       const upstream = deps.upstream ?? compatUpstreamClient;
       const policy = chooseMode(config, {
         alias: model.id,
@@ -120,6 +121,7 @@ function moaDiagnostic(
       ...(fullMoa?.innerCalls ?? []),
       { role: "primary" as const, provider: config.primary.provider, model: config.primary.model, usage: primaryUsage },
     ],
+    ...(fullMoa ? { portfolio: fullMoa.portfolio } : {}),
     combinedUsage,
     ...(tracePath ? { tracePath } : {}),
   };

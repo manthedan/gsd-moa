@@ -4,6 +4,8 @@ export const PROVIDER_ID = "gsd-moa" as const;
 
 export type MoaMode = "single" | "advisor" | "full_moa";
 export type AliasMode = MoaMode | "auto";
+export type ModelRef = string | { provider: string; model: string };
+export type InputCapability = "text" | "image" | "video" | "audio";
 
 export interface UpstreamRoute {
   provider: string;
@@ -20,6 +22,8 @@ export interface UpstreamRoute {
   maxTokens?: number;
   compat?: Record<string, unknown>;
 }
+
+export type RoutePresetConfig = Partial<UpstreamRoute>;
 
 export interface AliasConfig {
   mode: AliasMode;
@@ -50,16 +54,27 @@ export interface PromptConfig {
   fullMoaVersion: string;
 }
 
+export interface ReferenceWhenConfig {
+  anyCapability?: InputCapability[];
+  anyKeyword?: string[];
+}
+
 export interface FullMoaProposerConfig {
   id: string;
   label: string;
+  enabled?: boolean;
   prompt?: string;
+  modelRef?: ModelRef;
+  routePreset?: string;
   route?: Partial<UpstreamRoute>;
+  when?: ReferenceWhenConfig;
 }
 
 export interface FullMoaSynthesisConfig {
   enabled: boolean;
   prompt: string;
+  modelRef?: ModelRef;
+  routePreset?: string;
   route?: Partial<UpstreamRoute>;
 }
 
@@ -70,6 +85,7 @@ export interface FullMoaConfig {
 }
 
 export interface GsdMoaConfig {
+  routePresets: Record<string, RoutePresetConfig>;
   primary: UpstreamRoute;
   reference: UpstreamRoute;
   fullMoa: FullMoaConfig;
@@ -109,6 +125,14 @@ export interface InnerCallDetails {
   model: string;
   usage?: Usage;
   cacheHit?: boolean;
+  selectionReason?: string;
+}
+
+export interface PortfolioDecision {
+  id: string;
+  label: string;
+  selected: boolean;
+  reason: string;
 }
 
 export interface FullMoaProposal {
@@ -120,6 +144,7 @@ export interface FullMoaProposal {
   provider: string;
   model: string;
   key: string;
+  selectionReason?: string;
 }
 
 export interface FullMoaResult {
@@ -135,6 +160,7 @@ export interface FullMoaResult {
   guidance: string;
   usage?: Usage;
   innerCalls: InnerCallDetails[];
+  portfolio: PortfolioDecision[];
 }
 
 export interface MoaRunDetails {
@@ -143,6 +169,7 @@ export interface MoaRunDetails {
   reason: string;
   cacheHit?: boolean;
   innerCalls: InnerCallDetails[];
+  portfolio?: PortfolioDecision[];
 }
 
 export type UpstreamModel = Model<Api>;

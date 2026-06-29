@@ -13,6 +13,7 @@ import {
   type Model,
 } from "@earendil-works/pi-ai/compat";
 import { DEFAULT_CONFIG } from "../src/config.ts";
+import { applyModelPreset } from "../src/presets.ts";
 import { streamGsdMoa } from "../src/stream.ts";
 import type { GsdMoaConfig } from "../src/types.ts";
 import type { UpstreamClient } from "../src/upstream.ts";
@@ -138,6 +139,37 @@ describe("advisor orchestration", () => {
       assert.equal(details.cacheHit, true);
       assert.equal(details.innerCalls.length, 2);
       assert.equal(details.innerCalls[0].cacheHit, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves image blocks for image-capable Gemini advisor", async () => {
+    const { cfg: baseCfg, dir } = tempConfig();
+    const cfg = applyModelPreset(baseCfg, "gpt55-gemini35flash-advisor");
+    try {
+      const context: Context = {
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: "<!-- gsd-moa:advisor --> analyze this screenshot" },
+            { type: "image", data: "aW1hZ2U=", mimeType: "image/png" } as any,
+          ],
+          timestamp: 1,
+        }],
+      };
+      let advisorSawImage = false;
+      const upstream: UpstreamClient = {
+        async complete(seenModel, seenContext) {
+          assert.equal(seenModel.provider, "antigravity");
+          advisorSawImage = JSON.stringify(seenContext.messages).includes('"type":"image"');
+          return message(seenModel, "image advice", usage(1, 1));
+        },
+        stream(seenModel) { return streamText(seenModel, "final", usage(1, 1)); },
+      };
+
+      await collect(streamGsdMoa(model("gpt55-gemini35flash-advisor"), context, undefined, { config: cfg, upstream }));
+      assert.equal(advisorSawImage, true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

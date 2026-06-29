@@ -48,11 +48,11 @@ export async function runAdvisor(
 }
 
 export function buildAdvisorContext(config: GsdMoaConfig, context: Context, policy: PolicyDecision): Context {
-  const safe = sanitizeReferenceContext(context, policy);
+  const safe = sanitizeReferenceContext(context, policy, { preserveImages: config.reference.input?.includes("image") ?? false });
   return {
     ...safe,
     systemPrompt: [
-      `You are GLM-5.2 acting as a private advisor for a Pi coding agent provider.`,
+      `You are the configured reference model acting as a private advisor for a Pi coding agent provider.`,
       `Prompt version: ${config.prompts.advisorVersion}.`,
       `Give concise critique, risks, missing tests, and implementation advice.`,
       `Do not request or call tools. Do not produce patches.`,

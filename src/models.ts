@@ -5,6 +5,10 @@ export const GSD_MOA_MODEL_IDS = [
   "gpt55-glm52-advisor",
   "gpt55-glm52-full",
   "gpt55-glm52-auto",
+  "gpt55-gemini35flash-single",
+  "gpt55-gemini35flash-advisor",
+  "gpt55-gemini35flash-full",
+  "gpt55-gemini35flash-auto",
 ] as const;
 
 export type GsdMoaModelId = (typeof GSD_MOA_MODEL_IDS)[number];
@@ -40,6 +44,42 @@ export const GSD_MOA_MODELS: ProviderModelConfig[] = [
   {
     id: "gpt55-glm52-auto",
     name: "GSD MoA: GPT-5.5 + GLM-5.2 (Auto)",
+    reasoning: true,
+    input: ["text", "image"],
+    cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
+    contextWindow: 272000,
+    maxTokens: 128000,
+  },
+  {
+    id: "gpt55-gemini35flash-single",
+    name: "GSD MoA: GPT-5.5 + Gemini 3.5 Flash (Single)",
+    reasoning: true,
+    input: ["text", "image"],
+    cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
+    contextWindow: 272000,
+    maxTokens: 128000,
+  },
+  {
+    id: "gpt55-gemini35flash-advisor",
+    name: "GSD MoA: GPT-5.5 + Gemini 3.5 Flash (Advisor)",
+    reasoning: true,
+    input: ["text", "image"],
+    cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
+    contextWindow: 272000,
+    maxTokens: 128000,
+  },
+  {
+    id: "gpt55-gemini35flash-full",
+    name: "GSD MoA: GPT-5.5 + Gemini 3.5 Flash (Full MoA)",
+    reasoning: true,
+    input: ["text", "image"],
+    cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
+    contextWindow: 272000,
+    maxTokens: 128000,
+  },
+  {
+    id: "gpt55-gemini35flash-auto",
+    name: "GSD MoA: GPT-5.5 + Gemini 3.5 Flash (Auto)",
     reasoning: true,
     input: ["text", "image"],
     cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },

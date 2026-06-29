@@ -92,6 +92,10 @@ function tempConfig(): { cfg: GsdMoaConfig; dir: string; traceDir: string } {
     cfg: {
       ...structuredClone(DEFAULT_CONFIG),
       reference: { ...structuredClone(DEFAULT_CONFIG.reference), apiKey: "sk-secret-reference", headers: { Authorization: "Bearer secret" } },
+      routePresets: {
+        ...structuredClone(DEFAULT_CONFIG.routePresets),
+        secretPreset: { apiKey: "sk-secret-preset", headers: { Authorization: "Bearer preset-secret", "x-api-key": "preset-key" } },
+      },
       cache: { enabled: false, dir: join(dir, "cache"), ttlSeconds: 60 },
       trace: { enabled: true, dir: traceDir, includeContexts: true, includeOutputs: true },
     },
@@ -194,7 +198,7 @@ describe("trace capture", () => {
       assert.match(JSON.stringify(trace.finalContext), /Mixture of Agents reference context/);
       assert.match(trace.finalContext.systemPrompt ?? "", /Mixture of Agents reference context/);
       assert.match(JSON.stringify(trace.finalMessage), /final text/);
-      assert.doesNotMatch(JSON.stringify(trace), /sk-secret-reference|Bearer secret/);
+      assert.doesNotMatch(JSON.stringify(trace), /sk-secret-reference|Bearer secret|sk-secret-preset|Bearer preset-secret|preset-key/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

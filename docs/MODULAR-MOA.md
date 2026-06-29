@@ -1,6 +1,6 @@
 # Modular MoA and conditional multimodal references
 
-Status: exploration notes. This captures the next architecture direction after the GPT-5.5 + GLM-5.2 proof harness.
+Status: partially implemented. This captures the architecture direction after the GPT-5.5 + GLM-5.2 proof harness; Phase A/B and the initial Gemini specialist preset are now in code.
 
 ## Motivation
 
@@ -24,13 +24,17 @@ Example target behavior:
 
 ## Proposed configuration shape
 
-A future config could split model references from route details:
+The current config splits model identity from route details with `modelRef` + `routePreset` + optional `route` overrides:
 
 ```jsonc
 {
-  "primary": { "modelRef": "factory-codex/gpt-5.5" },
+  "routePresets": {
+    "factory-codex-local": { "baseUrl": "http://127.0.0.1:8317/v1", "apiKey": "$FACTORY_GPT_API_KEY" },
+    "cliproxyapi": { "baseUrl": "http://127.0.0.1:8317/v1", "apiKey": "$CLIPROXY_API_KEY" }
+  },
+  "primary": { "provider": "factory-codex", "model": "gpt-5.5" },
   "fullMoa": {
-    "references": [
+    "proposers": [
       {
         "id": "glm52",
         "label": "GLM-5.2 reference",
@@ -39,12 +43,14 @@ A future config could split model references from route details:
       {
         "id": "gpt55",
         "label": "GPT-5.5 reference",
-        "modelRef": "factory-codex/gpt-5.5"
+        "modelRef": "factory-codex/gpt-5.5",
+        "routePreset": "factory-codex-local"
       },
       {
         "id": "gemini-multimodal",
         "label": "Gemini multimodal reference",
-        "modelRef": "google/gemini-2.5-pro",
+        "modelRef": "antigravity/gemini-3.5-flash-low",
+        "routePreset": "cliproxyapi",
         "when": {
           "anyCapability": ["image", "video", "audio"],
           "anyKeyword": ["youtube", "video", "transcribe", "screenshot", "diagram"]
@@ -52,13 +58,14 @@ A future config could split model references from route details:
       }
     ],
     "synthesis": {
-      "modelRef": "factory-codex/gpt-5.5"
+      "modelRef": "factory-codex/gpt-5.5",
+      "routePreset": "factory-codex-local"
     }
   }
 }
 ```
 
-Open question: exact `modelRef` syntax should match Pi's provider/model semantics. Internally this can resolve through Pi's configured model registry before falling back to explicit route fields.
+Implemented syntax: `modelRef` accepts `provider/model` or `{ "provider": "...", "model": "..." }`. `routePreset` names the reusable transport/auth/compat profile. Internally this resolves to provider/model, applies the preset, then applies explicit route overrides; upstream conversion still consults Pi's configured model registry for missing model metadata.
 
 ## Capability matching
 
@@ -133,7 +140,12 @@ This suggests a staged approach: start with image/transcript-aware Gemini refere
 
 ## Possible milestone shape
 
-- Phase A: ModelRef resolver and backwards-compatible portfolio builder.
-- Phase B: Conditional reference predicates plus diagnostics/tracing.
-- Phase C: Gemini image/transcript reference preset and docs.
-- Phase D: Spike true video/YouTube handling if needed.
+- Phase A: ModelRef resolver and backwards-compatible portfolio builder. **Implemented.**
+- Phase B: Conditional reference predicates plus diagnostics/tracing. **Implemented for deterministic keyword/capability matching, disabled/parked specialists, and diagnostics.**
+- Phase C: Gemini image/transcript reference preset and docs. **Initial CLIProxyAPI/Antigravity Gemini 3.5 Flash specialist implemented; Claude Sonnet 4.6 is parked as disabled for A/B testing. Image-capable references receive sanitized text plus provided image blocks.**
+- Phase D: Spike true video/YouTube handling if needed. **Not implemented; current Gemini specialist does not acquire or forward direct video/YouTube media parts yet.**
+
+## Related evaluation notes
+
+See [`EVALUATION.md`](EVALUATION.md), [`TERMINAL-BENCH.md`](TERMINAL-BENCH.md), and [`TERMINAL-BENCH-RESULTS.md`](TERMINAL-BENCH-RESULTS.md) for the current Terminal-Bench evidence snapshot. Those results motivate keeping Gemini and other specialists conditional: MoA helped on constraint-heavy/distributed reasoning tasks, while current-info leaderboard tasks still need direct tool-grounded verification by the final actor.
+

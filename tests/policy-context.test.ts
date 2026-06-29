@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { Context } from "@earendil-works/pi-ai/compat";
-import { DEFAULT_CONFIG, loadConfig, validateConfig } from "../src/config.ts";
+import { DEFAULT_CONFIG, loadConfig, resolveProposerRoute, resolveSynthesisRoute, validateConfig } from "../src/config.ts";
+import { referenceCacheKey } from "../src/cache.ts";
 import { hasRecentToolResults, latestUserText, sanitizeReferenceContext } from "../src/context.ts";
 import { chooseMode, stripMoaMarkers } from "../src/policy.ts";
 
@@ -70,8 +71,16 @@ describe("mode policy", () => {
       assert.equal(cfg.trace.enabled, true);
       assert.equal(cfg.trace.dir, join(dir, "traces"));
       assert.equal(cfg.primary.baseUrl, "http://host.docker.internal:8317/v1");
-      assert.equal(cfg.fullMoa.proposers.find((p) => p.id === "gpt55")?.route?.baseUrl, "http://host.docker.internal:8317/v1");
-      assert.equal(cfg.fullMoa.synthesis.route?.baseUrl, "http://host.docker.internal:8317/v1");
+      const gpt = cfg.fullMoa.proposers.find((p) => p.id === "gpt55");
+      assert.ok(gpt);
+      assert.equal(resolveProposerRoute(cfg.reference, gpt, cfg.routePresets).baseUrl, "http://host.docker.internal:8317/v1");
+      assert.equal(resolveProposerRoute(cfg.reference, gpt, cfg.routePresets).provider, "factory-codex");
+      assert.equal(resolveProposerRoute(cfg.reference, gpt, cfg.routePresets).model, "gpt-5.5");
+      assert.equal(resolveProposerRoute(cfg.reference, gpt, cfg.routePresets).baseUrl, "http://host.docker.internal:8317/v1");
+      assert.equal(resolveProposerRoute(cfg.reference, gpt, cfg.routePresets).apiKey, "$FACTORY_GPT_API_KEY");
+      assert.equal(resolveProposerRoute(cfg.reference, gpt, cfg.routePresets).compat?.maxTokensField, "max_tokens");
+      assert.equal(resolveProposerRoute(cfg.reference, gpt, cfg.routePresets).input?.includes("image"), true);
+      assert.equal(resolveSynthesisRoute(cfg.reference, cfg.fullMoa.synthesis, cfg.routePresets).baseUrl, "http://host.docker.internal:8317/v1");
 
       if (oldTrace === undefined) delete process.env.GSD_MOA_TRACE;
       else process.env.GSD_MOA_TRACE = oldTrace;
@@ -83,8 +92,12 @@ describe("mode policy", () => {
       const cfgAfterEnvRestore = loadConfig("missing.json", dir);
       assert.equal(cfgAfterEnvRestore.trace.enabled, DEFAULT_CONFIG.trace.enabled);
       assert.equal(cfgAfterEnvRestore.trace.dir, DEFAULT_CONFIG.trace.dir);
-      assert.equal(cfgAfterEnvRestore.fullMoa.proposers.find((p) => p.id === "gpt55")?.route?.baseUrl, DEFAULT_CONFIG.primary.baseUrl);
-      assert.equal(DEFAULT_CONFIG.fullMoa.proposers.find((p) => p.id === "gpt55")?.route?.baseUrl, DEFAULT_CONFIG.primary.baseUrl);
+      const restoredGpt = cfgAfterEnvRestore.fullMoa.proposers.find((p) => p.id === "gpt55");
+      const defaultGpt = DEFAULT_CONFIG.fullMoa.proposers.find((p) => p.id === "gpt55");
+      assert.ok(restoredGpt);
+      assert.ok(defaultGpt);
+      assert.equal(resolveProposerRoute(cfgAfterEnvRestore.reference, restoredGpt, cfgAfterEnvRestore.routePresets).baseUrl, DEFAULT_CONFIG.primary.baseUrl);
+      assert.equal(resolveProposerRoute(DEFAULT_CONFIG.reference, defaultGpt, DEFAULT_CONFIG.routePresets).baseUrl, DEFAULT_CONFIG.primary.baseUrl);
     } finally {
       if (oldTrace === undefined) delete process.env.GSD_MOA_TRACE;
       else process.env.GSD_MOA_TRACE = oldTrace;
@@ -92,6 +105,67 @@ describe("mode policy", () => {
       else process.env.GSD_MOA_TRACE_DIR = oldDir;
       if (oldPrimaryBaseUrl === undefined) delete process.env.GSD_MOA_PRIMARY_BASE_URL;
       else process.env.GSD_MOA_PRIMARY_BASE_URL = oldPrimaryBaseUrl;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("applies route preset overrides to top-level primary and reference routes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gsd-moa-route-preset-test-"));
+    try {
+      writeFileSync(join(dir, "gsd-moa.json"), JSON.stringify({
+        routePresets: {
+          "factory-codex-local": { baseUrl: "http://factory.example/v1", apiKey: "factory-secret" },
+          "zai-coding-plan": { baseUrl: "http://zai.example/v1", apiKey: "zai-secret" },
+        },
+      }));
+      const cfg = loadConfig("gsd-moa.json", dir);
+      assert.equal(cfg.primary.provider, "factory-codex");
+      assert.equal(cfg.primary.model, "gpt-5.5");
+      assert.equal(cfg.primary.baseUrl, "http://factory.example/v1");
+      assert.equal(cfg.primary.apiKey, "factory-secret");
+      assert.equal(cfg.reference.provider, "zai");
+      assert.equal(cfg.reference.model, "glm-5.2");
+      assert.equal(cfg.reference.baseUrl, "http://zai.example/v1");
+      assert.equal(cfg.reference.apiKey, "zai-secret");
+      const gpt = cfg.fullMoa.proposers.find((p) => p.id === "gpt55");
+      assert.ok(gpt);
+      assert.equal(resolveProposerRoute(cfg.reference, gpt, cfg.routePresets).baseUrl, "http://factory.example/v1");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads modelRef-based full MoA specialists without inheriting the default route", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gsd-moa-modelref-test-"));
+    try {
+      writeFileSync(join(dir, "gsd-moa.json"), JSON.stringify({
+        routePresets: {
+          "gemini-proxy": { baseUrl: "http://gemini.example/v1", api: "openai-completions", apiKey: "$GEMINI_PROXY_KEY" },
+        },
+        fullMoa: {
+          proposers: [{
+            id: "gemini-specialist",
+            label: "Gemini specialist",
+            modelRef: "google/gemini-3.5-flash",
+            routePreset: "gemini-proxy",
+            route: { maxTokens: 1234 },
+            when: { anyCapability: ["image"], anyKeyword: ["diagram"] },
+          }],
+        },
+      }));
+      const cfg = loadConfig("gsd-moa.json", dir);
+      const specialist = cfg.fullMoa.proposers.find((p) => p.id === "gemini-specialist");
+      assert.ok(specialist);
+      const route = resolveProposerRoute(cfg.reference, specialist, cfg.routePresets);
+      assert.equal(route.provider, "google");
+      assert.equal(route.model, "gemini-3.5-flash");
+      assert.equal(route.baseUrl, "http://gemini.example/v1");
+      assert.equal(route.api, "openai-completions");
+      assert.equal(route.apiKey, "$GEMINI_PROXY_KEY");
+      assert.equal(route.maxTokens, 1234);
+      assert.notEqual(route.baseUrl, DEFAULT_CONFIG.reference.baseUrl);
+      assert.deepEqual(specialist.when?.anyCapability, ["image"]);
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -109,15 +183,30 @@ describe("mode policy", () => {
       assert.equal(cfg.fullMoa.proposers.length, DEFAULT_CONFIG.fullMoa.proposers.length);
       const gpt = cfg.fullMoa.proposers.find((p) => p.id === "gpt55");
       assert.equal(gpt?.label, "GPT-5.5 reference");
-      assert.equal(gpt?.route?.provider, "factory-codex");
-      assert.equal(gpt?.route?.model, "gpt-5.5");
-      assert.equal(gpt?.route?.baseUrl, "http://override.example/v1");
-      assert.equal(cfg.fullMoa.synthesis.route?.provider, "factory-codex");
-      assert.equal(cfg.fullMoa.synthesis.route?.model, "gpt-5.5");
-      assert.equal(cfg.fullMoa.synthesis.route?.baseUrl, "http://synthesis.example/v1");
+      assert.ok(gpt);
+      const gptRoute = resolveProposerRoute(cfg.reference, gpt, cfg.routePresets);
+      assert.equal(gptRoute.provider, "factory-codex");
+      assert.equal(gptRoute.model, "gpt-5.5");
+      assert.equal(gptRoute.baseUrl, "http://override.example/v1");
+      const synthesisRoute = resolveSynthesisRoute(cfg.reference, cfg.fullMoa.synthesis, cfg.routePresets);
+      assert.equal(synthesisRoute.provider, "factory-codex");
+      assert.equal(synthesisRoute.model, "gpt-5.5");
+      assert.equal(synthesisRoute.baseUrl, "http://synthesis.example/v1");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("reference cache keys", () => {
+  it("include preserved image content digests", () => {
+    const route = DEFAULT_CONFIG.primary;
+    const first: Context = { messages: [{ role: "user", content: [{ type: "text", text: "analyze this screenshot" }, { type: "image", data: "first", mimeType: "image/png" } as any], timestamp: 1 }] };
+    const second: Context = { messages: [{ role: "user", content: [{ type: "text", text: "analyze this screenshot" }, { type: "image", data: "second", mimeType: "image/png" } as any], timestamp: 1 }] };
+    assert.notEqual(
+      referenceCacheKey(DEFAULT_CONFIG, first, route, "full_moa:reference:gemini35flash", DEFAULT_CONFIG.prompts.fullMoaVersion),
+      referenceCacheKey(DEFAULT_CONFIG, second, route, "full_moa:reference:gemini35flash", DEFAULT_CONFIG.prompts.fullMoaVersion),
+    );
   });
 });
 

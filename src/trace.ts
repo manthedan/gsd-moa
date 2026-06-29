@@ -182,6 +182,7 @@ function redactedConfig(config: GsdMoaConfig): unknown {
   const copy = traceClone(config);
   redactRoute(copy.primary);
   redactRoute(copy.reference);
+  for (const preset of Object.values(copy.routePresets)) redactRoute(preset);
   for (const proposer of copy.fullMoa.proposers) if (proposer.route) redactRoute(proposer.route as UpstreamRoute);
   if (copy.fullMoa.synthesis.route) redactRoute(copy.fullMoa.synthesis.route as UpstreamRoute);
   return copy;
