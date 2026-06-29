@@ -7,7 +7,7 @@ This document summarizes local Harbor / Terminal-Bench 2.0 dogfood runs for `pi-
 - `single`: `gsd-moa/gpt55-glm52-single` — direct GPT-5.5 through Factory proxy.
 - `full_moa`: `gsd-moa/gpt55-glm52-full` — GLM-5.2 reference + GPT-5.5 reference + GPT-5.5 synthesis + GPT-5.5 final actor.
 
-All runs used the Pi custom provider extension and were run as one trial per mode unless noted. Treat results as directional, not statistically final.
+All runs used the Pi custom provider extension and were run as one trial per mode unless noted. Treat results as directional, not statistically final. See [`TERMINAL-BENCH-LEADERBOARD-COMPARISON.md`](TERMINAL-BENCH-LEADERBOARD-COMPARISON.md) for comparison against selected public leaderboard rows.
 
 ## Headline
 

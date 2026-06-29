@@ -142,7 +142,7 @@ The repo mount already maps local `.proof/gsd-moa.env` to `/workspace/gsd-moa/.p
 
 ## Current results
 
-See [`TERMINAL-BENCH-RESULTS.md`](TERMINAL-BENCH-RESULTS.md) for the current A/B evidence snapshot. As of 2026-06-28, the strongest non-multimodal MoA wins are `torch-tensor-parallelism` and `overfull-hbox`: single GPT-5.5 failed both one-trial runs, while current Hermes-aligned full-MoA passed both.
+See [`TERMINAL-BENCH-RESULTS.md`](TERMINAL-BENCH-RESULTS.md) for the current A/B evidence snapshot and [`TERMINAL-BENCH-LEADERBOARD-COMPARISON.md`](TERMINAL-BENCH-LEADERBOARD-COMPARISON.md) for the comparison against selected public leaderboard rows. As of 2026-06-28, the strongest non-multimodal MoA wins are `torch-tensor-parallelism` and `overfull-hbox`: single GPT-5.5 failed both one-trial runs, while current Hermes-aligned full-MoA passed both.
 
 ## Evaluation loop
 
