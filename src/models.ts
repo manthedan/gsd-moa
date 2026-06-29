@@ -16,6 +16,8 @@ export const GSD_MOA_MODEL_IDS = [
   "gpt55-cliproxycodex-auto",
   "gpt55-cliproxycodex-glm52-gemini35flash-full",
   "gpt55-cliproxycodex-glm52-claudeopus48-full",
+  "glm52-zai-gpt55-cliproxycodex-full",
+  "glm52-zai-gpt55-cliproxycodex-nosynth-full",
 ] as const;
 
 export type GsdMoaModelId = (typeof GSD_MOA_MODEL_IDS)[number];
@@ -155,5 +157,23 @@ export const GSD_MOA_MODELS: ProviderModelConfig[] = [
     cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
     contextWindow: 272000,
     maxTokens: 128000,
+  },
+  {
+    id: "glm52-zai-gpt55-cliproxycodex-full",
+    name: "GSD MoA: GLM-5.2 driver + GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 refs (Full MoA)",
+    reasoning: true,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 1000000,
+    maxTokens: 8192,
+  },
+  {
+    id: "glm52-zai-gpt55-cliproxycodex-nosynth-full",
+    name: "GSD MoA: GLM-5.2 driver + GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 refs (No Synth)",
+    reasoning: true,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 1000000,
+    maxTokens: 8192,
   },
 ];

@@ -61,6 +61,19 @@ function claudeOpusModelRef(): string {
   return `antigravity/${process.env.GSD_MOA_CLAUDE_OPUS_MODEL || process.env.GSD_MOA_CLAUDE_MODEL || DEFAULT_CLAUDE_OPUS_MODEL}`;
 }
 
+function glmPrimaryRoute(cfg: GsdMoaConfig): UpstreamRoute {
+  return mergeUpstreamRoute(
+    mergeUpstreamRoute({ provider: "zai", model: "glm-5.2" }, cfg.routePresets["zai-coding-plan"]),
+    {
+      reasoning: true,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 1_000_000,
+      maxTokens: 8192,
+    },
+  );
+}
+
 function geminiReferenceRoute(cfg: GsdMoaConfig): UpstreamRoute {
   return mergeUpstreamRoute(
     mergeUpstreamRoute({ provider: "antigravity", model: process.env.GSD_MOA_GEMINI_MODEL || DEFAULT_GEMINI_FLASH_MODEL }, cfg.routePresets.cliproxyapi),
@@ -125,6 +138,9 @@ function claudeOpusUnconditionalReference(): FullMoaProposerConfig {
 }
 
 export function applyModelPreset(config: GsdMoaConfig, alias: string): GsdMoaConfig {
+  if (alias.startsWith("glm52-zai-gpt55-cliproxycodex-nosynth-")) return applyGlmDriverCodexReferencePreset(config, { synthesis: false });
+  if (alias.startsWith("glm52-zai-gpt55-cliproxycodex-")) return applyGlmDriverCodexReferencePreset(config, { synthesis: true });
+
   let cfg = alias.startsWith("gpt55-cliproxycodex-") ? applyCliproxyCodexPreset(config) : config;
   if (alias.startsWith("gpt55-cliproxycodex-glm52-claudeopus48-")) return applyUnconditionalClaudeOpusPreset(cfg);
   if (alias.startsWith("gpt55-cliproxycodex-glm52-gemini35flash-")) return applyUnconditionalGeminiPreset(cfg);
@@ -152,6 +168,16 @@ export function applyModelPreset(config: GsdMoaConfig, alias: string): GsdMoaCon
     mergePresetSpecialist(claudeSpecialist(), existingClaude),
   ];
 
+  return cfg;
+}
+
+function applyGlmDriverCodexReferencePreset(config: GsdMoaConfig, options: { synthesis: boolean }): GsdMoaConfig {
+  const cfg = applyCliproxyCodexPreset(config);
+  cfg.primary = glmPrimaryRoute(cfg);
+  cfg.fullMoa.synthesis.enabled = options.synthesis;
+  cfg.fullMoa.synthesis.modelRef = codexModelRef();
+  cfg.fullMoa.synthesis.routePreset = "cliproxyapi-codex";
+  cfg.fullMoa.synthesis.route = { ...CODEX_METADATA, ...nonTransportRouteOverrides(cfg.fullMoa.synthesis.route) };
   return cfg;
 }
 

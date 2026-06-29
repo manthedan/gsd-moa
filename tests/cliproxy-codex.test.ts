@@ -107,6 +107,46 @@ describe("CLIProxyAPI Codex preset", () => {
     assert.equal(synthesisRoute.baseUrl, "http://127.0.0.1:8318/v1");
   });
 
+  it("can use GLM as the final driver while keeping GLM and GPT as references", () => {
+    const cfg = applyModelPreset(structuredClone(DEFAULT_CONFIG), "glm52-zai-gpt55-cliproxycodex-full");
+
+    assert.equal(cfg.primary.provider, "zai");
+    assert.equal(cfg.primary.model, "glm-5.2");
+    assert.equal(cfg.primary.baseUrl, "https://api.z.ai/api/coding/paas/v4");
+    assert.equal(cfg.primary.apiKey, "$ZAI_API_KEY");
+
+    const glm = cfg.fullMoa.proposers.find((proposer) => proposer.id === "glm52");
+    const gpt = cfg.fullMoa.proposers.find((proposer) => proposer.id === "gpt55");
+    assert.ok(glm);
+    assert.ok(gpt);
+
+    const glmRoute = resolveProposerRoute(cfg.reference, glm, cfg.routePresets);
+    assert.equal(glmRoute.provider, "zai");
+    assert.equal(glmRoute.model, "glm-5.2");
+
+    const gptRoute = resolveProposerRoute(cfg.reference, gpt, cfg.routePresets);
+    assert.equal(gptRoute.provider, "openai-codex");
+    assert.equal(gptRoute.model, "gpt-5.5");
+    assert.equal(gptRoute.baseUrl, "http://127.0.0.1:8318/v1");
+
+    assert.equal(cfg.fullMoa.synthesis.enabled, true);
+    const synthesisRoute = resolveSynthesisRoute(cfg.reference, cfg.fullMoa.synthesis, cfg.routePresets);
+    assert.equal(synthesisRoute.provider, "openai-codex");
+    assert.equal(synthesisRoute.model, "gpt-5.5");
+    assert.equal(synthesisRoute.baseUrl, "http://127.0.0.1:8318/v1");
+  });
+
+  it("can use GLM as the final driver without the synthesis layer", () => {
+    const cfg = applyModelPreset(structuredClone(DEFAULT_CONFIG), "glm52-zai-gpt55-cliproxycodex-nosynth-full");
+
+    assert.equal(cfg.primary.provider, "zai");
+    assert.equal(cfg.primary.model, "glm-5.2");
+    assert.equal(cfg.fullMoa.synthesis.enabled, false);
+
+    const selectedReferences = cfg.fullMoa.proposers.map((proposer) => proposer.id);
+    assert.deepEqual(selectedReferences, ["glm52", "gpt55"]);
+  });
+
   it("honors local Codex model and endpoint overrides", () => {
     const oldModel = process.env.GSD_MOA_CODEX_MODEL;
     const oldBaseUrl = process.env.GSD_MOA_CODEX_BASE_URL;
