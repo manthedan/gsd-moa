@@ -18,6 +18,7 @@ Use provider `gsd-moa` with one of these model ids:
 | `gpt55-gemini35flash-advisor` | Gemini 3.5 Flash reference/advisor via CLIProxyAPI Antigravity OAuth, then final GPT-5.5 acting call with normal tools. |
 | `gpt55-gemini35flash-full` | Default GLM-5.2 + GPT-5.5 full-MoA portfolio, plus a conditional Gemini 3.5 Flash specialist for multimodal/video/OCR/transcription prompts. |
 | `gpt55-gemini35flash-auto` | Same deterministic routing policy as `auto`; advisor uses Gemini, while full-MoA conditionally adds the Gemini specialist when predicates match. |
+| `gpt55-glm52-gemini35flash-full` | GLM-5.2 + GPT-5.5 + Gemini 3.5 Flash as unconditional full-MoA references, then final GPT-5.5 acting call. |
 | `gpt55-cliproxycodex-single` | Direct GPT-5.5 acting call through the CLIProxyAPI Codex transport preset. |
 | `gpt55-cliproxycodex-advisor` | GLM-5.2 advisor plus final GPT-5.5 acting call through CLIProxyAPI Codex. |
 | `gpt55-cliproxycodex-full` | GLM-5.2 + GPT-5.5 full-MoA where GPT reference, synthesis, and final actor use CLIProxyAPI Codex. |
@@ -144,7 +145,7 @@ Full-MoA proposers can now be unconditional references or conditional specialist
       {
         "id": "gemini35flash",
         "label": "Gemini multimodal specialist",
-        "modelRef": "antigravity/gemini-3.5-flash-low",
+        "modelRef": "antigravity/gemini-3.5-flash",
         "routePreset": "cliproxyapi",
         "route": { "maxTokens": 65536 },
         "when": {
@@ -202,7 +203,7 @@ curl -s http://127.0.0.1:8317/v1/models \
   ${CLIPROXY_API_KEY:+-H "Authorization: Bearer $CLIPROXY_API_KEY"} | jq '.data[].id'
 
 # The preset defaults to the Antigravity model id seen in current CLIProxyAPI installs.
-export GSD_MOA_GEMINI_MODEL=gemini-3.5-flash-low
+export GSD_MOA_GEMINI_MODEL=gemini-3.5-flash
 export GSD_MOA_GEMINI_BASE_URL=http://127.0.0.1:8317/v1
 
 # Then select one of the Gemini aliases in Pi.
@@ -212,7 +213,7 @@ export GSD_MOA_GEMINI_BASE_URL=http://127.0.0.1:8317/v1
 Notes:
 
 - A Google AI Pro/Ultra subscription is not the same thing as Gemini API billing. Direct API-key use should configure a normal `google` route with `api: "google-generative-ai"` and `apiKey: "$GEMINI_API_KEY"`.
-- The subscription-oriented aliases point at CLIProxyAPI's local OpenAI-compatible server. The default Antigravity model id is `gemini-3.5-flash-low`; set `GSD_MOA_GEMINI_MODEL` if `/v1/models` reports a different id.
+- The subscription-oriented aliases point at CLIProxyAPI's local OpenAI-compatible server. The default Antigravity model id is `gemini-3.5-flash`; set `GSD_MOA_GEMINI_MODEL` if `/v1/models` reports a different id or if you intentionally want a lower/higher tier exposed by your proxy.
 - Advisor mode uses Gemini directly as the private reference. Full-MoA mode keeps the normal GLM-5.2 + GPT-5.5 portfolio and adds Gemini only when the request looks multimodal/video/OCR/transcription-related. The final acting call remains GPT-5.5 through Pi, so normal Pi tools stay single-writer.
 - If you configure CLIProxyAPI with a non-default API key, export `CLIPROXY_API_KEY` before launching Pi.
 

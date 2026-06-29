@@ -50,7 +50,7 @@ The current config splits model identity from route details with `modelRef` + `r
       {
         "id": "gemini-multimodal",
         "label": "Gemini multimodal reference",
-        "modelRef": "antigravity/gemini-3.5-flash-low",
+        "modelRef": "antigravity/gemini-3.5-flash"
         "routePreset": "cliproxyapi",
         "when": {
           "anyCapability": ["image", "video", "audio"],
@@ -66,7 +66,7 @@ The current config splits model identity from route details with `modelRef` + `r
 }
 ```
 
-Implemented syntax: `modelRef` accepts `provider/model` or `{ "provider": "...", "model": "..." }`. `routePreset` names the reusable transport/auth/compat profile. Internally this resolves to provider/model, applies the preset, then applies explicit route overrides; upstream conversion still consults Pi's configured model registry for missing model metadata. The `gpt55-cliproxycodex-*` aliases use `cliproxyapi-codex` for GPT/Codex primary, reference, and synthesis calls while preserving logical route identity as `openai-codex/<model>`.
+Implemented syntax: `modelRef` accepts `provider/model` or `{ "provider": "...", "model": "..." }`. `routePreset` names the reusable transport/auth/compat profile. Internally this resolves to provider/model, applies the preset, then applies explicit route overrides; upstream conversion still consults Pi's configured model registry for missing model metadata. The `gpt55-cliproxycodex-*` aliases use `cliproxyapi-codex` for GPT/Codex primary, reference, and synthesis calls while preserving logical route identity as `openai-codex/<model>`. The `gpt55-glm52-gemini35flash-full` alias uses Gemini as an unconditional normal reference rather than a conditional specialist.
 
 ## Capability matching
 

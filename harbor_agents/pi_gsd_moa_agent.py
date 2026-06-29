@@ -20,6 +20,7 @@ Configure with environment variables passed to Harbor/the task container:
   PI_GSD_MOA_REPO=/workspace/gsd-moa              # mounted repo copied to /tmp/gsd-moa-ext
   PI_GSD_MOA_EXTENSION=/tmp/gsd-moa-ext/src/index.ts
   PI_GSD_MOA_ENV_FILE=/workspace/gsd-moa/.proof/gsd-moa.env  # preferred for secrets
+  PI_GSD_MOA_THINKING_LEVEL=high
   GSD_MOA_PRIMARY_BASE_URL=http://host.docker.internal:8317/v1
 
 Legacy quick-run fallback, only when PI_GSD_MOA_ENV_FILE is not set:
@@ -59,12 +60,17 @@ NON_SECRET_ENV_KEYS = [
     "GSD_MOA_TRACE_DIR",
     "GSD_MOA_PRIMARY_BASE_URL",
     "GSD_MOA_REFERENCE_BASE_URL",
+    "GSD_MOA_GEMINI_BASE_URL",
+    "GSD_MOA_CODEX_BASE_URL",
+    "GSD_MOA_GEMINI_MODEL",
+    "GSD_MOA_CODEX_MODEL",
+    "PI_GSD_MOA_THINKING_LEVEL",
 ]
 
 # Keep this intentionally narrow. Passing env vars through Harbor can expose them
 # in host-side docker compose exec argv on some setups. Real benchmark runs should
 # use PI_GSD_MOA_ENV_FILE instead.
-LEGACY_SECRET_ENV_KEYS = ["FACTORY_GPT_API_KEY", "ZAI_API_KEY"]
+LEGACY_SECRET_ENV_KEYS = ["FACTORY_GPT_API_KEY", "ZAI_API_KEY", "CLIPROXY_API_KEY"]
 
 
 def _nvm_prefix() -> str:
@@ -197,6 +203,15 @@ class PiGsdMoaAgent(BaseInstalledAgent):
             return str(harbor_model)
         return "gsd-moa/gpt55-glm52-single"
 
+    def _thinking_args(self) -> list[str]:
+        level = os.environ.get("PI_GSD_MOA_THINKING_LEVEL")
+        if not level:
+            return []
+        allowed = {"off", "minimal", "low", "medium", "high", "xhigh"}
+        if level not in allowed:
+            raise ValueError(f"invalid PI_GSD_MOA_THINKING_LEVEL={level!r}; expected one of {sorted(allowed)}")
+        return ["--thinking", level]
+
     def _run_command(self, instruction: str, out_dir: str, source_env: str) -> str:
         model = self._resolve_model_name()
         extension = os.environ.get("PI_GSD_MOA_EXTENSION", "/tmp/gsd-moa-ext/src/index.ts")
@@ -207,6 +222,7 @@ class PiGsdMoaAgent(BaseInstalledAgent):
         events_file = f"{out_dir}/{EVENTS_NAME}"
         session_file = f"{out_dir}/{SESSION_NAME}"
         stderr_file = f"{out_dir}/{STDERR_NAME}"
+        thinking_args = self._thinking_args()
         return " ".join(
             [
                 "set -e;",
@@ -223,6 +239,7 @@ class PiGsdMoaAgent(BaseInstalledAgent):
                 shlex.quote(model),
                 "--mode json --session",
                 shlex.quote(session_file),
+                *[shlex.quote(arg) for arg in thinking_args],
                 "-p",
                 shlex.quote(instruction),
                 ">",

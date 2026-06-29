@@ -11,6 +11,7 @@ interface CliArgs {
   outDir: string;
   skipPreflight: boolean;
   noTools: boolean;
+  thinking?: string;
 }
 
 const DEFAULT_MODELS = ["gsd-moa/gpt55-glm52-single", "gsd-moa/gpt55-glm52-full"];
@@ -28,6 +29,7 @@ async function main() {
     createdAt: new Date().toISOString(),
     models: args.models,
     command: process.argv,
+    thinking: args.thinking,
   }, null, 2)}\n`);
 
   const summaries = [];
@@ -35,7 +37,7 @@ async function main() {
     const label = safeLabel(model);
     const modelDir = join(args.outDir, label);
     mkdirSync(modelDir, { recursive: true });
-    const command = ["pi", "-a", "-e", "./src/index.ts", "--model", model, "--mode", "json", "--no-session", ...(args.noTools ? ["--no-tools"] : []), "-p", prompt];
+    const command = ["pi", "-a", "-e", "./src/index.ts", "--model", model, "--mode", "json", "--no-session", ...(args.thinking ? ["--thinking", args.thinking] : []), ...(args.noTools ? ["--no-tools"] : []), "-p", prompt];
     const env = { GSD_MOA_TRACE: "1", GSD_MOA_TRACE_DIR: join(modelDir, "traces") };
     writeFileSync(join(modelDir, "command.txt"), `${command.map(shellQuote).join(" ")}\n`);
     const result = await run(command, env);
@@ -64,10 +66,11 @@ function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--prompt-file") args.promptFile = argv[++i];
     else if (arg === "--models") args.models = argv[++i].split(",").map((m) => m.trim()).filter(Boolean);
     else if (arg === "--out") args.outDir = argv[++i];
+    else if (arg === "--thinking") args.thinking = argv[++i];
     else if (arg === "--skip-preflight") args.skipPreflight = true;
     else if (arg === "--no-tools") args.noTools = true;
     else if (arg === "--help" || arg === "-h") {
-      console.log("Usage: npm run proof:pi -- --prompt 'task' [--models gsd-moa/gpt55-glm52-single,gsd-moa/gpt55-glm52-full] [--out .proof/runs/name] [--skip-preflight] [--no-tools]");
+      console.log("Usage: npm run proof:pi -- --prompt 'task' [--models gsd-moa/gpt55-glm52-single,gsd-moa/gpt55-glm52-full] [--thinking high] [--out .proof/runs/name] [--skip-preflight] [--no-tools]");
       process.exit(0);
     } else throw new Error(`unknown arg: ${arg}`);
   }
@@ -76,7 +79,8 @@ function parseArgs(argv: string[]): CliArgs {
 }
 
 async function preflight(models: string[]): Promise<void> {
-  const needsFactory = models.some((model) => model.includes("gpt55-glm52"));
+  const needsFactory = models.some((model) => model.includes("gpt55-glm52") && !model.includes("cliproxycodex"));
+  const needsCliproxy = models.some((model) => model.includes("gemini35flash") || model.includes("cliproxycodex"));
   const needsZai = models.some((model) => /advisor|full|auto/.test(model));
   if (needsFactory && !process.env.FACTORY_GPT_API_KEY) {
     throw new Error("FACTORY_GPT_API_KEY is required for the default Factory GPT-5.5 primary route. Export it or pass --skip-preflight if your config does not use it.");
@@ -84,7 +88,10 @@ async function preflight(models: string[]): Promise<void> {
   if (needsZai && !process.env.ZAI_API_KEY) {
     throw new Error("ZAI_API_KEY is required for advisor/full/default-auto GLM-5.2 routes. Export it or pass --skip-preflight if your config does not use it.");
   }
-  if (needsFactory) await checkTcp("127.0.0.1", 8317, "Factory GPT proxy http://127.0.0.1:8317/v1");
+  if (needsCliproxy && !process.env.CLIPROXY_API_KEY) {
+    throw new Error("CLIPROXY_API_KEY is required for Gemini/CLIProxyAPI Codex routes. Export it or pass --skip-preflight if your config does not use it.");
+  }
+  if (needsFactory || needsCliproxy) await checkTcp("127.0.0.1", 8317, "local OpenAI-compatible proxy http://127.0.0.1:8317/v1");
 }
 
 function checkTcp(host: string, port: number, label: string): Promise<void> {

@@ -3,7 +3,7 @@ import type { FullMoaProposerConfig, GsdMoaConfig, UpstreamRoute } from "./types
 
 const DEFAULT_CLIPROXY_BASE_URL = "http://127.0.0.1:8317/v1";
 const DEFAULT_CODEX_MODEL = "gpt-5.5";
-const DEFAULT_GEMINI_FLASH_MODEL = "gemini-3.5-flash-low";
+const DEFAULT_GEMINI_FLASH_MODEL = "gemini-3.5-flash";
 const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6";
 
 const CLIPROXY_ROUTE_PRESET: Partial<UpstreamRoute> = {
@@ -77,6 +77,17 @@ function geminiSpecialist(): FullMoaProposerConfig {
   };
 }
 
+function geminiUnconditionalReference(): FullMoaProposerConfig {
+  return {
+    id: "gemini35flash",
+    label: "Gemini 3.5 Flash reference via CLIProxyAPI Antigravity OAuth",
+    enabled: true,
+    modelRef: geminiModelRef(),
+    routePreset: "cliproxyapi",
+    route: { ...GEMINI_METADATA },
+  };
+}
+
 function claudeSpecialist(): FullMoaProposerConfig {
   return {
     id: "claude46",
@@ -96,6 +107,7 @@ function claudeSpecialist(): FullMoaProposerConfig {
 
 export function applyModelPreset(config: GsdMoaConfig, alias: string): GsdMoaConfig {
   let cfg = alias.startsWith("gpt55-cliproxycodex-") ? applyCliproxyCodexPreset(config) : config;
+  if (alias.startsWith("gpt55-glm52-gemini35flash-")) return applyUnconditionalGeminiPreset(cfg);
   if (!alias.startsWith("gpt55-gemini35flash-")) return cfg;
 
   cfg = structuredClone(cfg);
@@ -118,6 +130,28 @@ export function applyModelPreset(config: GsdMoaConfig, alias: string): GsdMoaCon
     mergePresetSpecialist(geminiSpecialist(), existingGemini),
     mergePresetSpecialist(claudeSpecialist(), existingClaude),
   ];
+
+  return cfg;
+}
+
+function applyUnconditionalGeminiPreset(config: GsdMoaConfig): GsdMoaConfig {
+  const cfg = structuredClone(config);
+  cfg.routePresets.cliproxyapi = {
+    ...CLIPROXY_ROUTE_PRESET,
+    ...(cfg.routePresets.cliproxyapi ?? {}),
+    ...(process.env.GSD_MOA_GEMINI_BASE_URL ? { baseUrl: process.env.GSD_MOA_GEMINI_BASE_URL } : {}),
+  };
+
+  const existingGemini = cfg.fullMoa.proposers.find((proposer) => proposer.id === "gemini35flash");
+  cfg.fullMoa.proposers = [
+    ...cfg.fullMoa.proposers.filter((proposer) => proposer.id !== "gemini35flash"),
+    mergePresetSpecialist(geminiUnconditionalReference(), existingGemini),
+  ];
+  const gemini = cfg.fullMoa.proposers.find((proposer) => proposer.id === "gemini35flash");
+  if (gemini) {
+    gemini.enabled = true;
+    gemini.when = undefined;
+  }
 
   return cfg;
 }

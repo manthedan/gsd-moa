@@ -1,4 +1,4 @@
-import type { Api, Model, Usage } from "@earendil-works/pi-ai/compat";
+import type { Api, Model, ThinkingLevelMap, Usage } from "@earendil-works/pi-ai/compat";
 
 export const PROVIDER_ID = "gsd-moa" as const;
 
@@ -16,6 +16,7 @@ export interface UpstreamRoute {
   headers?: Record<string, string>;
   authHeader?: boolean;
   reasoning?: boolean;
+  thinkingLevelMap?: ThinkingLevelMap;
   input?: ("text" | "image")[];
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   contextWindow?: number;
