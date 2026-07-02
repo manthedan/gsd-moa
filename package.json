@@ -14,7 +14,8 @@
     "test": "node --import tsx --test tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test",
-    "proof:pi": "tsx scripts/run-pi-proof.ts"
+    "proof:pi": "tsx scripts/run-pi-proof.ts",
+    "tb:report": "tsx scripts/aggregate-tb-results.ts"
   },
   "keywords": [
     "pi",
