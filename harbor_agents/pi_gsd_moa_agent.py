@@ -200,7 +200,7 @@ class PiGsdMoaAgent(BaseInstalledAgent):
                     runtime_prefix,
                     "(npm ci || npm install) &&",
                     'arch=$(uname -m) && case "$arch" in aarch64|arm64) na=arm64 ;; x86_64|amd64) na=x64 ;; *) echo "unsupported arch $arch" >&2; exit 4 ;; esac &&',
-                    'ver=$(node -e "process.stdout.write(require(\"./node_modules/@oh-my-pi/pi-natives/package.json\").version)") &&',
+                    "ver=$(node -p \"require('./node_modules/@oh-my-pi/pi-natives/package.json').version\") &&",
                     'if [ ! -d "node_modules/@oh-my-pi/pi-natives-linux-$na" ]; then npm install --no-save "@oh-my-pi/pi-natives-linux-$na@$ver"; fi;',
                 ]
             )
