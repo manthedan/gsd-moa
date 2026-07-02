@@ -1,4 +1,4 @@
-import type { Usage } from "@earendil-works/pi-ai/compat";
+import type { Usage } from "./pi-compat.js";
 
 export function emptyUsage(): Usage {
   return {

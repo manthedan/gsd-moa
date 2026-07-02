@@ -1,16 +1,18 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ProviderConfig } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import { GSD_MOA_MODELS } from "./models.js";
 import { streamGsdMoa } from "./stream.js";
 import { PROVIDER_ID } from "./types.js";
 
+const ompStreamSimple: NonNullable<ProviderConfig["streamSimple"]> = (model, context, options) =>
+  streamGsdMoa(model as never, context as never, options) as unknown as ReturnType<NonNullable<ProviderConfig["streamSimple"]>>;
+
 export default function gsdMoaExtension(pi: ExtensionAPI) {
   pi.registerProvider(PROVIDER_ID, {
-    name: "GSD MoA",
     api: "gsd-moa-api",
     baseUrl: "gsd-moa://local",
     apiKey: "gsd-moa-local",
     models: GSD_MOA_MODELS,
-    streamSimple: streamGsdMoa,
+    streamSimple: ompStreamSimple,
   });
 }
 

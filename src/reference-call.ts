@@ -1,4 +1,4 @@
-import type { Context, SimpleStreamOptions, Usage } from "@earendil-works/pi-ai/compat";
+import type { Context, SimpleStreamOptions, Usage } from "./pi-compat.js";
 import { readCacheByKey, referenceCacheKey, writeAdvisorCache } from "./cache.js";
 import { assistantText } from "./context.js";
 import type { TraceRecorder, TraceReferenceCall } from "./trace.js";

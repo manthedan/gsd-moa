@@ -1,4 +1,4 @@
-import type { Context, SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
+import type { Context, SimpleStreamOptions } from "./pi-compat.js";
 import { sanitizeReferenceContext } from "./context.js";
 import { runReferenceCall } from "./reference-call.js";
 import type { TraceRecorder } from "./trace.js";

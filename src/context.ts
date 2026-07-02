@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { AssistantMessage, Context, Message, TextContent, UserMessage } from "@earendil-works/pi-ai/compat";
+import type { AssistantMessage, Context, Message, TextContent, UserMessage } from "./pi-compat.js";
 import type { FullMoaResult, PolicyDecision, ToolObservationSummary } from "./types.js";
 
 export function latestUserText(context: Context, preserveMarkers = false): string {

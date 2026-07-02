@@ -6,7 +6,7 @@ import type {
   Context,
   Api,
   Model,
-} from "@earendil-works/pi-ai/compat";
+} from "./pi-compat.js";
 import { redactSensitiveText } from "./context.js";
 import type { GsdMoaConfig, MoaAction, PolicyDecision, UpstreamRoute } from "./types.js";
 

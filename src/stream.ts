@@ -6,7 +6,7 @@ import {
   type Context,
   type Model,
   type SimpleStreamOptions,
-} from "@earendil-works/pi-ai/compat";
+} from "./pi-compat.js";
 import { runAdvisor } from "./advisor.js";
 import { loadConfig } from "./config.js";
 import { buildToolObservationSummary, isToolLoopContinuation, latestMessageHasMoaMarker, latestUserText, redactSensitiveText, stripMarkersFromContext, withAdvisorGuidance, withFullMoaGuidance } from "./context.js";

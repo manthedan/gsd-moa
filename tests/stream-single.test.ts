@@ -9,7 +9,7 @@ import {
   type Context,
   type Model,
   type SimpleStreamOptions,
-} from "@earendil-works/pi-ai/compat";
+} from "../src/pi-compat.js";
 import { DEFAULT_CONFIG } from "../src/config.ts";
 import { streamGsdMoa } from "../src/stream.ts";
 import type { UpstreamClient } from "../src/upstream.ts";

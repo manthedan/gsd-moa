@@ -8,7 +8,7 @@ import {
   type Context,
   type Model,
   type SimpleStreamOptions,
-} from "@earendil-works/pi-ai/compat";
+} from "./pi-compat.js";
 import type { UpstreamRoute } from "./types.js";
 
 export interface UpstreamClient {
@@ -30,7 +30,6 @@ export function routeToModel(route: UpstreamRoute): Model<Api> {
     provider: route.provider,
     baseUrl: route.baseUrl ?? builtin?.baseUrl ?? "",
     reasoning: route.reasoning ?? builtin?.reasoning ?? false,
-    thinkingLevelMap: route.thinkingLevelMap ?? builtin?.thinkingLevelMap,
     input: route.input ?? builtin?.input ?? ["text"],
     cost: route.cost ?? builtin?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: route.contextWindow ?? builtin?.contextWindow ?? 128000,

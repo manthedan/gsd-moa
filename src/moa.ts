@@ -1,4 +1,4 @@
-import type { Context, SimpleStreamOptions, UserMessage } from "@earendil-works/pi-ai/compat";
+import type { Context, SimpleStreamOptions, UserMessage } from "./pi-compat.js";
 import { resolveProposerRoute, resolveSynthesisRoute } from "./config.js";
 import { latestUserText, redactSensitiveText, sanitizeReferenceContext } from "./context.js";
 import { runReferenceCall } from "./reference-call.js";

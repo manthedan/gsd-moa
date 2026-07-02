@@ -11,7 +11,7 @@ import {
   type AssistantMessageEventStream,
   type Context,
   type Model,
-} from "@earendil-works/pi-ai/compat";
+} from "../src/pi-compat.js";
 import { DEFAULT_CONFIG } from "../src/config.ts";
 import { applyModelPreset } from "../src/presets.ts";
 import { streamGsdMoa } from "../src/stream.ts";

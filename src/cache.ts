@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { Context, Usage, UserMessage } from "@earendil-works/pi-ai/compat";
+import type { Context, Usage, UserMessage } from "./pi-compat.js";
 import { assistantText, messageText } from "./context.js";
 import type { GsdMoaConfig } from "./types.js";
 
@@ -136,6 +136,7 @@ function normalizeContext(context: Context): string {
     .map((msg) => {
       if (msg.role === "user") return `user:${normalizeUserMessage(msg)}`;
       if (msg.role === "assistant") return `assistant:${assistantText(msg)}`;
+      if (msg.role === "developer") return `developer:${typeof msg.content === "string" ? msg.content : msg.content.map((c) => (c.type === "text" ? c.text : "[image]")).join("\n")}`;
       return `tool:${msg.toolName}:${msg.content.map((c) => (c.type === "text" ? c.text : "[image]")).join("\n")}`;
     })
     .join("\n---\n")]

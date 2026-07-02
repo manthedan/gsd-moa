@@ -37,7 +37,6 @@ export const DEFAULT_ROUTE_PRESETS: GsdMoaConfig["routePresets"] = {
     apiKey: "$ZAI_API_KEY",
     compat: {
       thinkingFormat: "zai",
-      zaiToolStream: true,
       supportsDeveloperRole: false,
       maxTokensField: "max_tokens",
     },
