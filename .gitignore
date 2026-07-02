@@ -2,6 +2,7 @@ node_modules/
 .ralph/
 .pi/gsd-moa-cache/
 .proof/
+jobs/
 coverage/
 dist/
 .env
