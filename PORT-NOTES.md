@@ -65,3 +65,22 @@ env: bun: No such file or directory
 ```
 
 Outcome: blocked before extension load because the installed OMP CLI bin has a `#!/usr/bin/env bun` shebang and Bun is not installed/available in this environment. No live provider request was made.
+
+### Follow-up (after installing Bun 1.3.14)
+
+Verified live on 2026-07-02. Notes:
+
+- `omp models` lists `gsd-moa (18)` when loaded with `-e ./src/index.ts` — provider registration works.
+- omp resolves models via the combined `--model "gsd-moa/<alias>"` form; the separate `--provider` flag does not select extension providers.
+- The env file must be sourced with `set -a` (its assignments are not `export`ed), otherwise gsd-moa's fail-fast env check correctly rejects the unresolved `$CLIPROXY_API_KEY`.
+
+```sh
+set -a; source ../gsd-moa/.proof/gsd-moa.env; set +a
+omp --no-session -e ./src/index.ts --model "gsd-moa/gpt55-cliproxycodex-single" -p "Reply with exactly: OK"
+# → OK
+
+omp --no-session -e ./src/index.ts --model "gsd-moa/gpt55-cliproxycodex-glm52-nosynth-full" -p "In one short sentence: what is a mixture of agents?"
+# → full-MoA path: GLM-5.2 + GPT-5.5 proposers ran, guidance injected, final actor answered.
+```
+
+Both single and full-MoA modes work end-to-end under the omp runtime, including the local `AssistantMessageEventStream` compat class being consumed by omp's stream loop.
