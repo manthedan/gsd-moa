@@ -4,7 +4,7 @@ This adapter intentionally mirrors the plain-Pi Harbor adapter shape from
 `badlogic/pi-terminal-bench`, while keeping the extra pieces needed for this
 repo:
 
-- install Node 24 and the @earendil-works Pi package;
+- install Node 24 plus Bun for the local oh-my-pi CLI;
 - copy the mounted gsd-moa repo into the task container and load it with `-e`;
 - source secrets from PI_GSD_MOA_ENV_FILE instead of passing API keys in argv;
 - write Pi JSONL/session logs under /logs/agent so Harbor keeps them naturally;
@@ -20,6 +20,7 @@ Configure with environment variables passed to Harbor/the task container:
   PI_GSD_MOA_REPO=/workspace/gsd-moa              # mounted repo copied to /tmp/gsd-moa-ext
   PI_GSD_MOA_EXTENSION=/tmp/gsd-moa-ext/src/index.ts
   PI_GSD_MOA_ENV_FILE=/workspace/gsd-moa/.proof/gsd-moa.env  # preferred for secrets
+  PI_GSD_MOA_RUNTIME_TAR=/workspace/gsd-moa/.proof/omp-runtime.tar  # optional prebuilt OMP bundle
   PI_GSD_MOA_THINKING_LEVEL=high
   GSD_MOA_PRIMARY_BASE_URL=http://host.docker.internal:8317/v1
   GSD_MOA_GEMINI_BASE_URL=http://host.docker.internal:8318/v1
@@ -60,6 +61,8 @@ STDERR_NAME = "stderr.txt"
 NON_SECRET_ENV_KEYS = [
     "GSD_MOA_TRACE",
     "GSD_MOA_TRACE_DIR",
+    "GSD_MOA_DEADLINE_EPOCH_MS",
+    "GSD_MOA_BUDGET_MS",
     "GSD_MOA_PRIMARY_BASE_URL",
     "GSD_MOA_REFERENCE_BASE_URL",
     "GSD_MOA_GEMINI_BASE_URL",
@@ -75,7 +78,7 @@ NON_SECRET_ENV_KEYS = [
 LEGACY_SECRET_ENV_KEYS = ["FACTORY_GPT_API_KEY", "ZAI_API_KEY", "CLIPROXY_API_KEY"]
 
 
-def _nvm_prefix() -> str:
+def _runtime_prefix() -> str:
     return (
         'export NVM_DIR="$HOME/.nvm"; '
         '[ -s "$NVM_DIR/nvm.sh" ] || '
@@ -83,6 +86,9 @@ def _nvm_prefix() -> str:
         '. "$NVM_DIR/nvm.sh"; '
         'nvm install 24; '
         'nvm use 24; '
+        'export BUN_INSTALL="$HOME/.bun"; '
+        'export PATH="$BUN_INSTALL/bin:$PATH"; '
+        '[ -x "$BUN_INSTALL/bin/bun" ] || curl -fsSL https://bun.sh/install | bash; '
     )
 
 
@@ -92,26 +98,112 @@ class PiGsdMoaAgent(BaseInstalledAgent):
         return "pi-gsd-moa"
 
     async def install(self, environment: BaseEnvironment) -> None:
+        runtime_tar = self._env_value("PI_GSD_MOA_RUNTIME_TAR", "/workspace/gsd-moa/.proof/omp-runtime.tar")
+        if runtime_tar:
+            installed = await self._install_prebuilt_runtime(environment, runtime_tar)
+            if installed:
+                await self._copy_extension_repo(environment, runtime_prefix="", install_deps=False, preserve_runtime=True)
+                return
+
         await self.exec_as_root(
             environment,
-            command="apt-get update && apt-get install -y ca-certificates curl git python3",
-        )
-        nvm_prefix = _nvm_prefix()
-        await self.exec_as_agent(
-            environment,
             command=(
-                nvm_prefix
-                + "npm install -g @earendil-works/pi-coding-agent && pi --version"
+                "set -e; "
+                "if command -v apt-get >/dev/null 2>&1; then "
+                "  apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git python3 unzip; "
+                "elif command -v apk >/dev/null 2>&1; then "
+                "  echo 'ERROR: Alpine/musl base image; @oh-my-pi/pi-natives ships no musl prebuilt' >&2; exit 3; "
+                "elif command -v dnf >/dev/null 2>&1; then dnf install -y ca-certificates curl git python3 unzip; "
+                "elif command -v yum >/dev/null 2>&1; then yum install -y ca-certificates curl git python3 unzip; "
+                "fi"
             ),
         )
-        await self._copy_extension_repo(environment, nvm_prefix)
+        runtime_prefix = _runtime_prefix()
+        await self.exec_as_agent(
+            environment,
+            command=runtime_prefix + "node --version && bun --version",
+        )
+        await self._copy_extension_repo(environment, runtime_prefix)
+
+    async def _install_prebuilt_runtime(self, environment: BaseEnvironment, runtime_tar: str) -> bool:
+        workdir = self._env_value("PI_GSD_MOA_WORKDIR", "/tmp/gsd-moa-ext")
+        quoted_runtime_tar = shlex.quote(runtime_tar)
+        quoted_workdir = shlex.quote(workdir or "/tmp/gsd-moa-ext")
+        result = await self.exec_as_agent(
+            environment,
+            command=" ".join(
+                [
+                    "if [ ! -f",
+                    quoted_runtime_tar,
+                    "]; then echo '__GSD_MOA_PREBUILT_MISSING__'; exit 0; fi;",
+                    "if ls /lib/ld-musl-* >/dev/null 2>&1; then echo '__GSD_MOA_PREBUILT_MUSL_UNSUPPORTED__'; exit 0; fi;",
+                    "(",
+                    "rm -rf",
+                    quoted_workdir,
+                    "&& mkdir -p",
+                    quoted_workdir,
+                    "&& tar -xf",
+                    quoted_runtime_tar,
+                    "-C",
+                    quoted_workdir,
+                    "&& arch=$(uname -m) && case \"$arch\" in",
+                    "aarch64|arm64) bun_src=.bun/bin/bun-linux-aarch64 ;;",
+                    "x86_64|amd64) bun_src=.bun/bin/bun-linux-x64-baseline ;;",
+                    "*) echo \"unsupported arch $arch\" >&2; exit 4 ;; esac &&",
+                    "cd",
+                    quoted_workdir,
+                    "&& if [ -f \"$bun_src\" ]; then cp \"$bun_src\" .bun/bin/bun; fi &&",
+                    "chmod +x .bun/bin/bun &&",
+                    f"export BUN_INSTALL={quoted_workdir}/.bun;",
+                    'export PATH="$BUN_INSTALL/bin:$PATH";',
+                    "export PI_NATIVE_VARIANT=${PI_NATIVE_VARIANT:-baseline};",
+                    "bun --version && ./node_modules/.bin/omp --version",
+                    "&& echo '__GSD_MOA_PREBUILT_READY__'",
+                    ") || { echo '__GSD_MOA_PREBUILT_FAILED__'; exit 0; }",
+                ]
+            ),
+        )
+        return "__GSD_MOA_PREBUILT_READY__" in (result.stdout or "")
 
     def _env_value(self, key: str, default: str | None = None) -> str | None:
         return self.extra_env.get(key) or os.environ.get(key) or default
 
-    async def _copy_extension_repo(self, environment: BaseEnvironment, nvm_prefix: str) -> None:
+    async def _copy_extension_repo(
+        self,
+        environment: BaseEnvironment,
+        runtime_prefix: str,
+        *,
+        install_deps: bool = True,
+        preserve_runtime: bool = False,
+    ) -> None:
         repo = self._env_value("PI_GSD_MOA_REPO", "/workspace/gsd-moa")
         workdir = self._env_value("PI_GSD_MOA_WORKDIR", "/tmp/gsd-moa-ext")
+        quoted_workdir = shlex.quote(workdir)
+        prepare_workdir = (
+            "mkdir -p "
+            + quoted_workdir
+            + " && for path in "
+            + quoted_workdir
+            + "/* "
+            + quoted_workdir
+            + "/.[!.]* "
+            + quoted_workdir
+            + "/..?*; do [ -e \"$path\" ] || continue; base=$(basename \"$path\"); "
+            + "case \"$base\" in node_modules|.bun) continue ;; esac; rm -rf \"$path\"; done"
+            if preserve_runtime
+            else "rm -rf " + quoted_workdir + " && mkdir -p " + quoted_workdir
+        )
+        install_command = "true"
+        if install_deps:
+            install_command = " ".join(
+                [
+                    runtime_prefix,
+                    "(npm ci || npm install) &&",
+                    'arch=$(uname -m) && case "$arch" in aarch64|arm64) na=arm64 ;; x86_64|amd64) na=x64 ;; *) echo "unsupported arch $arch" >&2; exit 4 ;; esac &&',
+                    'ver=$(node -e "process.stdout.write(require(\"./node_modules/@oh-my-pi/pi-natives/package.json\").version)") &&',
+                    'if [ ! -d "node_modules/@oh-my-pi/pi-natives-linux-$na" ]; then npm install --no-save "@oh-my-pi/pi-natives-linux-$na@$ver"; fi;',
+                ]
+            )
         await self.exec_as_agent(
             environment,
             command=" ".join(
@@ -119,22 +211,17 @@ class PiGsdMoaAgent(BaseInstalledAgent):
                     "if [ -d",
                     shlex.quote(repo),
                     "]; then",
-                    "rm -rf",
-                    shlex.quote(workdir),
-                    "&&",
-                    "mkdir -p",
-                    shlex.quote(workdir),
+                    prepare_workdir,
                     "&&",
                     "tar --exclude='./.proof' --exclude='./node_modules' --exclude='./.pi/gsd-moa-cache' --exclude='./.git' -cf - -C",
                     shlex.quote(repo),
                     ". | tar -xf - -C",
-                    shlex.quote(workdir),
+                    quoted_workdir,
                     "&&",
                     "cd",
-                    shlex.quote(workdir),
+                    quoted_workdir,
                     "&&",
-                    nvm_prefix,
-                    "(npm ci || npm install);",
+                    install_command,
                     "else echo 'PI_GSD_MOA_REPO not mounted; using PI_GSD_MOA_EXTENSION as-is'; fi",
                 ]
             ),
@@ -159,6 +246,10 @@ class PiGsdMoaAgent(BaseInstalledAgent):
         env.setdefault("GSD_MOA_PRIMARY_BASE_URL", "http://host.docker.internal:8317/v1")
         env.setdefault("GSD_MOA_GEMINI_BASE_URL", "http://host.docker.internal:8318/v1")
         env.setdefault("GSD_MOA_CODEX_BASE_URL", "http://host.docker.internal:8318/v1")
+        env.setdefault("PI_NATIVE_VARIANT", "baseline")
+        runtime_tar = self._env_value("PI_GSD_MOA_RUNTIME_TAR")
+        if runtime_tar:
+            env["PI_GSD_MOA_RUNTIME_TAR"] = runtime_tar
         return env
 
     async def _prepare_secret_env(self, environment: BaseEnvironment, secret_env_file: str) -> str:
@@ -237,15 +328,24 @@ class PiGsdMoaAgent(BaseInstalledAgent):
                 shlex.quote(out_dir),
                 "&&",
                 source_env,
-                'export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 24 >/dev/null;',
+                'task_cwd="$PWD";',
+                'export NVM_DIR="$HOME/.nvm"; if [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh"; nvm use 24 >/dev/null || true; fi;',
+                f"export BUN_INSTALL={shlex.quote(f'{workdir}/.bun')};",
+                'export PATH="$BUN_INSTALL/bin:$HOME/.bun/bin:$PATH";',
+                'case "$GSD_MOA_BUDGET_MS" in ""|*[!0-9]*) export GSD_MOA_BUDGET_MS=900000 ;; esac;',
+                'now_ms=$(( $(date +%s) * 1000 ));',
+                'case "$GSD_MOA_DEADLINE_EPOCH_MS" in ""|*[!0-9]*) export GSD_MOA_DEADLINE_EPOCH_MS=$((now_ms + GSD_MOA_BUDGET_MS)) ;; esac;',
+                "cd",
+                shlex.quote(workdir),
+                "&&",
                 "set +e;",
-                "pi -a",
+                "./node_modules/.bin/omp",
+                "--auto-approve --approval-mode yolo --no-session --cwd \"$task_cwd\"",
                 "-e",
                 shlex.quote(extension),
                 "--model",
                 shlex.quote(model),
-                "--mode json --session",
-                shlex.quote(session_file),
+                "--mode json",
                 *[shlex.quote(arg) for arg in thinking_args],
                 "-p",
                 shlex.quote(instruction),
@@ -283,7 +383,11 @@ class PiGsdMoaAgent(BaseInstalledAgent):
                 ">>",
                 shlex.quote(stderr_file),
                 "; fi;",
-                "exit $status",
+                "echo 'omp exit status:' $status >>",
+                shlex.quote(stderr_file),
+                "; if [ \"$status\" -ne 0 ]; then if [ \"$status\" -eq 137 ] && grep -q '\"type\":\"turn_end\"'",
+                shlex.quote(output_file),
+                "; then exit 0; fi; exit $status; fi; exit 0",
             ]
         )
 
