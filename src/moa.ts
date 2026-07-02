@@ -2,6 +2,7 @@ import type { Context, SimpleStreamOptions, UserMessage } from "./pi-compat.js";
 import { resolveProposerRoute, resolveSynthesisRoute } from "./config.js";
 import { latestUserText, redactSensitiveText, sanitizeReferenceContext } from "./context.js";
 import { runReferenceCall } from "./reference-call.js";
+import { formatReferenceTimeLine } from "./time.js";
 import type { TraceRecorder } from "./trace.js";
 import type {
   FullMoaProposal,
@@ -11,6 +12,7 @@ import type {
   InnerCallDetails,
   PolicyDecision,
   PortfolioDecision,
+  TimeState,
   ToolObservationSummary,
   UpstreamRoute,
 } from "./types.js";
@@ -25,6 +27,7 @@ export async function runFullMoa(
   options?: SimpleStreamOptions,
   trace?: TraceRecorder,
   observationSummary?: ToolObservationSummary,
+  timeState?: TimeState,
 ): Promise<FullMoaResult> {
   if (!config.fullMoa.enabled) {
     throw new Error("full_moa mode requested but fullMoa.enabled is false");
@@ -36,7 +39,7 @@ export async function runFullMoa(
 
   const proposersById = new Map(config.fullMoa.proposers.map((proposer) => [proposer.id, proposer]));
   const settled = await Promise.allSettled(
-    selected.map((decision) => runProposer(config, context, policy, proposersById.get(decision.id)!, decision.reason, upstream, options, trace, observationSummary)),
+    selected.map((decision) => runProposer(config, context, policy, proposersById.get(decision.id)!, decision.reason, upstream, options, trace, observationSummary, timeState)),
   );
   const proposals = settled
     .filter((result): result is PromiseFulfilledResult<FullMoaProposal> => result.status === "fulfilled")
@@ -55,7 +58,7 @@ export async function runFullMoa(
   let synthesisError: string | undefined;
   if (config.fullMoa.synthesis.enabled) {
     try {
-      synthesis = await runSynthesis(config, context, policy, proposals, upstream, options, trace, observationSummary);
+      synthesis = await runSynthesis(config, context, policy, proposals, upstream, options, trace, observationSummary, timeState);
     } catch (error) {
       synthesisError = safeErrorMessage(error);
       synthesis = undefined;
@@ -99,16 +102,17 @@ async function runProposer(
   options?: SimpleStreamOptions,
   trace?: TraceRecorder,
   observationSummary?: ToolObservationSummary,
+  timeState?: TimeState,
 ): Promise<FullMoaProposal> {
   const route = resolveProposerRoute(config.reference, proposer, config.routePresets);
-  const proposerContext = buildProposerContext(config, context, policy, proposer, route, selectionReason, observationSummary);
+  const proposerContext = buildProposerContext(config, context, policy, proposer, route, selectionReason, observationSummary, timeState);
   const result = await runReferenceCall(config, route, proposerContext, {
     role: "proposer",
     id: proposer.id,
     label: proposer.label,
     cacheScope: `full_moa:reference:${proposer.id}`,
     promptVersion: config.prompts.fullMoaVersion,
-  }, upstream, options, trace);
+  }, upstream, options, trace, timeState);
   return {
     id: proposer.id,
     label: proposer.label,
@@ -131,14 +135,15 @@ async function runSynthesis(
   options?: SimpleStreamOptions,
   trace?: TraceRecorder,
   observationSummary?: ToolObservationSummary,
+  timeState?: TimeState,
 ): Promise<NonNullable<FullMoaResult["synthesis"]>> {
   const route = resolveSynthesisRoute(config.reference, config.fullMoa.synthesis, config.routePresets);
-  const synthesisContext = buildSynthesisContext(config, context, policy, proposals, route, observationSummary);
+  const synthesisContext = buildSynthesisContext(config, context, policy, proposals, route, observationSummary, timeState);
   const result = await runReferenceCall(config, route, synthesisContext, {
     role: "synthesizer",
     cacheScope: "full_moa:synthesis",
     promptVersion: config.prompts.fullMoaVersion,
-  }, upstream, options, trace);
+  }, upstream, options, trace, timeState);
   return {
     text: result.text,
     usage: result.usage,
@@ -157,6 +162,7 @@ export function buildProposerContext(
   route: UpstreamRoute = config.reference,
   selectionReason?: string,
   observationSummary?: ToolObservationSummary,
+  timeState?: TimeState,
 ): Context {
   const safe = sanitizeReferenceContext(context, policy, { preserveImages: route.input?.includes("image") ?? false });
   return {
@@ -173,6 +179,7 @@ export function buildProposerContext(
       selectionReason ? `Portfolio selection: ${selectionReason}.` : undefined,
       proposer.prompt,
       `Do not request or call tools. Do not claim to have changed files or executed commands.`,
+      formatReferenceTimeLine(timeState),
       `Selected route: requested=${policy.requestedMode}, mode=${policy.mode}, reason=${policy.reason}.`,
     ].filter(Boolean).join("\n\n"),
     tools: undefined,
@@ -186,6 +193,7 @@ export function buildSynthesisContext(
   proposals: FullMoaProposal[],
   route: UpstreamRoute = config.reference,
   observationSummary?: ToolObservationSummary,
+  timeState?: TimeState,
 ): Context {
   const safe = sanitizeReferenceContext(context, policy, { preserveImages: route.input?.includes("image") ?? false });
   const proposalMessage: UserMessage = {
@@ -205,6 +213,7 @@ export function buildSynthesisContext(
       `Prompt version: ${config.prompts.fullMoaVersion}.`,
       config.fullMoa.synthesis.prompt,
       `Do not request or call tools. Do not claim to have changed files or executed commands.`,
+      formatReferenceTimeLine(timeState),
       `Selected route: requested=${policy.requestedMode}, mode=${policy.mode}, reason=${policy.reason}.`,
     ].join("\n"),
     tools: undefined,

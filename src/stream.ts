@@ -8,13 +8,15 @@ import {
   type SimpleStreamOptions,
 } from "./pi-compat.js";
 import { runAdvisor } from "./advisor.js";
+import { maybeUseAsyncAdvisor, type AsyncAdvisorDecision } from "./async-advisor.js";
 import { loadConfig } from "./config.js";
-import { buildToolObservationSummary, isToolLoopContinuation, latestMessageHasMoaMarker, latestUserText, redactSensitiveText, stripMarkersFromContext, withAdvisorGuidance, withFullMoaGuidance } from "./context.js";
+import { buildToolObservationSummary, isToolLoopContinuation, latestMessageHasMoaMarker, latestUserText, redactSensitiveText, stripMarkersFromContext, withAdvisorGuidance, withFullMoaGuidance, withTimeAwarenessNote } from "./context.js";
 import { runFullMoa } from "./moa.js";
 import { chooseAction, chooseMode } from "./policy.js";
 import { applyModelPreset } from "./presets.js";
+import { timeEnvFromProcess, computeTimeState } from "./time.js";
 import { createTraceRecorder } from "./trace.js";
-import type { AdvisorResult, FullMoaResult, GsdMoaConfig, MoaAction, MoaRunDetails } from "./types.js";
+import type { AdvisorResult, FullMoaResult, GsdMoaConfig, MoaAction, MoaRunDetails, TimeState } from "./types.js";
 import { routeToModel, streamOptionsForRoute, type UpstreamClient, compatUpstreamClient } from "./upstream.js";
 import { addUsage } from "./usage.js";
 
@@ -36,6 +38,7 @@ export function streamGsdMoa(
     try {
       const config = applyModelPreset(deps.config ?? loadConfig(), model.id);
       const upstream = deps.upstream ?? compatUpstreamClient;
+      const timeState = computeTimeState(config.timeAware, timeEnvFromProcess(), Date.now());
       const contextIsToolLoopContinuation = isToolLoopContinuation(context);
       const recentToolSummary = contextIsToolLoopContinuation ? buildToolObservationSummary(context, config.checkpoint.maxToolResults) : undefined;
       const policyInput = {
@@ -44,6 +47,7 @@ export function streamGsdMoa(
         hasToolResults: contextIsToolLoopContinuation,
         hasFreshMoaMarker: latestMessageHasMoaMarker(context),
         recentToolSummary,
+        timeState,
       };
       const requestedPolicy = chooseMode(config, policyInput);
       const action = chooseAction(config, requestedPolicy, policyInput);
@@ -59,21 +63,37 @@ export function streamGsdMoa(
       let fullMoa: FullMoaResult | undefined;
       let guidanceInjected: boolean | undefined;
       let guidanceSkippedReason: string | undefined;
+      let asyncAdvisor: AsyncAdvisorDecision | undefined;
       if (action.kind === "run" && action.mode === "advisor") {
-        try {
-          advisor = await runAdvisor(config, context, policy, upstream, options, trace, action.observationSummary);
-          guidanceInjected = true;
-          finalContext = withAdvisorGuidance(primaryContext, advisor.text, policy);
-        } catch (error) {
-          if (options?.signal?.aborted) throw error;
-          trace?.recordReferenceLayerFailure("advisor", error);
-          guidanceInjected = false;
-          guidanceSkippedReason = `advisor failed: ${safeErrorMessage(error)}`;
-          diagnosticPolicy = { ...policy, mode: "single", reason: guidanceSkippedReason };
+        asyncAdvisor = maybeUseAsyncAdvisor(config, model, context, policy, action, upstream, options, timeState);
+        if (asyncAdvisor) {
+          if (asyncAdvisor.status === "injected" && asyncAdvisor.advisor) {
+            advisor = asyncAdvisor.advisor;
+            guidanceInjected = true;
+            finalContext = withAdvisorGuidance(primaryContext, advisor.text, policy);
+          } else {
+            guidanceInjected = false;
+            guidanceSkippedReason = asyncAdvisor.status === "failed"
+              ? `async advisor failed: ${asyncAdvisor.error ?? "unknown error"}`
+              : `async advisor ${asyncAdvisor.status}`;
+            diagnosticPolicy = { ...policy, mode: "single", reason: guidanceSkippedReason };
+          }
+        } else {
+          try {
+            advisor = await runAdvisor(config, context, policy, upstream, options, trace, action.observationSummary, timeState);
+            guidanceInjected = true;
+            finalContext = withAdvisorGuidance(primaryContext, advisor.text, policy);
+          } catch (error) {
+            if (options?.signal?.aborted) throw error;
+            trace?.recordReferenceLayerFailure("advisor", error);
+            guidanceInjected = false;
+            guidanceSkippedReason = `advisor failed: ${safeErrorMessage(error)}`;
+            diagnosticPolicy = { ...policy, mode: "single", reason: guidanceSkippedReason };
+          }
         }
       } else if (action.kind === "run" && action.mode === "full_moa") {
         try {
-          fullMoa = await runFullMoa(config, context, policy, upstream, options, trace, action.observationSummary);
+          fullMoa = await runFullMoa(config, context, policy, upstream, options, trace, action.observationSummary, timeState);
           guidanceInjected = true;
           finalContext = withFullMoaGuidance(primaryContext, fullMoa, policy);
         } catch (error) {
@@ -88,6 +108,8 @@ export function streamGsdMoa(
         guidanceSkippedReason = action.reason;
       }
 
+      if (timeState) finalContext = withTimeAwarenessNote(finalContext, timeState);
+
       trace?.recordFinalContext(finalContext);
       const primaryModel = routeToModel(config.primary);
       const inner = upstream.stream(primaryModel, finalContext, streamOptionsForRoute(config.primary, options));
@@ -97,7 +119,7 @@ export function streamGsdMoa(
           const primaryUsage = event.message.usage;
           const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
           event.message.usage = combinedUsage;
-          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, trace?.filePath, guidanceInjected, guidanceSkippedReason);
+          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor);
           event.message.diagnostics = [
             ...(event.message.diagnostics ?? []),
             diagnostic,
@@ -107,7 +129,7 @@ export function streamGsdMoa(
           const primaryUsage = event.error.usage;
           const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
           event.error.usage = combinedUsage;
-          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, trace?.filePath, guidanceInjected, guidanceSkippedReason);
+          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor);
           event.error.diagnostics = [
             ...(event.error.diagnostics ?? []),
             diagnostic,
@@ -142,7 +164,10 @@ function moaDiagnostic(
   tracePath?: string,
   guidanceInjected?: boolean,
   guidanceSkippedReason?: string,
+  timeState?: TimeState,
+  asyncAdvisor?: AsyncAdvisorDecision,
 ): NonNullable<AssistantMessage["diagnostics"]>[number] {
+  const timeSuppressed = timeState && action.kind === "single" && action.reason.startsWith("time reserve") ? action.reason : undefined;
   const details: MoaRunDetails & { combinedUsage: AssistantMessage["usage"]; tracePath?: string } = {
     mode: policy.mode,
     requestedMode: policy.requestedMode,
@@ -161,6 +186,21 @@ function moaDiagnostic(
     guidanceInjected,
     ...(guidanceSkippedReason ? { guidanceSkippedReason } : {}),
     ...(fullMoa?.synthesisError ? { synthesisFailedReason: fullMoa.synthesisError } : {}),
+    ...(timeState ? {
+      timeAware: {
+        remainingMs: timeState.remainingMs,
+        ...(timeState.elapsedMs !== undefined ? { elapsedMs: timeState.elapsedMs } : {}),
+        ...(timeState.phase ? { phase: timeState.phase } : {}),
+        ...(timeSuppressed ? { suppressed: timeSuppressed } : {}),
+      },
+    } : {}),
+    ...(asyncAdvisor ? {
+      asyncAdvisor: {
+        status: asyncAdvisor.status,
+        ...(asyncAdvisor.ageMs !== undefined ? { ageMs: asyncAdvisor.ageMs } : {}),
+        ...(asyncAdvisor.error ? { error: asyncAdvisor.error } : {}),
+      },
+    } : {}),
     innerCalls: [
       ...(advisor
         ? [{ role: "reference" as const, provider: config.reference.provider, model: config.reference.model, usage: advisor.usage, cacheHit: advisor.cacheHit }]

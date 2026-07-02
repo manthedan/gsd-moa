@@ -168,6 +168,8 @@ export GSD_MOA_CHECKPOINT_DRIFT_TOOL_RESULTS=3
 
 The default GPT-5.5 route expects a local OpenAI-compatible Codex/Factory-style proxy. The default GLM-5.2 route expects a Z.ai-compatible endpoint. CLIProxyAPI route presets default to `http://127.0.0.1:8318/v1`. Override route presets in `.pi/gsd-moa.json` when using a different provider, proxy, port, model ID, or subscription path.
 
+See `docs/TIME-AWARE.md` for the harness deadline env contract, LemonHarness-style phase schedule, async advisor experiment, and Codex model-limit note.
+
 ## Modular specialists
 
 Full MoA can include unconditional references or conditional specialists. A proposer can use:

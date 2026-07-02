@@ -32,6 +32,7 @@ export default function gsdMoaExtension(pi: ExtensionAPI) {
 }
 
 export { runAdvisor, buildAdvisorContext } from "./advisor.js";
+export { resetAsyncAdvisor } from "./async-advisor.js";
 export { advisorCacheKey, readAdvisorCache, writeAdvisorCache } from "./cache.js";
 export { loadConfig, mergeUpstreamRoute, parseModelRef, resetConfigCache, resolveProposerRoute, resolveSynthesisRoute, validateConfig } from "./config.js";
 export { sanitizeReferenceContext, withAdvisorGuidance, withFullMoaGuidance } from "./context.js";
@@ -42,6 +43,7 @@ export { applyModelPreset } from "./presets.js";
 export { ALIAS_PRESETS, applyAliasPreset, buildDefaultAliasMap, buildProviderModelConfigs, modelCardFromPrimaryRoute, providerModelConfigForAliasConfig, providerModelConfigForEntry } from "./registry.js";
 export type { AliasPresetEntry, BuiltinAliasId } from "./registry.js";
 export { streamGsdMoa } from "./stream.js";
+export { computeTimeState } from "./time.js";
 export { createTraceRecorder } from "./trace.js";
 export { PROVIDER_ID } from "./types.js";
-export type { CheckpointPolicyConfig, CheckpointScope, FullMoaProposal, FullMoaResult, GsdMoaConfig, ModelRef, MoaAction, MoaMode, PolicyDecision, PortfolioDecision, ReferenceWhenConfig, TraceConfig, UpstreamRoute } from "./types.js";
+export type { AsyncAdvisorConfig, CheckpointPolicyConfig, CheckpointScope, FullMoaProposal, FullMoaResult, GsdMoaConfig, ModelRef, MoaAction, MoaMode, PolicyDecision, PortfolioDecision, ReferenceWhenConfig, TimeAwareConfig, TimeState, TraceConfig, UpstreamRoute } from "./types.js";

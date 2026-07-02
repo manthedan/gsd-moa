@@ -116,6 +116,20 @@ export const DEFAULT_CONFIG: GsdMoaConfig = {
     maxToolResults: 4,
     driftToolResultThreshold: 3,
   },
+  timeAware: {
+    enabled: true,
+    reserveRatio: 0.10,
+    exploreRatio: 0.30,
+    implementRatio: 0.60,
+    validateRatio: 0.90,
+    graceRatio: 0.05,
+    minReserveMs: 60_000,
+    downgradeInValidate: true,
+  },
+  asyncAdvisor: {
+    enabled: false,
+    maxPendingMs: 600_000,
+  },
   referenceTimeoutMs: 120000,
 };
 
@@ -259,6 +273,8 @@ function parseConfigFile(fullPath: string, displayPath: string): GsdMoaConfig {
     trace: isRecord(parsed.trace) ? { ...DEFAULT_CONFIG.trace, ...parsed.trace } as GsdMoaConfig["trace"] : structuredClone(DEFAULT_CONFIG.trace),
     prompts: isRecord(parsed.prompts) ? { ...DEFAULT_CONFIG.prompts, ...parsed.prompts } as GsdMoaConfig["prompts"] : structuredClone(DEFAULT_CONFIG.prompts),
     checkpoint: isRecord(parsed.checkpoint) ? { ...DEFAULT_CONFIG.checkpoint, ...parsed.checkpoint } as GsdMoaConfig["checkpoint"] : structuredClone(DEFAULT_CONFIG.checkpoint),
+    timeAware: isRecord(parsed.timeAware) ? { ...DEFAULT_CONFIG.timeAware, ...parsed.timeAware } as GsdMoaConfig["timeAware"] : structuredClone(DEFAULT_CONFIG.timeAware),
+    asyncAdvisor: isRecord(parsed.asyncAdvisor) ? { ...DEFAULT_CONFIG.asyncAdvisor, ...parsed.asyncAdvisor } as GsdMoaConfig["asyncAdvisor"] : structuredClone(DEFAULT_CONFIG.asyncAdvisor),
     referenceTimeoutMs: typeof parsed.referenceTimeoutMs === "number" ? parsed.referenceTimeoutMs : DEFAULT_CONFIG.referenceTimeoutMs,
   };
 }
@@ -351,8 +367,34 @@ export function validateConfig(cfg: GsdMoaConfig): void {
   if (!Number.isInteger(cfg.checkpoint.driftToolResultThreshold) || cfg.checkpoint.driftToolResultThreshold < 1) {
     throw new Error("checkpoint.driftToolResultThreshold must be a positive integer");
   }
+  validateTimeAware(cfg.timeAware);
+  if (typeof cfg.asyncAdvisor.enabled !== "boolean") throw new Error("asyncAdvisor.enabled must be boolean");
+  if (!Number.isInteger(cfg.asyncAdvisor.maxPendingMs) || cfg.asyncAdvisor.maxPendingMs < 1) {
+    throw new Error("asyncAdvisor.maxPendingMs must be a positive integer");
+  }
   if (!Number.isInteger(cfg.referenceTimeoutMs) || cfg.referenceTimeoutMs < 1) {
     throw new Error("referenceTimeoutMs must be a positive integer");
+  }
+}
+
+function validateTimeAware(timeAware: GsdMoaConfig["timeAware"]): void {
+  if (typeof timeAware.enabled !== "boolean") throw new Error("timeAware.enabled must be boolean");
+  if (typeof timeAware.downgradeInValidate !== "boolean") throw new Error("timeAware.downgradeInValidate must be boolean");
+  const ratios: Array<[string, number]> = [
+    ["timeAware.reserveRatio", timeAware.reserveRatio],
+    ["timeAware.exploreRatio", timeAware.exploreRatio],
+    ["timeAware.implementRatio", timeAware.implementRatio],
+    ["timeAware.validateRatio", timeAware.validateRatio],
+    ["timeAware.graceRatio", timeAware.graceRatio],
+  ];
+  for (const [label, value] of ratios) {
+    if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error(`${label} must be a ratio between 0 and 1`);
+  }
+  if (!(timeAware.exploreRatio <= timeAware.implementRatio && timeAware.implementRatio <= timeAware.validateRatio)) {
+    throw new Error("timeAware phase ratios must be cumulative: exploreRatio <= implementRatio <= validateRatio");
+  }
+  if (!Number.isInteger(timeAware.minReserveMs) || timeAware.minReserveMs < 0) {
+    throw new Error("timeAware.minReserveMs must be a non-negative integer");
   }
 }
 

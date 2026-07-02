@@ -140,8 +140,8 @@ describe("alias registry", () => {
   it("derives honest model-card metadata from effective primary routes", () => {
     const codex = GSD_MOA_MODELS.find((model) => model.id === "gpt55-cliproxycodex-full");
     assert.ok(codex);
-    assert.equal(codex.contextWindow, 128_000);
-    assert.equal(codex.maxTokens, 16_384);
+    assert.equal(codex.contextWindow, 272_000);
+    assert.equal(codex.maxTokens, 128_000);
     assert.deepEqual(codex.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
 
     const glmDriver = GSD_MOA_MODELS.find((model) => model.id === "glm52-zai-gpt55-cliproxycodex-full");

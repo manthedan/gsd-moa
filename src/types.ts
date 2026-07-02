@@ -60,6 +60,32 @@ export interface CheckpointPolicyConfig {
   driftToolResultThreshold: number;
 }
 
+export type TimePhase = "explore" | "implement" | "validate" | "reserve";
+
+export interface TimeAwareConfig {
+  enabled: boolean;
+  reserveRatio: number;
+  exploreRatio: number;
+  implementRatio: number;
+  validateRatio: number;
+  graceRatio: number;
+  minReserveMs: number;
+  downgradeInValidate: boolean;
+}
+
+export interface AsyncAdvisorConfig {
+  enabled: boolean;
+  maxPendingMs: number;
+}
+
+export interface TimeState {
+  remainingMs: number;
+  elapsedMs?: number;
+  budgetMs?: number;
+  phase?: TimePhase;
+  inReserve: boolean;
+}
+
 export interface ReferenceWhenConfig {
   anyCapability?: InputCapability[];
   anyKeyword?: string[];
@@ -101,6 +127,8 @@ export interface GsdMoaConfig {
   trace: TraceConfig;
   prompts: PromptConfig;
   checkpoint: CheckpointPolicyConfig;
+  timeAware: TimeAwareConfig;
+  asyncAdvisor: AsyncAdvisorConfig;
   referenceTimeoutMs: number;
 }
 
@@ -123,6 +151,7 @@ export interface PolicyInput {
   hasToolResults?: boolean;
   hasFreshMoaMarker?: boolean;
   recentToolSummary?: ToolObservationSummary;
+  timeState?: TimeState;
 }
 
 export interface PolicyDecision {
@@ -207,6 +236,17 @@ export interface MoaRunDetails {
   guidanceInjected?: boolean;
   guidanceSkippedReason?: string;
   synthesisFailedReason?: string;
+  timeAware?: {
+    remainingMs: number;
+    elapsedMs?: number;
+    phase?: TimePhase;
+    suppressed?: string;
+  };
+  asyncAdvisor?: {
+    status: "fired" | "pending" | "injected" | "failed";
+    ageMs?: number;
+    error?: string;
+  };
   innerCalls: InnerCallDetails[];
   portfolio?: PortfolioDecision[];
 }

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AssistantMessage, Context, Message, TextContent, UserMessage } from "./pi-compat.js";
-import type { FullMoaResult, PolicyDecision, ToolObservationSummary } from "./types.js";
+import { formatTimeAwareNote } from "./time.js";
+import type { FullMoaResult, PolicyDecision, TimeState, ToolObservationSummary } from "./types.js";
 
 export function latestUserText(context: Context, preserveMarkers = false): string {
   for (let i = context.messages.length - 1; i >= 0; i--) {
@@ -249,6 +250,10 @@ export function withFullMoaGuidance(context: Context, result: FullMoaResult, pol
 
   if (!context.tools?.length) return finalContext;
   return appendPublicExecutionNote(finalContext, "[Execution note from provider: You are inside the live task environment and have tools. If this request asks to configure, fix, install, run, edit files, or modify services, use tools to perform and verify the work instead of only providing instructions.]");
+}
+
+export function withTimeAwarenessNote(context: Context, timeState: TimeState): Context {
+  return appendPublicExecutionNote(context, formatTimeAwareNote(timeState));
 }
 
 function appendPublicExecutionNote(context: Context, note: string): Context {

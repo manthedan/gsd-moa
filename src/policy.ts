@@ -1,3 +1,4 @@
+import { hasReferenceTimeBudget } from "./time.js";
 import type { AliasMode, GsdMoaConfig, MoaAction, MoaMode, PolicyDecision, PolicyInput } from "./types.js";
 
 const ADVISOR_MARKERS = ["<!-- gsd-moa:advisor -->", "<!-- gsd-moa:on -->"];
@@ -68,6 +69,10 @@ export function chooseAction(config: GsdMoaConfig, policy: PolicyDecision, input
 
   if (explicitSingle) return { kind: "single", reason: policy.reason };
 
+  if (!explicitFreshMoaMarker && shouldSuppressForReserve(config, input)) {
+    return { kind: "single", reason: `time reserve: ${Math.ceil((input.timeState?.remainingMs ?? 0) / 1000)}s remaining` };
+  }
+
   if (!config.checkpoint.enabled && input.hasToolResults && !explicitFreshMoaMarker) {
     return { kind: "single", reason: "checkpoint policy disabled for tool-loop continuation" };
   }
@@ -109,17 +114,26 @@ export function chooseAction(config: GsdMoaConfig, policy: PolicyDecision, input
 
   const driftEligible = policy.mode === "advisor" || policy.mode === "full_moa" || policy.requestedMode === "auto";
   if (summary && summary.totalToolResultCount > 0 && summary.totalToolResultCount % config.checkpoint.driftToolResultThreshold === 0 && driftEligible) {
-    const mode = policy.mode === "full_moa" && config.fullMoa.enabled ? "full_moa" : "advisor";
+    const baseMode = policy.mode === "full_moa" && config.fullMoa.enabled ? "full_moa" : "advisor";
+    const mode = config.timeAware.downgradeInValidate && input.timeState?.phase === "validate" && baseMode === "full_moa" ? "advisor" : baseMode;
     return {
       kind: "run",
       mode,
       scope: "drift",
-      reason: `MoA drift checkpoint after ${summary.totalToolResultCount} total tool results`,
+      reason: mode !== baseMode
+        ? `MoA drift checkpoint after ${summary.totalToolResultCount} total tool results; downgraded to advisor during validate phase`
+        : `MoA drift checkpoint after ${summary.totalToolResultCount} total tool results`,
       observationSummary: summary,
     };
   }
 
   return { kind: "single", reason: "tool-loop continuation without checkpoint signal" };
+}
+
+function shouldSuppressForReserve(config: GsdMoaConfig, input: PolicyInput): boolean {
+  if (!input.timeState) return false;
+  if (!hasReferenceTimeBudget(config.timeAware, input.timeState)) return true;
+  return false;
 }
 
 function decision(
