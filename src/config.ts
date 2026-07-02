@@ -311,6 +311,9 @@ function applyEnvOverrides(cfg: GsdMoaConfig): void {
   if (process.env.GSD_MOA_CHECKPOINT_DRIFT_TOOL_RESULTS !== undefined) {
     cfg.checkpoint.driftToolResultThreshold = Number(process.env.GSD_MOA_CHECKPOINT_DRIFT_TOOL_RESULTS);
   }
+  if (process.env.GSD_MOA_TIME_AWARE !== undefined) {
+    cfg.timeAware.enabled = /^(1|true|yes|on)$/i.test(process.env.GSD_MOA_TIME_AWARE);
+  }
   if (process.env.GSD_MOA_REFERENCE_TIMEOUT_MS !== undefined) {
     cfg.referenceTimeoutMs = Number(process.env.GSD_MOA_REFERENCE_TIMEOUT_MS);
   }

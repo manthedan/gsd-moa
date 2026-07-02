@@ -205,3 +205,20 @@ describe("time-aware scheduling", () => {
     }
   });
 });
+
+describe("time-aware env override", () => {
+  it("GSD_MOA_TIME_AWARE=0 disables time-aware via loadConfig even when budget env vars are set", async () => {
+    const { loadConfig, resetConfigCache } = await import("../src/config.ts");
+    const prev = process.env.GSD_MOA_TIME_AWARE;
+    process.env.GSD_MOA_TIME_AWARE = "0";
+    try {
+      resetConfigCache();
+      const cfg = loadConfig("nonexistent-gsd-moa-config.json");
+      assert.equal(cfg.timeAware.enabled, false);
+    } finally {
+      if (prev === undefined) delete process.env.GSD_MOA_TIME_AWARE;
+      else process.env.GSD_MOA_TIME_AWARE = prev;
+      resetConfigCache();
+    }
+  });
+});
