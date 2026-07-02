@@ -117,5 +117,10 @@
   "prompts": {
     "advisorVersion": "v1",
     "fullMoaVersion": "v2"
+  },
+  "checkpoint": {
+    "enabled": true,
+    "maxToolResults": 4,
+    "driftToolResultThreshold": 3
   }
 }

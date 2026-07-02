@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { Context } from "@earendil-works/pi-ai/compat";
 import { DEFAULT_CONFIG, loadConfig, resolveProposerRoute, resolveSynthesisRoute, validateConfig } from "../src/config.ts";
-import { referenceCacheKey } from "../src/cache.ts";
-import { hasRecentToolResults, latestUserText, sanitizeReferenceContext } from "../src/context.ts";
-import { chooseMode, stripMoaMarkers } from "../src/policy.ts";
+import { readCacheByKey, referenceCacheKey, writeAdvisorCache } from "../src/cache.ts";
+import { buildToolObservationSummary, hasRecentToolResults, latestUserText, sanitizeReferenceContext } from "../src/context.ts";
+import { chooseAction, chooseMode, stripMoaMarkers } from "../src/policy.ts";
+import { resolveConfigValue, streamOptionsForRoute } from "../src/upstream.ts";
 
 const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 
@@ -35,6 +36,177 @@ describe("mode policy", () => {
     assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-single", latestUserText: "<!-- gsd-moa:advisor --> review" }).mode, "advisor");
     assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-single", latestUserText: "<!-- gsd-moa:full --> review" }).mode, "full_moa");
     assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-advisor", latestUserText: "<!-- gsd-moa:off --> review" }).mode, "single");
+  });
+
+  it("chooses checkpoint actions for tool-loop continuations", () => {
+    const failedContext: Context = {
+      messages: [
+        { role: "user", content: "<!-- gsd-moa:full --> fix tests", timestamp: 1 },
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "npm test exited with status 1\nAssertionError: expected true" }], isError: true, timestamp: 2 } as any,
+      ],
+    };
+    const failedInput = {
+      alias: "gpt55-glm52-full",
+      latestUserText: latestUserText(failedContext, true),
+      hasToolResults: hasRecentToolResults(failedContext),
+      recentToolSummary: buildToolObservationSummary(failedContext),
+    };
+    const failedPolicy = chooseMode(DEFAULT_CONFIG, failedInput);
+    const failedAction = chooseAction(DEFAULT_CONFIG, failedPolicy, failedInput);
+    assert.equal(failedAction.kind, "run");
+    if (failedAction.kind === "run") {
+      assert.equal(failedAction.scope, "failure");
+      assert.equal(failedAction.mode, "full_moa");
+      assert.ok(failedAction.observationSummary?.latestFailureSignals.includes("tool-result-error"));
+    }
+
+    const successContext: Context = {
+      messages: [
+        failedContext.messages[0],
+        failedContext.messages[1],
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-2", content: [{ type: "text", text: "created file\ndone" }], timestamp: 3 } as any,
+      ],
+    };
+    const successInput = {
+      alias: "gpt55-glm52-full",
+      latestUserText: latestUserText(successContext, true),
+      hasToolResults: hasRecentToolResults(successContext),
+      recentToolSummary: buildToolObservationSummary(successContext),
+    };
+    const successAction = chooseAction(DEFAULT_CONFIG, chooseMode(DEFAULT_CONFIG, successInput), successInput);
+    assert.deepEqual(successAction, { kind: "single", reason: "tool-loop continuation without checkpoint signal" });
+  });
+
+  it("fires drift checkpoints periodically using uncapped tool-result count", () => {
+    const cfg = { ...DEFAULT_CONFIG, checkpoint: { ...DEFAULT_CONFIG.checkpoint, driftToolResultThreshold: 3 } };
+    const baseMessages: Context["messages"] = [{ role: "user", content: "<!-- gsd-moa:advisor --> continue", timestamp: 1 }];
+    const tool = (n: number) => ({ role: "toolResult", toolName: "Bash", toolCallId: `call-${n}`, content: [{ type: "text", text: `done ${n}` }], timestamp: n + 1 }) as any;
+    const three: Context = { messages: [...baseMessages, tool(1), tool(2), tool(3)] };
+    const four: Context = { messages: [...baseMessages, tool(1), tool(2), tool(3), tool(4)] };
+
+    const threeInput = {
+      alias: "gpt55-glm52-advisor",
+      latestUserText: latestUserText(three, true),
+      hasToolResults: true,
+      recentToolSummary: buildToolObservationSummary(three),
+    };
+    const threeAction = chooseAction(cfg, chooseMode(cfg, threeInput), threeInput);
+    assert.equal(threeAction.kind, "run");
+    if (threeAction.kind === "run") {
+      assert.equal(threeAction.scope, "drift");
+      assert.equal(threeAction.observationSummary?.toolResultCount, 3);
+      assert.equal(threeAction.observationSummary?.totalToolResultCount, 3);
+    }
+
+    const fourInput = {
+      alias: "gpt55-glm52-advisor",
+      latestUserText: latestUserText(four, true),
+      hasToolResults: true,
+      recentToolSummary: buildToolObservationSummary(four),
+    };
+    const fourAction = chooseAction(cfg, chooseMode(cfg, fourInput), fourInput);
+    assert.deepEqual(fourAction, { kind: "single", reason: "tool-loop continuation without checkpoint signal" });
+    assert.equal(fourInput.recentToolSummary?.toolResultCount, 4);
+    assert.equal(fourInput.recentToolSummary?.totalToolResultCount, 4);
+    assert.match(fourInput.recentToolSummary?.text ?? "", /Recent tool observations:/);
+    assert.doesNotMatch(fourInput.recentToolSummary?.text ?? "", /since the last MoA checkpoint/);
+
+    const explicitFullOnSingleAlias = {
+      alias: "gpt55-glm52-single",
+      latestUserText: latestUserText(three, true).replace("advisor", "full"),
+      hasToolResults: true,
+      recentToolSummary: buildToolObservationSummary(three),
+    };
+    const explicitFullAction = chooseAction(cfg, chooseMode(cfg, explicitFullOnSingleAlias), explicitFullOnSingleAlias);
+    assert.equal(explicitFullAction.kind, "run");
+    if (explicitFullAction.kind === "run") {
+      assert.equal(explicitFullAction.scope, "drift");
+      assert.equal(explicitFullAction.mode, "full_moa");
+    }
+  });
+
+  it("redacts credentials from compact tool observation summaries", () => {
+    const context: Context = {
+      messages: [
+        { role: "user", content: "fix failing deploy", timestamp: 1 },
+        {
+          role: "toolResult",
+          toolName: "Bash",
+          toolCallId: "call-1",
+          content: [{ type: "text", text: "Error: deploy failed\nWarning: Authorization: Bearer sk-supersecret1234567890\nWarning Authorization=Basic basic-secret-token\nWarning Authorization Bearer whitespace-secret-token\nWarning Authorization: token token-scheme-secret\nError OPENAI_API_KEY=sk-anothersecret1234567890\nError ANTHROPIC_API_KEY=anthropic-secret-value\nWarning NPM_TOKEN=npm-provider-token\nWarning //registry.npmjs.org/:_authToken=npm_secret_token\nWarning DATABASE_URL=postgres://dbuser:dbpassword@example.com/app\nWarning remote=https://oauth-token@example.com/repo.git\nWarning bare npm_abcdefghijklmnopqrstuvwxyz\nWarning bare AIzaabcdefghijklmnopqrstuvwxyz\nWarning {\"Authorization\":\"ApiKey json-apikey-secret\"}" }],
+          isError: true,
+          timestamp: 2,
+        } as any,
+      ],
+    };
+    const summary = buildToolObservationSummary(context);
+    assert.ok(summary);
+    assert.match(summary.text, /Error: deploy failed/);
+    assert.match(summary.text, /REDACTED/);
+    assert.doesNotMatch(summary.text, /sk-supersecret/);
+    assert.doesNotMatch(summary.text, /sk-anothersecret/);
+    assert.doesNotMatch(summary.text, /basic-secret-token/);
+    assert.doesNotMatch(summary.text, /anthropic-secret-value/);
+    assert.doesNotMatch(summary.text, /whitespace-secret-token/);
+    assert.doesNotMatch(summary.text, /npm-provider-token/);
+    assert.doesNotMatch(summary.text, /npm_secret_token/);
+    assert.doesNotMatch(summary.text, /dbuser:dbpassword/);
+    assert.doesNotMatch(summary.text, /json-apikey-secret/);
+    assert.doesNotMatch(summary.text, /token-scheme-secret/);
+    assert.doesNotMatch(summary.text, /oauth-token/);
+    assert.doesNotMatch(summary.text, /npm_abcdefghijklmnopqrstuvwxyz/);
+    assert.doesNotMatch(summary.text, /AIzaabcdefghijklmnopqrstuvwxyz/);
+    assert.ok(summary.failureSignals.includes("tool-result-error"));
+  });
+
+  it("scopes tool observation summaries to the current user turn", () => {
+    const context: Context = {
+      messages: [
+        { role: "user", content: "old task", timestamp: 1 },
+        { role: "toolResult", toolName: "Bash", toolCallId: "old-1", content: [{ type: "text", text: "Error: old failure" }], isError: true, timestamp: 2 } as any,
+        { role: "user", content: "new task", timestamp: 3 },
+        { role: "toolResult", toolName: "Bash", toolCallId: "new-1", content: [{ type: "text", text: "created new file" }], timestamp: 4 } as any,
+      ],
+    };
+    const summary = buildToolObservationSummary(context);
+    assert.equal(summary?.toolResultCount, 1);
+    assert.equal(summary?.totalToolResultCount, 1);
+    assert.doesNotMatch(summary?.text ?? "", /old failure/);
+    assert.match(summary?.text ?? "", /created new file/);
+  });
+
+  it("does not treat negated failure counts as failure signals", () => {
+    const passing: Context = {
+      messages: [
+        { role: "user", content: "run tests", timestamp: 1 },
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "0 failed, 50 passed\n0 errors" }], timestamp: 2 } as any,
+      ],
+    };
+    const failing: Context = {
+      messages: [
+        { role: "user", content: "run tests", timestamp: 1 },
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "2 failed, 48 passed" }], timestamp: 2 } as any,
+      ],
+    };
+    assert.deepEqual(buildToolObservationSummary(passing)?.failureSignals, []);
+    assert.ok(buildToolObservationSummary(failing)?.failureSignals.includes("error-output"));
+  });
+
+  it("lets config disable tool-loop checkpoints", () => {
+    const cfg = { ...DEFAULT_CONFIG, checkpoint: { ...DEFAULT_CONFIG.checkpoint, enabled: false } };
+    const context: Context = {
+      messages: [
+        { role: "user", content: "<!-- gsd-moa:full --> fix tests", timestamp: 1 },
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "AssertionError" }], isError: true, timestamp: 2 } as any,
+      ],
+    };
+    const input = {
+      alias: "gpt55-glm52-full",
+      latestUserText: latestUserText(context, true),
+      hasToolResults: true,
+      recentToolSummary: buildToolObservationSummary(context),
+    };
+    assert.deepEqual(chooseAction(cfg, chooseMode(cfg, input), input), { kind: "single", reason: "checkpoint policy disabled for tool-loop continuation" });
   });
 
   it("rejects recursive upstream routes", () => {
@@ -170,6 +342,47 @@ describe("mode policy", () => {
     }
   });
 
+  it("loads and validates reference timeout config and env overrides", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gsd-moa-timeout-test-"));
+    const oldTimeout = process.env.GSD_MOA_REFERENCE_TIMEOUT_MS;
+    try {
+      writeFileSync(join(dir, "gsd-moa.json"), JSON.stringify({ referenceTimeoutMs: 5000 }));
+      assert.equal(loadConfig("gsd-moa.json", dir).referenceTimeoutMs, 5000);
+      process.env.GSD_MOA_REFERENCE_TIMEOUT_MS = "2500";
+      assert.equal(loadConfig("gsd-moa.json", dir).referenceTimeoutMs, 2500);
+      assert.throws(() => validateConfig({ ...DEFAULT_CONFIG, referenceTimeoutMs: 0 }), /referenceTimeoutMs/);
+    } finally {
+      if (oldTimeout === undefined) delete process.env.GSD_MOA_REFERENCE_TIMEOUT_MS;
+      else process.env.GSD_MOA_REFERENCE_TIMEOUT_MS = oldTimeout;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves route env vars for api keys and header values, and rejects missing ones", () => {
+    const oldApi = process.env.GSD_MOA_TEST_API_KEY;
+    const oldHeader = process.env.GSD_MOA_TEST_HEADER;
+    const oldMissing = process.env.GSD_MOA_TEST_MISSING;
+    try {
+      process.env.GSD_MOA_TEST_API_KEY = "api-secret";
+      process.env.GSD_MOA_TEST_HEADER = "header-secret";
+      delete process.env.GSD_MOA_TEST_MISSING;
+      assert.equal(resolveConfigValue("$GSD_MOA_TEST_API_KEY", "route apiKey"), "api-secret");
+      assert.equal(resolveConfigValue("${GSD_MOA_TEST_HEADER}", "route header x-api-key"), "header-secret");
+      const options = streamOptionsForRoute({ provider: "test", model: "m", apiKey: "$GSD_MOA_TEST_API_KEY", headers: { "x-api-key": "$GSD_MOA_TEST_HEADER" } }, { headers: { existing: "1" } });
+      assert.equal(options.apiKey, "api-secret");
+      assert.deepEqual(options.headers, { existing: "1", "x-api-key": "header-secret" });
+      assert.throws(() => resolveConfigValue("$GSD_MOA_TEST_MISSING", "route apiKey"), /GSD_MOA_TEST_MISSING.*route apiKey/);
+      assert.throws(() => streamOptionsForRoute({ provider: "test", model: "m", headers: { "x-api-key": "$GSD_MOA_TEST_MISSING" } }), /GSD_MOA_TEST_MISSING.*route header x-api-key/);
+    } finally {
+      if (oldApi === undefined) delete process.env.GSD_MOA_TEST_API_KEY;
+      else process.env.GSD_MOA_TEST_API_KEY = oldApi;
+      if (oldHeader === undefined) delete process.env.GSD_MOA_TEST_HEADER;
+      else process.env.GSD_MOA_TEST_HEADER = oldHeader;
+      if (oldMissing === undefined) delete process.env.GSD_MOA_TEST_MISSING;
+      else process.env.GSD_MOA_TEST_MISSING = oldMissing;
+    }
+  });
+
   it("merges full MoA reference overrides by id", () => {
     const dir = mkdtempSync(join(tmpdir(), "gsd-moa-proposer-test-"));
     try {
@@ -199,6 +412,27 @@ describe("mode policy", () => {
 });
 
 describe("reference cache keys", () => {
+  it("deletes corrupt and expired cache files and skips empty writes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gsd-moa-cache-test-"));
+    const cfg = { ...structuredClone(DEFAULT_CONFIG), cache: { enabled: true, dir: join(dir, "cache"), ttlSeconds: 60 } };
+    try {
+      writeAdvisorCache(cfg, "seed", "seed", usage, dir);
+      writeAdvisorCache(cfg, "empty", "   ", usage, dir);
+      assert.equal(existsSync(join(cfg.cache.dir, "empty.json")), false);
+      const corruptPath = join(cfg.cache.dir, "corrupt.json");
+      writeFileSync(corruptPath, "not json", { flag: "w" });
+      assert.equal(readCacheByKey(cfg, "corrupt", dir).hit, false);
+      assert.equal(existsSync(corruptPath), false);
+
+      const expiredPath = join(cfg.cache.dir, "expired.json");
+      writeFileSync(expiredPath, JSON.stringify({ version: 1, createdAt: 1, expiresAt: 1, text: "old" }));
+      assert.equal(readCacheByKey(cfg, "expired", dir).hit, false);
+      assert.equal(existsSync(expiredPath), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("include preserved image content digests", () => {
     const route = DEFAULT_CONFIG.primary;
     const first: Context = { messages: [{ role: "user", content: [{ type: "text", text: "analyze this screenshot" }, { type: "image", data: "first", mimeType: "image/png" } as any], timestamp: 1 }] };

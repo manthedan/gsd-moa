@@ -18,11 +18,11 @@ Internally, the provider can route each request through one of three modes:
 
 | Mode | What happens | Use when |
 |---|---|---|
-| `single` | GPT-5.5 answers directly. | Normal coding turns, tool loops, quick edits. |
-| `advisor` | A private tool-less reference model gives advice, then GPT-5.5 acts with normal Pi tools. | Planning, debugging, risky changes, review. |
-| `full_moa` | Multiple tool-less reference models respond first; their outputs can be synthesized into private guidance for the final acting call. | Expensive final checks or hard tasks where multiple perspectives are worth the cost. |
+| `single` | GPT-5.5 answers directly. | Normal coding turns, quick edits, and ordinary tool continuations. |
+| `advisor` | A private tool-less reference model gives advice at a checkpoint, then GPT-5.5 acts with normal Pi tools. | Planning, debugging, risky changes, review. |
+| `full_moa` | Multiple tool-less reference models respond at a checkpoint; their outputs can be synthesized into private guidance for the final acting call. | Expensive final checks or hard tasks where multiple perspectives are worth the cost. |
 
-Only the final acting model receives Pi tools. Reference models never receive tool schemas, tool calls, tool results, or the Pi system prompt.
+Only the final acting model receives Pi tools. Reference models never receive tool schemas, tool calls, raw tool results, or the Pi system prompt. On tool-loop continuations, `advisor` and `full_moa` aliases behave as checkpoint policies: boring continuations stay single-model, while failed/latest-drift checkpoints can rerun references with a compact tool-observation summary.
 
 ## How the MoA flow works
 
@@ -35,9 +35,10 @@ gsd-moa provider
   ↓
 choose mode: single | advisor | full_moa
   ↓
-reference/advisor calls, if needed
+reference/advisor calls, if a checkpoint is needed
   - no tools
   - sanitized context
+  - compact observation summary at failure/drift checkpoints
   - cached when safe
   ↓
 private guidance is appended to the final model context
@@ -144,6 +145,11 @@ Minimal example:
   "trace": {
     "enabled": false,
     "dir": ".proof/traces"
+  },
+  "checkpoint": {
+    "enabled": true,
+    "maxToolResults": 4,
+    "driftToolResultThreshold": 3
   }
 }
 ```
@@ -156,6 +162,8 @@ export ZAI_API_KEY=...
 export CLIPROXY_API_KEY=...          # for CLIProxyAPI presets
 export GSD_MOA_CODEX_MODEL=gpt-5.5   # optional Codex preset override
 export GSD_MOA_GEMINI_MODEL=gemini-3-flash
+export GSD_MOA_CHECKPOINTS=true
+export GSD_MOA_CHECKPOINT_DRIFT_TOOL_RESULTS=3
 ```
 
 The default GPT-5.5 route expects a local OpenAI-compatible Codex/Factory-style proxy. The default GLM-5.2 route expects a Z.ai-compatible endpoint. CLIProxyAPI route presets default to `http://127.0.0.1:8318/v1`. Override route presets in `.pi/gsd-moa.json` when using a different provider, proxy, port, model ID, or subscription path.
@@ -227,6 +235,8 @@ Final assistant messages include `gsd-moa.details`, which records:
 
 - selected mode
 - routing reason
+- checkpoint scope when references ran (`initial`, `explicit`, `failure`, or `drift`)
+- compact observation digest/signals for failure or drift checkpoints
 - cache hit/miss
 - inner provider/model calls
 - selected or skipped MoA references

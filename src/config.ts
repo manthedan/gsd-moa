@@ -103,6 +103,7 @@ export const DEFAULT_CONFIG: GsdMoaConfig = {
     "gpt55-cliproxycodex-advisor": { mode: "advisor" },
     "gpt55-cliproxycodex-full": { mode: "full_moa" },
     "gpt55-cliproxycodex-auto": { mode: "auto" },
+    "gpt55-cliproxycodex-glm52-nosynth-full": { mode: "full_moa" },
     "gpt55-cliproxycodex-glm52-gemini35flash-full": { mode: "full_moa" },
     "gpt55-cliproxycodex-glm52-claudeopus48-full": { mode: "full_moa" },
     "glm52-zai-gpt55-cliproxycodex-full": { mode: "full_moa" },
@@ -129,6 +130,12 @@ export const DEFAULT_CONFIG: GsdMoaConfig = {
     advisorVersion: "v1",
     fullMoaVersion: "v2",
   },
+  checkpoint: {
+    enabled: true,
+    maxToolResults: 4,
+    driftToolResultThreshold: 3,
+  },
+  referenceTimeoutMs: 120000,
 };
 
 function defaultPrimaryRoute(routePresets: GsdMoaConfig["routePresets"]): UpstreamRoute {
@@ -234,6 +241,8 @@ export function loadConfig(path = DEFAULT_CONFIG_PATH, cwd = process.cwd()): Gsd
     cache: isRecord(parsed.cache) ? { ...DEFAULT_CONFIG.cache, ...parsed.cache } as GsdMoaConfig["cache"] : structuredClone(DEFAULT_CONFIG.cache),
     trace: isRecord(parsed.trace) ? { ...DEFAULT_CONFIG.trace, ...parsed.trace } as GsdMoaConfig["trace"] : structuredClone(DEFAULT_CONFIG.trace),
     prompts: isRecord(parsed.prompts) ? { ...DEFAULT_CONFIG.prompts, ...parsed.prompts } as GsdMoaConfig["prompts"] : structuredClone(DEFAULT_CONFIG.prompts),
+    checkpoint: isRecord(parsed.checkpoint) ? { ...DEFAULT_CONFIG.checkpoint, ...parsed.checkpoint } as GsdMoaConfig["checkpoint"] : structuredClone(DEFAULT_CONFIG.checkpoint),
+    referenceTimeoutMs: typeof parsed.referenceTimeoutMs === "number" ? parsed.referenceTimeoutMs : DEFAULT_CONFIG.referenceTimeoutMs,
   };
   applyEnvOverrides(cfg);
   validateConfig(cfg);
@@ -262,6 +271,18 @@ function applyEnvOverrides(cfg: GsdMoaConfig): void {
   }
   if (process.env.GSD_MOA_TRACE_INCLUDE_OUTPUTS !== undefined) {
     cfg.trace.includeOutputs = /^(1|true|yes|on)$/i.test(process.env.GSD_MOA_TRACE_INCLUDE_OUTPUTS);
+  }
+  if (process.env.GSD_MOA_CHECKPOINTS !== undefined) {
+    cfg.checkpoint.enabled = /^(1|true|yes|on)$/i.test(process.env.GSD_MOA_CHECKPOINTS);
+  }
+  if (process.env.GSD_MOA_CHECKPOINT_MAX_TOOL_RESULTS !== undefined) {
+    cfg.checkpoint.maxToolResults = Number(process.env.GSD_MOA_CHECKPOINT_MAX_TOOL_RESULTS);
+  }
+  if (process.env.GSD_MOA_CHECKPOINT_DRIFT_TOOL_RESULTS !== undefined) {
+    cfg.checkpoint.driftToolResultThreshold = Number(process.env.GSD_MOA_CHECKPOINT_DRIFT_TOOL_RESULTS);
+  }
+  if (process.env.GSD_MOA_REFERENCE_TIMEOUT_MS !== undefined) {
+    cfg.referenceTimeoutMs = Number(process.env.GSD_MOA_REFERENCE_TIMEOUT_MS);
   }
 }
 
@@ -309,6 +330,16 @@ export function validateConfig(cfg: GsdMoaConfig): void {
   if (typeof cfg.trace.includeOutputs !== "boolean") throw new Error("trace.includeOutputs must be boolean");
   if (!cfg.prompts.advisorVersion) throw new Error("prompts.advisorVersion is required");
   if (!cfg.prompts.fullMoaVersion) throw new Error("prompts.fullMoaVersion is required");
+  if (typeof cfg.checkpoint.enabled !== "boolean") throw new Error("checkpoint.enabled must be boolean");
+  if (!Number.isInteger(cfg.checkpoint.maxToolResults) || cfg.checkpoint.maxToolResults < 1) {
+    throw new Error("checkpoint.maxToolResults must be a positive integer");
+  }
+  if (!Number.isInteger(cfg.checkpoint.driftToolResultThreshold) || cfg.checkpoint.driftToolResultThreshold < 1) {
+    throw new Error("checkpoint.driftToolResultThreshold must be a positive integer");
+  }
+  if (!Number.isInteger(cfg.referenceTimeoutMs) || cfg.referenceTimeoutMs < 1) {
+    throw new Error("referenceTimeoutMs must be a positive integer");
+  }
 }
 
 export function mergeUpstreamRoute(base: UpstreamRoute, override: Partial<UpstreamRoute> | undefined): UpstreamRoute {

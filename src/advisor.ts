@@ -1,9 +1,9 @@
 import type { Context, SimpleStreamOptions } from "@earendil-works/pi-ai/compat";
-import { readAdvisorCache, writeAdvisorCache } from "./cache.js";
-import { assistantText, sanitizeReferenceContext } from "./context.js";
+import { sanitizeReferenceContext } from "./context.js";
+import { runReferenceCall } from "./reference-call.js";
 import type { TraceRecorder } from "./trace.js";
-import type { AdvisorResult, GsdMoaConfig, PolicyDecision } from "./types.js";
-import { routeToModel, streamOptionsForRoute, type UpstreamClient } from "./upstream.js";
+import type { AdvisorResult, GsdMoaConfig, PolicyDecision, ToolObservationSummary } from "./types.js";
+import type { UpstreamClient } from "./upstream.js";
 
 export async function runAdvisor(
   config: GsdMoaConfig,
@@ -12,45 +12,24 @@ export async function runAdvisor(
   upstream: UpstreamClient,
   options?: SimpleStreamOptions,
   trace?: TraceRecorder,
+  observationSummary?: ToolObservationSummary,
 ): Promise<AdvisorResult> {
-  const referenceContext = buildAdvisorContext(config, context, policy);
-  const cache = readAdvisorCache(config, referenceContext);
-  const startedAt = Date.now();
-  if (cache.hit) {
-    trace?.recordReferenceCall({
-      role: "reference",
-      route: config.reference,
-      context: referenceContext,
-      cacheHit: true,
-      cacheKey: cache.key,
-      cachedText: cache.text,
-      startedAt,
-      endedAt: Date.now(),
-    });
-    return { text: cache.text, usage: undefined, cacheHit: true, key: cache.key };
-  }
-
-  const referenceModel = routeToModel(config.reference);
-  const message = await upstream.complete(referenceModel, referenceContext, streamOptionsForRoute(config.reference, options));
-  const text = assistantText(message).trim();
-  writeAdvisorCache(config, cache.key, text, message.usage);
-  trace?.recordReferenceCall({
+  const referenceContext = buildAdvisorContext(config, context, policy, observationSummary);
+  const result = await runReferenceCall(config, config.reference, referenceContext, {
     role: "reference",
-    route: config.reference,
-    context: referenceContext,
-    message,
-    cacheHit: false,
-    cacheKey: cache.key,
-    startedAt,
-    endedAt: Date.now(),
-  });
-  return { text, usage: message.usage, cacheHit: false, key: cache.key };
+    cacheScope: "advisor",
+    promptVersion: config.prompts.advisorVersion,
+  }, upstream, options, trace);
+  return { text: result.text, usage: result.usage, cacheHit: result.cacheHit, key: result.key };
 }
 
-export function buildAdvisorContext(config: GsdMoaConfig, context: Context, policy: PolicyDecision): Context {
+export function buildAdvisorContext(config: GsdMoaConfig, context: Context, policy: PolicyDecision, observationSummary?: ToolObservationSummary): Context {
   const safe = sanitizeReferenceContext(context, policy, { preserveImages: config.reference.input?.includes("image") ?? false });
   return {
     ...safe,
+    messages: observationSummary
+      ? [...safe.messages, { role: "user", content: observationSummary.text, timestamp: Date.now() }]
+      : safe.messages,
     systemPrompt: [
       `You are the configured reference model acting as a private advisor for a Pi coding agent provider.`,
       `Prompt version: ${config.prompts.advisorVersion}.`,

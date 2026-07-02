@@ -1,7 +1,7 @@
 import type { Context, SimpleStreamOptions, UserMessage } from "@earendil-works/pi-ai/compat";
-import { readReferenceCache, writeAdvisorCache } from "./cache.js";
 import { resolveProposerRoute, resolveSynthesisRoute } from "./config.js";
-import { assistantText, latestUserText, sanitizeReferenceContext } from "./context.js";
+import { latestUserText, redactSensitiveText, sanitizeReferenceContext } from "./context.js";
+import { runReferenceCall } from "./reference-call.js";
 import type { TraceRecorder } from "./trace.js";
 import type {
   FullMoaProposal,
@@ -11,9 +11,10 @@ import type {
   InnerCallDetails,
   PolicyDecision,
   PortfolioDecision,
+  ToolObservationSummary,
   UpstreamRoute,
 } from "./types.js";
-import { routeToModel, streamOptionsForRoute, type UpstreamClient } from "./upstream.js";
+import type { UpstreamClient } from "./upstream.js";
 import { addUsage } from "./usage.js";
 
 export async function runFullMoa(
@@ -23,6 +24,7 @@ export async function runFullMoa(
   upstream: UpstreamClient,
   options?: SimpleStreamOptions,
   trace?: TraceRecorder,
+  observationSummary?: ToolObservationSummary,
 ): Promise<FullMoaResult> {
   if (!config.fullMoa.enabled) {
     throw new Error("full_moa mode requested but fullMoa.enabled is false");
@@ -33,13 +35,30 @@ export async function runFullMoa(
   if (selected.length === 0) throw new Error("full_moa mode selected no reference proposers");
 
   const proposersById = new Map(config.fullMoa.proposers.map((proposer) => [proposer.id, proposer]));
-  const proposals = await Promise.all(
-    selected.map((decision) => runProposer(config, context, policy, proposersById.get(decision.id)!, decision.reason, upstream, options, trace)),
+  const settled = await Promise.allSettled(
+    selected.map((decision) => runProposer(config, context, policy, proposersById.get(decision.id)!, decision.reason, upstream, options, trace, observationSummary)),
   );
+  const proposals = settled
+    .filter((result): result is PromiseFulfilledResult<FullMoaProposal> => result.status === "fulfilled")
+    .map((result) => result.value);
+  const failedById = new Map<string, string>();
+  settled.forEach((result, index) => {
+    if (result.status === "rejected") failedById.set(selected[index]!.id, safeErrorMessage(result.reason));
+  });
+  const finalPortfolio = portfolio.map((decision) => {
+    const failure = failedById.get(decision.id);
+    return failure ? { ...decision, selected: true, reason: `failed: ${failure}` } : decision;
+  });
+  if (proposals.length === 0) throw new Error(`all full_moa proposers failed: ${[...failedById.values()].join("; ")}`);
 
-  const synthesis = config.fullMoa.synthesis.enabled
-    ? await runSynthesis(config, context, policy, proposals, upstream, options, trace)
-    : undefined;
+  let synthesis: NonNullable<FullMoaResult["synthesis"]> | undefined;
+  if (config.fullMoa.synthesis.enabled) {
+    try {
+      synthesis = await runSynthesis(config, context, policy, proposals, upstream, options, trace, observationSummary);
+    } catch {
+      synthesis = undefined;
+    }
+  }
 
   const guidance = formatReferenceBundle(proposals, synthesis?.text);
   const usage = addUsage(...proposals.map((proposal) => proposal.usage), synthesis?.usage);
@@ -65,7 +84,7 @@ export async function runFullMoa(
       : []),
   ];
 
-  return { proposals, synthesis, guidance, usage, innerCalls, portfolio };
+  return { proposals, synthesis, guidance, usage, innerCalls, portfolio: finalPortfolio };
 }
 
 async function runProposer(
@@ -77,62 +96,26 @@ async function runProposer(
   upstream: UpstreamClient,
   options?: SimpleStreamOptions,
   trace?: TraceRecorder,
+  observationSummary?: ToolObservationSummary,
 ): Promise<FullMoaProposal> {
   const route = resolveProposerRoute(config.reference, proposer, config.routePresets);
-  const proposerContext = buildProposerContext(config, context, policy, proposer, route, selectionReason);
-  const cache = readReferenceCache(config, proposerContext, route, `full_moa:reference:${proposer.id}`);
-  const startedAt = Date.now();
-  if (cache.hit) {
-    trace?.recordReferenceCall({
-      role: "proposer",
-      id: proposer.id,
-      label: proposer.label,
-      route,
-      context: proposerContext,
-      cacheHit: true,
-      cacheKey: cache.key,
-      cachedText: cache.text,
-      startedAt,
-      endedAt: Date.now(),
-    });
-    return {
-      id: proposer.id,
-      label: proposer.label,
-      text: cache.text,
-      usage: undefined,
-      cacheHit: true,
-      provider: route.provider,
-      model: route.model,
-      key: cache.key,
-      selectionReason,
-    };
-  }
-
-  const model = routeToModel(route);
-  const message = await upstream.complete(model, proposerContext, streamOptionsForRoute(route, options));
-  const text = assistantText(message).trim();
-  writeAdvisorCache(config, cache.key, text, message.usage);
-  trace?.recordReferenceCall({
+  const proposerContext = buildProposerContext(config, context, policy, proposer, route, selectionReason, observationSummary);
+  const result = await runReferenceCall(config, route, proposerContext, {
     role: "proposer",
     id: proposer.id,
     label: proposer.label,
-    route,
-    context: proposerContext,
-    message,
-    cacheHit: false,
-    cacheKey: cache.key,
-    startedAt,
-    endedAt: Date.now(),
-  });
+    cacheScope: `full_moa:reference:${proposer.id}`,
+    promptVersion: config.prompts.fullMoaVersion,
+  }, upstream, options, trace);
   return {
     id: proposer.id,
     label: proposer.label,
-    text,
-    usage: message.usage,
-    cacheHit: false,
-    provider: route.provider,
-    model: route.model,
-    key: cache.key,
+    text: result.text,
+    usage: result.usage,
+    cacheHit: result.cacheHit,
+    provider: result.provider,
+    model: result.model,
+    key: result.key,
     selectionReason,
   };
 }
@@ -145,53 +128,22 @@ async function runSynthesis(
   upstream: UpstreamClient,
   options?: SimpleStreamOptions,
   trace?: TraceRecorder,
+  observationSummary?: ToolObservationSummary,
 ): Promise<NonNullable<FullMoaResult["synthesis"]>> {
   const route = resolveSynthesisRoute(config.reference, config.fullMoa.synthesis, config.routePresets);
-  const synthesisContext = buildSynthesisContext(config, context, policy, proposals, route);
-  const cache = readReferenceCache(config, synthesisContext, route, "full_moa:synthesis");
-  const startedAt = Date.now();
-  if (cache.hit) {
-    trace?.recordReferenceCall({
-      role: "synthesizer",
-      route,
-      context: synthesisContext,
-      cacheHit: true,
-      cacheKey: cache.key,
-      cachedText: cache.text,
-      startedAt,
-      endedAt: Date.now(),
-    });
-    return {
-      text: cache.text,
-      usage: undefined,
-      cacheHit: true,
-      provider: route.provider,
-      model: route.model,
-      key: cache.key,
-    };
-  }
-
-  const model = routeToModel(route);
-  const message = await upstream.complete(model, synthesisContext, streamOptionsForRoute(route, options));
-  const text = assistantText(message).trim();
-  writeAdvisorCache(config, cache.key, text, message.usage);
-  trace?.recordReferenceCall({
+  const synthesisContext = buildSynthesisContext(config, context, policy, proposals, route, observationSummary);
+  const result = await runReferenceCall(config, route, synthesisContext, {
     role: "synthesizer",
-    route,
-    context: synthesisContext,
-    message,
-    cacheHit: false,
-    cacheKey: cache.key,
-    startedAt,
-    endedAt: Date.now(),
-  });
+    cacheScope: "full_moa:synthesis",
+    promptVersion: config.prompts.fullMoaVersion,
+  }, upstream, options, trace);
   return {
-    text,
-    usage: message.usage,
-    cacheHit: false,
-    provider: route.provider,
-    model: route.model,
-    key: cache.key,
+    text: result.text,
+    usage: result.usage,
+    cacheHit: result.cacheHit,
+    provider: result.provider,
+    model: result.model,
+    key: result.key,
   };
 }
 
@@ -202,10 +154,14 @@ export function buildProposerContext(
   proposer: FullMoaProposerConfig,
   route: UpstreamRoute = config.reference,
   selectionReason?: string,
+  observationSummary?: ToolObservationSummary,
 ): Context {
   const safe = sanitizeReferenceContext(context, policy, { preserveImages: route.input?.includes("image") ?? false });
   return {
     ...safe,
+    messages: observationSummary
+      ? [...safe.messages, { role: "user", content: observationSummary.text, timestamp: Date.now() } satisfies UserMessage]
+      : safe.messages,
     systemPrompt: [
       `You are ${proposer.label} in a private Mixture-of-Agents reference layer for a Pi coding agent provider.`,
       `Prompt version: ${config.prompts.fullMoaVersion}. Reference id: ${proposer.id}.`,
@@ -227,6 +183,7 @@ export function buildSynthesisContext(
   policy: PolicyDecision,
   proposals: FullMoaProposal[],
   route: UpstreamRoute = config.reference,
+  observationSummary?: ToolObservationSummary,
 ): Context {
   const safe = sanitizeReferenceContext(context, policy, { preserveImages: route.input?.includes("image") ?? false });
   const proposalMessage: UserMessage = {
@@ -236,7 +193,11 @@ export function buildSynthesisContext(
   };
   return {
     ...safe,
-    messages: [...safe.messages, proposalMessage],
+    messages: [
+      ...safe.messages,
+      ...(observationSummary ? [{ role: "user", content: observationSummary.text, timestamp: Date.now() } satisfies UserMessage] : []),
+      proposalMessage,
+    ],
     systemPrompt: [
       `You are the private synthesizer layer in a Mixture-of-Agents provider for a Pi coding agent.`,
       `Prompt version: ${config.prompts.fullMoaVersion}.`,
@@ -294,7 +255,7 @@ function isEmptyWhen(when: NonNullable<FullMoaProposerConfig["when"]>): boolean 
 }
 
 function requestFeatures(context: Context, policy: PolicyDecision): { text: string; capabilities: Set<string>; explicitIncludes: Set<string> } {
-  const text = `${policy.strippedText}\n${latestUserText(context, true)}\n${JSON.stringify(context.messages ?? [])}`.toLowerCase();
+  const text = `${policy.strippedText}\n${latestUserText(context, true)}`.toLowerCase();
   const capabilities = new Set<string>(["text"]);
   if (hasImageSignal(context, text)) capabilities.add("image");
   if (/\b(youtube|youtu\.be|video|mp4|mov|webm|transcribe|ocr|screen recording)\b/i.test(text)) capabilities.add("video");
@@ -304,11 +265,19 @@ function requestFeatures(context: Context, policy: PolicyDecision): { text: stri
 
 function hasImageSignal(context: Context, text: string): boolean {
   if (/\b(image|screenshot|diagram|ocr|png|jpe?g|gif|webp)\b/i.test(text)) return true;
-  return JSON.stringify(context.messages ?? []).includes('\"type\":\"image\"');
+  return context.messages.some((message) => {
+    if (message.role !== "user") return false;
+    if (typeof message.content === "string") return false;
+    return message.content.some((item) => item.type === "image");
+  });
 }
 
 function explicitIncludeIds(text: string): Set<string> {
   const ids = new Set<string>();
   for (const match of text.matchAll(/(?:gsd-moa:include|moa:include)\s*=\s*([a-z0-9_.-]+)/gi)) ids.add(match[1]);
   return ids;
+}
+
+function safeErrorMessage(error: unknown): string {
+  return redactSensitiveText(error instanceof Error ? error.message : String(error));
 }

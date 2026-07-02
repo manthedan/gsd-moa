@@ -72,7 +72,11 @@ async function collect(stream: AssistantMessageEventStream): Promise<AssistantMe
 
 function tempConfig(): { cfg: GsdMoaConfig; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "gsd-moa-test-"));
-  return { cfg: { ...structuredClone(DEFAULT_CONFIG), cache: { enabled: true, dir, ttlSeconds: 60 } }, dir };
+  const cfg = structuredClone(DEFAULT_CONFIG);
+  cfg.primary.apiKey = "test-primary-key";
+  cfg.reference.apiKey = "test-reference-key";
+  for (const preset of Object.values(cfg.routePresets)) preset.apiKey = "test-preset-key";
+  return { cfg: { ...cfg, cache: { enabled: true, dir, ttlSeconds: 60 } }, dir };
 }
 
 describe("advisor orchestration", () => {
@@ -86,19 +90,22 @@ describe("advisor orchestration", () => {
       let advisorCalls = 0;
       let primaryCalls = 0;
       const upstream: UpstreamClient = {
-        async complete(seenModel, seenContext) {
+        async complete(seenModel, seenContext, seenOptions) {
           advisorCalls++;
           assert.equal(seenModel.provider, "zai");
           assert.equal(seenModel.id, "glm-5.2");
           assert.equal(seenContext.tools, undefined);
           assert.match(seenContext.systemPrompt ?? "", /private advisor/i);
+          assert.ok(seenOptions?.signal instanceof AbortSignal);
           return message(seenModel, "Check tests and edge cases.", usage(10, 20));
         },
         stream(seenModel, seenContext) {
           primaryCalls++;
           assert.equal(seenModel.provider, "factory-codex");
           assert.equal(seenContext.tools?.[0]?.name, "Bash");
-          assert.match(seenContext.systemPrompt ?? "", /Check tests and edge cases/);
+          assert.doesNotMatch(seenContext.systemPrompt ?? "", /Check tests and edge cases/);
+          assert.match(JSON.stringify(seenContext.messages), /Check tests and edge cases/);
+          assert.match(JSON.stringify(seenContext.messages), /gsd-moa advisor guidance/);
           return streamText(seenModel, "final", usage(1, 2));
         },
       };
@@ -112,6 +119,74 @@ describe("advisor orchestration", () => {
       assert.equal(details.mode, "advisor");
       assert.equal(details.cacheHit, false);
       assert.equal(details.innerCalls.length, 2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("degrades to a primary-only call when advisor fails", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    try {
+      const context: Context = { messages: [{ role: "user", content: "please review this plan", timestamp: 1 }] };
+      let primaryCalls = 0;
+      const upstream: UpstreamClient = {
+        async complete() { throw new Error("advisor offline Authorization: Bearer sk-advisor-secret1234567890"); },
+        stream(seenModel, seenContext) {
+          primaryCalls++;
+          assert.equal(seenModel.provider, "factory-codex");
+          assert.doesNotMatch(JSON.stringify(seenContext.messages), /gsd-moa advisor guidance/);
+          return streamText(seenModel, "final", usage(1, 2));
+        },
+      };
+
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      assert.equal(done.type, "done");
+      assert.equal(primaryCalls, 1);
+      assert.equal(done.message.usage.totalTokens, 3);
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.mode, "single");
+      assert.equal(details.guidanceInjected, false);
+      assert.match(details.guidanceSkippedReason, /advisor failed: advisor offline/);
+      assert.match(details.guidanceSkippedReason, /REDACTED/);
+      assert.doesNotMatch(details.guidanceSkippedReason, /sk-advisor-secret/);
+      assert.equal(details.innerCalls.length, 1);
+      assert.equal(details.innerCalls[0].role, "primary");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a user message after old tool results as a fresh advisor turn", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    try {
+      const context: Context = {
+        messages: [
+          { role: "user", content: "fix tests", timestamp: 1 },
+          { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "Error: old failure" }], isError: true, timestamp: 2 } as any,
+          { role: "user", content: "please review this new plan", timestamp: 3 },
+        ],
+      };
+      let advisorCalls = 0;
+      const upstream: UpstreamClient = {
+        async complete(seenModel, seenContext) {
+          advisorCalls++;
+          assert.doesNotMatch(JSON.stringify(seenContext.messages), /old failure/);
+          return message(seenModel, "fresh advice", usage(2, 3));
+        },
+        stream(seenModel, seenContext) {
+          assert.match(JSON.stringify(seenContext.messages), /fresh advice/);
+          return streamText(seenModel, "final", usage(1, 2));
+        },
+      };
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(advisorCalls, 1);
+      assert.equal(details.mode, "advisor");
+      assert.equal(details.checkpointScope, "initial");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

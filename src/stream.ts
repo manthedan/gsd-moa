@@ -9,12 +9,12 @@ import {
 } from "@earendil-works/pi-ai/compat";
 import { runAdvisor } from "./advisor.js";
 import { loadConfig } from "./config.js";
-import { hasRecentToolResults, latestUserText, stripMarkersFromContext, withAdvisorGuidance, withFullMoaGuidance } from "./context.js";
+import { buildToolObservationSummary, isToolLoopContinuation, latestMessageHasMoaMarker, latestUserText, redactSensitiveText, stripMarkersFromContext, withAdvisorGuidance, withFullMoaGuidance } from "./context.js";
 import { runFullMoa } from "./moa.js";
-import { chooseMode } from "./policy.js";
+import { chooseAction, chooseMode } from "./policy.js";
 import { applyModelPreset } from "./presets.js";
 import { createTraceRecorder } from "./trace.js";
-import type { AdvisorResult, FullMoaResult, GsdMoaConfig, MoaRunDetails } from "./types.js";
+import type { AdvisorResult, FullMoaResult, GsdMoaConfig, MoaAction, MoaRunDetails } from "./types.js";
 import { routeToModel, streamOptionsForRoute, type UpstreamClient, compatUpstreamClient } from "./upstream.js";
 import { addUsage } from "./usage.js";
 
@@ -36,23 +36,56 @@ export function streamGsdMoa(
     try {
       const config = applyModelPreset(deps.config ?? loadConfig(), model.id);
       const upstream = deps.upstream ?? compatUpstreamClient;
-      const policy = chooseMode(config, {
+      const contextIsToolLoopContinuation = isToolLoopContinuation(context);
+      const recentToolSummary = contextIsToolLoopContinuation ? buildToolObservationSummary(context, config.checkpoint.maxToolResults) : undefined;
+      const policyInput = {
         alias: model.id,
         latestUserText: latestUserText(context, true),
-        hasToolResults: hasRecentToolResults(context),
-      });
-      trace = createTraceRecorder(config, model, context, policy);
+        hasToolResults: contextIsToolLoopContinuation,
+        hasFreshMoaMarker: latestMessageHasMoaMarker(context),
+        recentToolSummary,
+      };
+      const requestedPolicy = chooseMode(config, policyInput);
+      const action = chooseAction(config, requestedPolicy, policyInput);
+      const policy = action.kind === "run"
+        ? { ...requestedPolicy, mode: action.mode, reason: action.reason }
+        : { ...requestedPolicy, mode: "single" as const, reason: action.reason };
+      let diagnosticPolicy = policy;
+      trace = createTraceRecorder(config, model, context, policy, action);
 
       const primaryContext = stripMarkersFromContext(context);
       let finalContext = primaryContext;
       let advisor: AdvisorResult | undefined;
       let fullMoa: FullMoaResult | undefined;
-      if (policy.mode === "advisor") {
-        advisor = await runAdvisor(config, context, policy, upstream, options, trace);
-        finalContext = withAdvisorGuidance(primaryContext, advisor.text, policy);
-      } else if (policy.mode === "full_moa") {
-        fullMoa = await runFullMoa(config, context, policy, upstream, options, trace);
-        finalContext = withFullMoaGuidance(primaryContext, fullMoa, policy);
+      let guidanceInjected: boolean | undefined;
+      let guidanceSkippedReason: string | undefined;
+      if (action.kind === "run" && action.mode === "advisor") {
+        try {
+          advisor = await runAdvisor(config, context, policy, upstream, options, trace, action.observationSummary);
+          guidanceInjected = true;
+          finalContext = withAdvisorGuidance(primaryContext, advisor.text, policy);
+        } catch (error) {
+          if (options?.signal?.aborted) throw error;
+          trace?.recordReferenceLayerFailure("advisor", error);
+          guidanceInjected = false;
+          guidanceSkippedReason = `advisor failed: ${safeErrorMessage(error)}`;
+          diagnosticPolicy = { ...policy, mode: "single", reason: guidanceSkippedReason };
+        }
+      } else if (action.kind === "run" && action.mode === "full_moa") {
+        try {
+          fullMoa = await runFullMoa(config, context, policy, upstream, options, trace, action.observationSummary);
+          guidanceInjected = true;
+          finalContext = withFullMoaGuidance(primaryContext, fullMoa, policy);
+        } catch (error) {
+          if (options?.signal?.aborted) throw error;
+          trace?.recordReferenceLayerFailure("full_moa", error);
+          guidanceInjected = false;
+          guidanceSkippedReason = `full_moa failed: ${safeErrorMessage(error)}`;
+          diagnosticPolicy = { ...policy, mode: "single", reason: guidanceSkippedReason };
+        }
+      } else if (requestedPolicy.mode !== "single" && contextIsToolLoopContinuation) {
+        guidanceInjected = false;
+        guidanceSkippedReason = action.reason;
       }
 
       trace?.recordFinalContext(finalContext);
@@ -64,7 +97,7 @@ export function streamGsdMoa(
           const primaryUsage = event.message.usage;
           const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
           event.message.usage = combinedUsage;
-          const diagnostic = moaDiagnostic(config, policy, advisor, fullMoa, primaryUsage, combinedUsage, trace?.filePath);
+          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, trace?.filePath, guidanceInjected, guidanceSkippedReason);
           event.message.diagnostics = [
             ...(event.message.diagnostics ?? []),
             diagnostic,
@@ -74,7 +107,7 @@ export function streamGsdMoa(
           const primaryUsage = event.error.usage;
           const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
           event.error.usage = combinedUsage;
-          const diagnostic = moaDiagnostic(config, policy, advisor, fullMoa, primaryUsage, combinedUsage, trace?.filePath);
+          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, trace?.filePath, guidanceInjected, guidanceSkippedReason);
           event.error.diagnostics = [
             ...(event.error.diagnostics ?? []),
             diagnostic,
@@ -101,19 +134,32 @@ export function streamGsdMoa(
 function moaDiagnostic(
   config: GsdMoaConfig,
   policy: ReturnType<typeof chooseMode>,
+  action: MoaAction,
   advisor: AdvisorResult | undefined,
   fullMoa: FullMoaResult | undefined,
   primaryUsage: AssistantMessage["usage"],
   combinedUsage: AssistantMessage["usage"],
   tracePath?: string,
+  guidanceInjected?: boolean,
+  guidanceSkippedReason?: string,
 ): NonNullable<AssistantMessage["diagnostics"]>[number] {
   const details: MoaRunDetails & { combinedUsage: AssistantMessage["usage"]; tracePath?: string } = {
     mode: policy.mode,
     requestedMode: policy.requestedMode,
     reason: policy.reason,
+    ...(action.kind === "run" ? { checkpointScope: action.scope } : {}),
+    ...(action.kind === "run" && action.observationSummary ? {
+      observationDigest: action.observationSummary.digest,
+      observationToolResultCount: action.observationSummary.toolResultCount,
+      observationLatestFailureSignals: action.observationSummary.latestFailureSignals,
+      observationFailureSignals: action.observationSummary.failureSignals,
+      observationFilesMentioned: action.observationSummary.filesMentioned,
+    } : {}),
     cacheHit: fullMoa
       ? fullMoa.innerCalls.every((call) => call.cacheHit === true)
       : advisor?.cacheHit,
+    guidanceInjected,
+    ...(guidanceSkippedReason ? { guidanceSkippedReason } : {}),
     innerCalls: [
       ...(advisor
         ? [{ role: "reference" as const, provider: config.reference.provider, model: config.reference.model, usage: advisor.usage, cacheHit: advisor.cacheHit }]
@@ -126,6 +172,10 @@ function moaDiagnostic(
     ...(tracePath ? { tracePath } : {}),
   };
   return { type: "gsd-moa.details", timestamp: Date.now(), details: details as unknown as Record<string, unknown> };
+}
+
+function safeErrorMessage(error: unknown): string {
+  return redactSensitiveText(error instanceof Error ? error.message : String(error));
 }
 
 export function makeErrorMessage(model: Model<Api>, error: unknown, aborted = false): AssistantMessage {

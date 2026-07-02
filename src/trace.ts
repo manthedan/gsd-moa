@@ -7,13 +7,16 @@ import type {
   Api,
   Model,
 } from "@earendil-works/pi-ai/compat";
-import type { GsdMoaConfig, PolicyDecision, UpstreamRoute } from "./types.js";
+import { redactSensitiveText } from "./context.js";
+import type { GsdMoaConfig, MoaAction, PolicyDecision, UpstreamRoute } from "./types.js";
 
 export interface TraceRecorder {
   readonly runId: string;
   readonly filePath?: string;
   recordFinalContext(context: Context): void;
   recordReferenceCall(entry: TraceReferenceCall): void;
+  recordReferenceFailure(entry: TraceReferenceCall): void;
+  recordReferenceLayerFailure(layer: "advisor" | "full_moa", error: unknown): void;
   recordPrimaryEvent(event: AssistantMessageEvent): void;
   finish(message: AssistantMessage, diagnostics: unknown): void;
   finishError(message: AssistantMessage, diagnostics: unknown): void;
@@ -32,6 +35,7 @@ export interface TraceReferenceCall {
   cachedText?: string;
   startedAt: number;
   endedAt: number;
+  error?: string;
 }
 
 interface TraceFile {
@@ -42,6 +46,7 @@ interface TraceFile {
   status: "running" | "done" | "error";
   model: Pick<Model<Api>, "provider" | "id" | "api">;
   policy: PolicyDecision;
+  action: MoaAction;
   config: unknown;
   inputContext?: Context;
   finalContext?: Context;
@@ -50,6 +55,7 @@ interface TraceFile {
   finalMessage?: AssistantMessage;
   diagnostics?: unknown;
   error?: string;
+  referenceLayerFailures?: Array<{ layer: "advisor" | "full_moa"; error: string; timestamp: string }>;
 }
 
 export function createTraceRecorder(
@@ -57,9 +63,10 @@ export function createTraceRecorder(
   model: Model<Api>,
   inputContext: Context,
   policy: PolicyDecision,
+  action: MoaAction,
 ): TraceRecorder | undefined {
   if (!config.trace.enabled) return undefined;
-  return new JsonTraceRecorder(config, model, inputContext, policy);
+  return new JsonTraceRecorder(config, model, inputContext, policy, action);
 }
 
 class JsonTraceRecorder implements TraceRecorder {
@@ -68,7 +75,7 @@ class JsonTraceRecorder implements TraceRecorder {
   private readonly data: TraceFile;
   private readonly config: GsdMoaConfig;
 
-  constructor(config: GsdMoaConfig, model: Model<Api>, inputContext: Context, policy: PolicyDecision) {
+  constructor(config: GsdMoaConfig, model: Model<Api>, inputContext: Context, policy: PolicyDecision, action: MoaAction) {
     this.config = config;
     this.filePath = join(config.trace.dir, `${this.runId}.json`);
     this.data = {
@@ -78,6 +85,7 @@ class JsonTraceRecorder implements TraceRecorder {
       status: "running",
       model: { provider: model.provider, id: model.id, api: model.api },
       policy,
+      action: compactAction(action),
       config: redactedConfig(config),
       ...(config.trace.includeContexts ? { inputContext: traceClone(inputContext) } : {}),
       referenceCalls: [],
@@ -99,6 +107,20 @@ class JsonTraceRecorder implements TraceRecorder {
     this.flush();
   }
 
+  recordReferenceFailure(entry: TraceReferenceCall): void {
+    this.recordReferenceCall(entry);
+  }
+
+  recordReferenceLayerFailure(layer: "advisor" | "full_moa", error: unknown): void {
+    this.data.referenceLayerFailures ??= [];
+    this.data.referenceLayerFailures.push({
+      layer,
+      error: redactSensitiveText(error instanceof Error ? `${error.name}: ${error.message}` : String(error)),
+      timestamp: new Date().toISOString(),
+    });
+    this.flush();
+  }
+
   recordPrimaryEvent(event: AssistantMessageEvent): void {
     this.data.primaryEvents.push(compactPrimaryEvent(event, this.config.trace.includeOutputs));
     this.flush();
@@ -110,15 +132,15 @@ class JsonTraceRecorder implements TraceRecorder {
 
   finishError(message: AssistantMessage, diagnostics: unknown): void {
     this.finishWithStatus("error", message, diagnostics);
-    this.data.error = message.errorMessage;
+    this.data.error = message.errorMessage ? redactSensitiveText(message.errorMessage) : message.errorMessage;
     this.flush();
   }
 
   fail(error: unknown, diagnostics?: unknown): void {
     this.data.status = "error";
     this.data.endedAt = new Date().toISOString();
-    this.data.error = error instanceof Error ? `${error.name}: ${error.message}\n${error.stack ?? ""}` : String(error);
-    this.data.diagnostics = diagnostics;
+    this.data.error = redactSensitiveText(error instanceof Error ? `${error.name}: ${error.message}\n${error.stack ?? ""}` : String(error));
+    this.data.diagnostics = traceClone(diagnostics);
     this.flush();
   }
 
@@ -126,7 +148,7 @@ class JsonTraceRecorder implements TraceRecorder {
     this.data.status = status;
     this.data.endedAt = new Date().toISOString();
     if (this.config.trace.includeOutputs) this.data.finalMessage = traceClone(message);
-    this.data.diagnostics = diagnostics;
+    this.data.diagnostics = traceClone(diagnostics);
     this.flush();
   }
 
@@ -178,6 +200,12 @@ function compactPrimaryEvent(event: AssistantMessageEvent, includeOutputs: boole
   }
 }
 
+function compactAction(action: MoaAction): MoaAction {
+  if (action.kind === "single" || !action.observationSummary) return traceClone(action);
+  const { text: _text, ...summary } = action.observationSummary;
+  return traceClone({ ...action, observationSummary: summary }) as MoaAction;
+}
+
 function redactedConfig(config: GsdMoaConfig): unknown {
   const copy = traceClone(config);
   redactRoute(copy.primary);
@@ -193,7 +221,8 @@ function traceClone<T>(value: T): T {
 }
 
 function toTraceValue(value: unknown, seen: WeakSet<object>): unknown {
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") return redactSensitiveText(value);
+  if (value === null || typeof value === "number" || typeof value === "boolean") return value;
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "function") return `[Function${value.name ? `: ${value.name}` : ""}]`;
   if (typeof value === "symbol" || typeof value === "undefined") return undefined;

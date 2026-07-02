@@ -71,7 +71,11 @@ async function collect(stream: AssistantMessageEventStream): Promise<AssistantMe
 
 function tempConfig(): { cfg: GsdMoaConfig; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "gsd-moa-full-test-"));
-  return { cfg: { ...structuredClone(DEFAULT_CONFIG), cache: { enabled: true, dir, ttlSeconds: 60 } }, dir };
+  const cfg = structuredClone(DEFAULT_CONFIG);
+  cfg.primary.apiKey = "test-primary-key";
+  cfg.reference.apiKey = "test-reference-key";
+  for (const preset of Object.values(cfg.routePresets)) preset.apiKey = "test-preset-key";
+  return { cfg: { ...cfg, cache: { enabled: true, dir, ttlSeconds: 60 } }, dir };
 }
 
 describe("full MoA orchestration", () => {
@@ -89,8 +93,9 @@ describe("full MoA orchestration", () => {
         },
         stream(seenModel, seenContext) {
           assert.equal(seenModel.provider, "factory-codex");
-          assert.match(seenContext.systemPrompt ?? "", /Mixture of Agents reference context/);
-          assert.match(seenContext.systemPrompt ?? "", /call tools as needed/);
+          assert.doesNotMatch(seenContext.systemPrompt ?? "", /Mixture of Agents reference context/);
+          assert.match(JSON.stringify(seenContext.messages), /Mixture of Agents reference context/);
+          assert.match(JSON.stringify(seenContext.messages), /call tools as needed/);
           return streamText(seenModel, "final", usage(1, 1));
         },
       };
@@ -219,6 +224,123 @@ describe("full MoA orchestration", () => {
     }
   });
 
+  it("continues full MoA with successful proposers when one selected proposer fails", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    try {
+      const context: Context = { messages: [{ role: "user", content: "<!-- gsd-moa:full --> deep review", timestamp: 1 }] };
+      const upstream: UpstreamClient = {
+        async complete(seenModel) {
+          if (seenModel.provider === "zai") throw new Error("glm unavailable");
+          return message(seenModel, seenModel.id === "gpt-5.5" ? "gpt reference" : "synthesis", usage(1, 1));
+        },
+        stream(seenModel, seenContext) {
+          assert.match(JSON.stringify(seenContext.messages), /gpt reference/);
+          assert.doesNotMatch(JSON.stringify(seenContext.messages), /glm unavailable/);
+          return streamText(seenModel, "final", usage(1, 1));
+        },
+      };
+
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      assert.equal(done.type, "done");
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.guidanceInjected, true);
+      assert.match(details.portfolio.find((p: any) => p.id === "glm52")?.reason, /failed: glm unavailable/);
+      assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("continues without synthesis when synthesis fails after successful proposals", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    try {
+      const context: Context = { messages: [{ role: "user", content: "<!-- gsd-moa:full --> deep review", timestamp: 1 }] };
+      let completeCalls = 0;
+      const upstream: UpstreamClient = {
+        async complete(seenModel) {
+          completeCalls++;
+          if (completeCalls === 3) throw new Error("synthesis down");
+          return message(seenModel, `proposal-${completeCalls}`, usage(1, 1));
+        },
+        stream(seenModel, seenContext) {
+          assert.match(JSON.stringify(seenContext.messages), /proposal-1/);
+          assert.doesNotMatch(JSON.stringify(seenContext.messages), /Synthesis \/ execution memo/);
+          return streamText(seenModel, "final", usage(1, 1));
+        },
+      };
+
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      assert.equal(done.type, "done");
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 2);
+      assert.equal(details.innerCalls.some((call: any) => call.role === "synthesizer"), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("degrades to single primary call when all full MoA proposers fail", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    try {
+      const context: Context = { messages: [{ role: "user", content: "<!-- gsd-moa:full --> deep review", timestamp: 1 }] };
+      let primaryCalls = 0;
+      const upstream: UpstreamClient = {
+        async complete() { throw new Error("reference outage"); },
+        stream(seenModel, seenContext) {
+          primaryCalls++;
+          assert.doesNotMatch(JSON.stringify(seenContext.messages), /Mixture of Agents reference context/);
+          return streamText(seenModel, "final", usage(1, 1));
+        },
+      };
+
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      assert.equal(done.type, "done");
+      assert.equal(primaryCalls, 1);
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.mode, "single");
+      assert.equal(details.guidanceInjected, false);
+      assert.match(details.guidanceSkippedReason, /full_moa failed:/);
+      assert.equal(details.innerCalls.filter((call: any) => call.role !== "primary").length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("scopes portfolio keywords to the latest user request instead of older history", async () => {
+    const { cfg, dir } = tempConfig();
+    try {
+      const context: Context = {
+        messages: [
+          { role: "user", content: "previously inspect demo.mp4 and moa:include=gemini35flash", timestamp: 1 },
+          message(model("gpt55-gemini35flash-full"), "previous answer"),
+          { role: "user", content: "<!-- gsd-moa:full --> review this TypeScript module", timestamp: 3 },
+        ],
+      };
+      const completeProviders: string[] = [];
+      const upstream: UpstreamClient = {
+        async complete(seenModel) {
+          completeProviders.push(seenModel.provider);
+          return message(seenModel, `reference-${completeProviders.length}`, usage(1, 1));
+        },
+        stream(seenModel) { return streamText(seenModel, "final", usage(1, 1)); },
+      };
+
+      const events = await collect(streamGsdMoa(model("gpt55-gemini35flash-full"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      assert.deepEqual(completeProviders, ["zai", "factory-codex", "factory-codex"]);
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.portfolio.find((p: any) => p.id === "gemini35flash")?.selected, false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("reuses reference and synthesis cache on identical repeated requests", async () => {
     const { cfg, dir } = tempConfig();
     try {
@@ -253,6 +375,94 @@ describe("full MoA orchestration", () => {
     }
   });
 
+  it("can skip reinjecting identical cached full-MoA guidance on tool-result continuations", async () => {
+    const { cfg, dir } = tempConfig();
+    try {
+      const initialContext: Context = {
+        messages: [{ role: "user", content: "<!-- gsd-moa:full --> create a tiny file then read it back", timestamp: 1 }],
+        tools: [{ name: "Bash", description: "run shell", parameters: { type: "object" } as any }],
+      };
+      let completeCalls = 0;
+      const primarySystemPrompts: string[] = [];
+      const upstream: UpstreamClient = {
+        async complete(seenModel) {
+          completeCalls++;
+          return message(seenModel, `reference-${completeCalls}`, usage(1, 1));
+        },
+        stream(seenModel, seenContext) {
+          primarySystemPrompts.push(seenContext.systemPrompt ?? "");
+          return streamText(seenModel, "final", usage(1, 1));
+        },
+      };
+
+      await collect(streamGsdMoa(model("gpt55-glm52-full"), initialContext, undefined, { config: cfg, upstream }));
+      assert.doesNotMatch(primarySystemPrompts[0], /Mixture of Agents reference context/);
+      const firstRunCalls = completeCalls;
+
+      const continuationContext: Context = {
+        messages: [
+          initialContext.messages[0],
+          { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "created file" }], timestamp: 2 } as any,
+        ],
+        tools: initialContext.tools,
+      };
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), continuationContext, undefined, { config: cfg, upstream }));
+      assert.equal(completeCalls, firstRunCalls, "ordinary continuation should not call references/synthesis again");
+      assert.doesNotMatch(primarySystemPrompts[1], /Mixture of Agents reference context/);
+      assert.doesNotMatch(primarySystemPrompts[1], /Reference responses/);
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.mode, "single");
+      assert.equal(details.guidanceInjected, false);
+      assert.match(details.guidanceSkippedReason, /tool-loop continuation without checkpoint signal/);
+      assert.equal(details.innerCalls.filter((call: any) => call.role !== "primary").length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reruns full MoA with compact observations after a failed tool result", async () => {
+    const { cfg, dir } = tempConfig();
+    try {
+      const context: Context = {
+        messages: [
+          { role: "user", content: "<!-- gsd-moa:full --> fix the failing test", timestamp: 1 },
+          { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "npm test exited with status 1\nAssertionError: expected 2 actual 3\nsrc/example.test.ts" }], isError: true, timestamp: 2 } as any,
+        ],
+        tools: [{ name: "Bash", description: "run shell", parameters: { type: "object" } as any }],
+      };
+      const referenceContexts: Context[] = [];
+      const upstream: UpstreamClient = {
+        async complete(seenModel, seenContext) {
+          referenceContexts.push(seenContext);
+          return message(seenModel, `reference-${referenceContexts.length}`, usage(1, 1));
+        },
+        stream(seenModel, seenContext) {
+          assert.doesNotMatch(seenContext.systemPrompt ?? "", /Mixture of Agents reference context/);
+          assert.match(JSON.stringify(seenContext.messages), /Mixture of Agents reference context/);
+          return streamText(seenModel, "final", usage(1, 1));
+        },
+      };
+
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
+      assert.equal(referenceContexts.length, cfg.fullMoa.proposers.length + 1);
+      assert.ok(referenceContexts.every((seenContext) => JSON.stringify(seenContext.messages).includes("Recent tool observations:")));
+      assert.ok(referenceContexts.every((seenContext) => JSON.stringify(seenContext.messages).includes("AssertionError")));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.mode, "full_moa");
+      assert.equal(details.checkpointScope, "failure");
+      assert.match(details.reason, /tool failure/);
+      assert.equal(details.guidanceInjected, true);
+      assert.equal(details.observationToolResultCount, 1);
+      assert.ok(details.observationDigest);
+      assert.ok(details.observationLatestFailureSignals.includes("tool-result-error"));
+      assert.ok(details.observationFilesMentioned.includes("src/example.test.ts"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("runs multiple tool-less references, a tool-less synthesis layer, then one tool-capable primary call", async () => {
     const { cfg, dir } = tempConfig();
     try {
@@ -282,11 +492,12 @@ describe("full MoA orchestration", () => {
           assert.equal(seenModel.provider, "factory-codex");
           assert.equal(seenContext.tools?.[0]?.name, "Bash");
           assert.doesNotMatch(JSON.stringify(seenContext), /gsd-moa:full/);
-          assert.match(seenContext.systemPrompt ?? "", /Mixture of Agents reference context/);
-          assert.match(seenContext.systemPrompt ?? "", /Reference responses/);
-          assert.match(seenContext.systemPrompt ?? "", /reference-1/);
-          assert.match(seenContext.systemPrompt ?? "", /Synthesis \/ execution memo/);
-          assert.match(seenContext.systemPrompt ?? "", /call tools rather than merely describing commands/);
+          assert.doesNotMatch(seenContext.systemPrompt ?? "", /Mixture of Agents reference context/);
+          assert.match(JSON.stringify(seenContext.messages), /Mixture of Agents reference context/);
+          assert.match(JSON.stringify(seenContext.messages), /Reference responses/);
+          assert.match(JSON.stringify(seenContext.messages), /reference-1/);
+          assert.match(JSON.stringify(seenContext.messages), /Synthesis \/ execution memo/);
+          assert.match(JSON.stringify(seenContext.messages), /call tools rather than merely describing commands/);
           assert.match(JSON.stringify(seenContext.messages), /Execution note from provider/);
           return streamText(seenModel, "final", usage(1, 2));
         },

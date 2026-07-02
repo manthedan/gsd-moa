@@ -20,9 +20,9 @@ export { loadConfig, mergeUpstreamRoute, parseModelRef, resolveProposerRoute, re
 export { sanitizeReferenceContext, withAdvisorGuidance, withFullMoaGuidance } from "./context.js";
 export { buildProposerContext, buildSynthesisContext, runFullMoa, selectPortfolio } from "./moa.js";
 export { GSD_MOA_MODELS, GSD_MOA_MODEL_IDS } from "./models.js";
-export { chooseMode, stripMoaMarkers } from "./policy.js";
+export { chooseAction, chooseMode, stripMoaMarkers } from "./policy.js";
 export { applyModelPreset } from "./presets.js";
 export { streamGsdMoa } from "./stream.js";
 export { createTraceRecorder } from "./trace.js";
 export { PROVIDER_ID } from "./types.js";
-export type { FullMoaProposal, FullMoaResult, GsdMoaConfig, ModelRef, MoaMode, PolicyDecision, PortfolioDecision, ReferenceWhenConfig, TraceConfig, UpstreamRoute } from "./types.js";
+export type { CheckpointPolicyConfig, CheckpointScope, FullMoaProposal, FullMoaResult, GsdMoaConfig, ModelRef, MoaAction, MoaMode, PolicyDecision, PortfolioDecision, ReferenceWhenConfig, TraceConfig, UpstreamRoute } from "./types.js";

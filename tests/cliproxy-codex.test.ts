@@ -35,6 +35,20 @@ describe("CLIProxyAPI Codex preset", () => {
     assert.equal(synthesisRoute.baseUrl, "http://127.0.0.1:8318/v1");
   });
 
+  it("can use GPT as the final driver without the synthesis layer", () => {
+    const cfg = applyModelPreset(structuredClone(DEFAULT_CONFIG), "gpt55-cliproxycodex-glm52-nosynth-full");
+
+    assert.equal(cfg.primary.provider, "openai-codex");
+    assert.equal(cfg.primary.model, "gpt-5.5");
+    assert.equal(cfg.fullMoa.synthesis.enabled, false);
+
+    const glm = cfg.fullMoa.proposers.find((proposer) => proposer.id === "glm52");
+    const gpt = cfg.fullMoa.proposers.find((proposer) => proposer.id === "gpt55");
+    assert.ok(glm);
+    assert.ok(gpt);
+    assert.equal(resolveProposerRoute(cfg.reference, gpt, cfg.routePresets).provider, "openai-codex");
+  });
+
   it("can combine CLIProxy Codex GPT with GLM and unconditional Gemini", () => {
     const cfg = applyModelPreset(structuredClone(DEFAULT_CONFIG), "gpt55-cliproxycodex-glm52-gemini35flash-full");
 

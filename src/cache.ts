@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Context, Usage, UserMessage } from "@earendil-works/pi-ai/compat";
 import { assistantText, messageText } from "./context.js";
@@ -68,15 +68,19 @@ export function readReferenceCache(
   return readCacheByKey(config, referenceCacheKey(config, context, route, scope, config.prompts.fullMoaVersion), cwd);
 }
 
-function readCacheByKey(config: GsdMoaConfig, key: string, cwd: string): AdvisorCacheResult {
+export function readCacheByKey(config: GsdMoaConfig, key: string, cwd: string): AdvisorCacheResult {
   const path = cachePath(config, key, cwd);
   if (!config.cache.enabled || !existsSync(path)) return { hit: false, key, path };
 
   try {
     const envelope = JSON.parse(readFileSync(path, "utf8")) as CacheEnvelope;
-    if (envelope.version !== 1 || envelope.expiresAt < Date.now()) return { hit: false, key, path };
+    if (envelope.version !== 1 || envelope.expiresAt < Date.now()) {
+      unlinkCacheFile(path);
+      return { hit: false, key, path };
+    }
     return { hit: true, key, text: envelope.text, usage: envelope.usage };
   } catch {
+    unlinkCacheFile(path);
     return { hit: false, key, path };
   }
 }
@@ -88,7 +92,7 @@ export function writeAdvisorCache(
   usage: Usage | undefined,
   cwd = process.cwd(),
 ): void {
-  if (!config.cache.enabled) return;
+  if (!config.cache.enabled || !text.trim()) return;
   const path = cachePath(config, key, cwd);
   mkdirSync(resolve(cwd, config.cache.dir), { recursive: true });
   const envelope: CacheEnvelope = {
@@ -103,6 +107,14 @@ export function writeAdvisorCache(
 
 function cachePath(config: GsdMoaConfig, key: string, cwd: string): string {
   return join(resolve(cwd, config.cache.dir), `${key}.json`);
+}
+
+function unlinkCacheFile(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch {
+    // Cache cleanup should never make a cache miss fail.
+  }
 }
 
 function normalizeUserMessage(message: UserMessage): string {

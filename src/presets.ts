@@ -142,6 +142,7 @@ export function applyModelPreset(config: GsdMoaConfig, alias: string): GsdMoaCon
   if (alias.startsWith("glm52-zai-gpt55-cliproxycodex-")) return applyGlmDriverCodexReferencePreset(config, { synthesis: true });
 
   let cfg = alias.startsWith("gpt55-cliproxycodex-") ? applyCliproxyCodexPreset(config) : config;
+  if (alias.startsWith("gpt55-cliproxycodex-glm52-nosynth-")) return applyNoSynthesisPreset(cfg);
   if (alias.startsWith("gpt55-cliproxycodex-glm52-claudeopus48-")) return applyUnconditionalClaudeOpusPreset(cfg);
   if (alias.startsWith("gpt55-cliproxycodex-glm52-gemini35flash-")) return applyUnconditionalGeminiPreset(cfg);
   if (alias.startsWith("gpt55-glm52-gemini35flash-")) return applyUnconditionalGeminiPreset(cfg);
@@ -168,6 +169,12 @@ export function applyModelPreset(config: GsdMoaConfig, alias: string): GsdMoaCon
     mergePresetSpecialist(claudeSpecialist(), existingClaude),
   ];
 
+  return cfg;
+}
+
+function applyNoSynthesisPreset(config: GsdMoaConfig): GsdMoaConfig {
+  const cfg = structuredClone(config);
+  cfg.fullMoa.synthesis.enabled = false;
   return cfg;
 }
 

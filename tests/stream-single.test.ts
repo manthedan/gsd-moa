@@ -33,6 +33,11 @@ const context: Context = {
   tools: [{ name: "Bash", description: "run shell", parameters: { type: "object" } as any }],
 };
 
+const config = {
+  ...structuredClone(DEFAULT_CONFIG),
+  primary: { ...structuredClone(DEFAULT_CONFIG.primary), apiKey: "test-primary-key" },
+};
+
 function textMessage(model: Model<Api>, text: string): AssistantMessage {
   return {
     role: "assistant",
@@ -82,7 +87,7 @@ describe("single-mode streaming", () => {
       async complete() { throw new Error("advisor should not run in single mode"); },
     };
 
-    const events = await collect(streamGsdMoa(gsdModel, context, undefined, { config: DEFAULT_CONFIG, upstream }));
+    const events = await collect(streamGsdMoa(gsdModel, context, undefined, { config, upstream }));
     assert.equal(calls, 1);
     assert.deepEqual(events.map((e) => e.type), ["start", "text_start", "text_delta", "text_end", "done"]);
     assert.equal((events.at(-1) as any).message.content[0].text, "primary response");
@@ -96,7 +101,7 @@ describe("single-mode streaming", () => {
       },
       async complete() { throw new Error("not used"); },
     };
-    await collect(streamGsdMoa(gsdModel, context, undefined, { config: DEFAULT_CONFIG, upstream }));
+    await collect(streamGsdMoa(gsdModel, context, undefined, { config, upstream }));
   });
 
   it("strips routing markers before the final primary call", async () => {
@@ -110,7 +115,7 @@ describe("single-mode streaming", () => {
       },
       async complete() { throw new Error("not used"); },
     };
-    await collect(streamGsdMoa(gsdModel, markedContext, undefined, { config: DEFAULT_CONFIG, upstream }));
+    await collect(streamGsdMoa(gsdModel, markedContext, undefined, { config, upstream }));
   });
 
   it("turns upstream errors into Pi-compatible error events", async () => {
@@ -118,7 +123,7 @@ describe("single-mode streaming", () => {
       stream() { throw new Error("boom"); },
       async complete() { throw new Error("not used"); },
     };
-    const events = await collect(streamGsdMoa(gsdModel, context, undefined, { config: DEFAULT_CONFIG, upstream }));
+    const events = await collect(streamGsdMoa(gsdModel, context, undefined, { config, upstream }));
     assert.equal(events.length, 1);
     assert.equal(events[0]?.type, "error");
     assert.match((events[0] as any).error.errorMessage, /boom/);
@@ -131,7 +136,7 @@ describe("single-mode streaming", () => {
       stream() { throw new Error("Request was aborted"); },
       async complete() { throw new Error("not used"); },
     };
-    const events = await collect(streamGsdMoa(gsdModel, context, { signal: controller.signal } as SimpleStreamOptions, { config: DEFAULT_CONFIG, upstream }));
+    const events = await collect(streamGsdMoa(gsdModel, context, { signal: controller.signal } as SimpleStreamOptions, { config, upstream }));
     assert.equal(events[0]?.type, "error");
     assert.equal((events[0] as any).reason, "aborted");
   });

@@ -17,8 +17,8 @@ export interface UpstreamClient {
 }
 
 export const compatUpstreamClient: UpstreamClient = {
-  stream: (model, context, options) => streamSimple(model, context, withRouteApiKey(model, options)),
-  complete: (model, context, options) => completeSimple(model, context, withRouteApiKey(model, options)),
+  stream: (model, context, options) => streamSimple(model, context, options),
+  complete: (model, context, options) => completeSimple(model, context, options),
 };
 
 export function routeToModel(route: UpstreamRoute): Model<Api> {
@@ -40,24 +40,28 @@ export function routeToModel(route: UpstreamRoute): Model<Api> {
   } as Model<Api>;
 }
 
-export function resolveConfigValue(value: string | undefined): string | undefined {
+export function resolveConfigValue(value: string | undefined, label = "config value"): string | undefined {
   if (!value) return undefined;
-  if (value.startsWith("${") && value.endsWith("}")) return process.env[value.slice(2, -1)];
-  if (value.startsWith("$")) return process.env[value.slice(1)];
-  return value;
-}
-
-function withRouteApiKey(model: Model<Api>, options?: SimpleStreamOptions): SimpleStreamOptions | undefined {
-  // If caller already provided an apiKey, keep it. Route-specific keys are applied by orchestration.
-  return options;
+  const envName = value.startsWith("${") && value.endsWith("}")
+    ? value.slice(2, -1)
+    : value.startsWith("$")
+      ? value.slice(1)
+      : undefined;
+  if (!envName) return value;
+  const resolved = process.env[envName];
+  if (!resolved) throw new Error(`gsd-moa: environment variable ${envName} referenced by ${label} is not set`);
+  return resolved;
 }
 
 export function streamOptionsForRoute(route: UpstreamRoute, options?: SimpleStreamOptions): SimpleStreamOptions {
-  const apiKey = resolveConfigValue(route.apiKey);
+  const apiKey = resolveConfigValue(route.apiKey, "route apiKey");
   const { apiKey: _providerApiKey, ...rest } = options ?? {};
+  const headers = Object.fromEntries(
+    Object.entries(route.headers ?? {}).map(([key, value]) => [key, resolveConfigValue(value, `route header ${key}`) ?? ""]),
+  );
   return {
     ...rest,
     ...(apiKey ? { apiKey } : {}),
-    headers: { ...(options?.headers ?? {}), ...(route.headers ?? {}) },
+    headers: { ...(options?.headers ?? {}), ...headers },
   };
 }

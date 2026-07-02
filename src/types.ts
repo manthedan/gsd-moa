@@ -55,6 +55,12 @@ export interface PromptConfig {
   fullMoaVersion: string;
 }
 
+export interface CheckpointPolicyConfig {
+  enabled: boolean;
+  maxToolResults: number;
+  driftToolResultThreshold: number;
+}
+
 export interface ReferenceWhenConfig {
   anyCapability?: InputCapability[];
   anyKeyword?: string[];
@@ -95,12 +101,29 @@ export interface GsdMoaConfig {
   cache: CacheConfig;
   trace: TraceConfig;
   prompts: PromptConfig;
+  checkpoint: CheckpointPolicyConfig;
+  referenceTimeoutMs: number;
+}
+
+export interface ToolObservationSummary {
+  toolResultCount: number;
+  totalToolResultCount: number;
+  failedToolResultCount: number;
+  latestFailureSignals: string[];
+  failureSignals: string[];
+  successSignals: string[];
+  filesMentioned: string[];
+  likelyStateChange: boolean;
+  digest: string;
+  text: string;
 }
 
 export interface PolicyInput {
   alias: string;
   latestUserText: string;
   hasToolResults?: boolean;
+  hasFreshMoaMarker?: boolean;
+  recentToolSummary?: ToolObservationSummary;
 }
 
 export interface PolicyDecision {
@@ -110,6 +133,12 @@ export interface PolicyDecision {
   strippedText: string;
   markers: string[];
 }
+
+export type CheckpointScope = "initial" | "explicit" | "failure" | "drift";
+
+export type MoaAction =
+  | { kind: "single"; reason: string }
+  | { kind: "run"; mode: Exclude<MoaMode, "single">; scope: CheckpointScope; reason: string; observationSummary?: ToolObservationSummary };
 
 export interface AdvisorResult {
   text: string;
@@ -168,7 +197,15 @@ export interface MoaRunDetails {
   mode: MoaMode;
   requestedMode: AliasMode;
   reason: string;
+  checkpointScope?: CheckpointScope;
+  observationDigest?: string;
+  observationToolResultCount?: number;
+  observationLatestFailureSignals?: string[];
+  observationFailureSignals?: string[];
+  observationFilesMentioned?: string[];
   cacheHit?: boolean;
+  guidanceInjected?: boolean;
+  guidanceSkippedReason?: string;
   innerCalls: InnerCallDetails[];
   portfolio?: PortfolioDecision[];
 }

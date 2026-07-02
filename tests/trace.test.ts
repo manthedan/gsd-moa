@@ -91,9 +91,10 @@ function tempConfig(): { cfg: GsdMoaConfig; dir: string; traceDir: string } {
   return {
     cfg: {
       ...structuredClone(DEFAULT_CONFIG),
+      primary: { ...structuredClone(DEFAULT_CONFIG.primary), apiKey: "sk-secret-primary" },
       reference: { ...structuredClone(DEFAULT_CONFIG.reference), apiKey: "sk-secret-reference", headers: { Authorization: "Bearer secret" } },
       routePresets: {
-        ...structuredClone(DEFAULT_CONFIG.routePresets),
+        ...Object.fromEntries(Object.entries(structuredClone(DEFAULT_CONFIG.routePresets)).map(([name, preset]) => [name, { ...preset, apiKey: "sk-secret-preset" }])),
         secretPreset: { apiKey: "sk-secret-preset", headers: { Authorization: "Bearer preset-secret", "x-api-key": "preset-key" } },
       },
       cache: { enabled: false, dir: join(dir, "cache"), ttlSeconds: 60 },
@@ -121,6 +122,57 @@ describe("trace capture", () => {
       const trace = JSON.parse(readFileSync(tracePath, "utf8"));
       assert.equal(trace.status, "done");
       assert.match(JSON.stringify(trace.inputContext.tools), /\[Function/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("redacts sensitive tool-result text from trace contexts", async () => {
+    const { cfg, dir, traceDir } = tempConfig();
+    try {
+      const context: Context = {
+        messages: [
+          { role: "user", content: "continue", timestamp: 1 },
+          {
+            role: "toolResult",
+            toolName: "Bash",
+            toolCallId: "call-1",
+            content: [{ type: "text", text: "Error: failed\nAuthorization: Bearer sk-trace-secret1234567890\nDATABASE_URL=postgres://traceuser:tracepass@example.com/app" }],
+            isError: true,
+            timestamp: 2,
+          } as any,
+        ],
+      };
+      const upstream: UpstreamClient = {
+        async complete(seenModel) { return message(seenModel, "unused"); },
+        stream(seenModel) { return streamWithThinking(seenModel); },
+      };
+      await collect(streamGsdMoa(model("gpt55-glm52-single"), context, undefined, { config: cfg, upstream }));
+      const tracePath = join(traceDir, readdirSync(traceDir)[0]);
+      const traceText = readFileSync(tracePath, "utf8");
+      assert.match(traceText, /REDACTED/);
+      assert.doesNotMatch(traceText, /sk-trace-secret/);
+      assert.doesNotMatch(traceText, /traceuser:tracepass/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("redacts sensitive reference failure text from trace diagnostics", async () => {
+    const { cfg, dir, traceDir } = tempConfig();
+    cfg.cache.enabled = false;
+    try {
+      const context: Context = { messages: [{ role: "user", content: "please review", timestamp: 1 }] };
+      const upstream: UpstreamClient = {
+        async complete() { throw new Error("reference failed Authorization: Bearer sk-reference-fail1234567890"); },
+        stream(seenModel) { return streamWithThinking(seenModel); },
+      };
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, undefined, { config: cfg, upstream }));
+      const tracePath = join(traceDir, readdirSync(traceDir)[0]);
+      const traceText = readFileSync(tracePath, "utf8");
+      assert.match(traceText, /reference failed/);
+      assert.match(traceText, /REDACTED/);
+      assert.doesNotMatch(traceText, /sk-reference-fail/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -196,7 +248,7 @@ describe("trace capture", () => {
       assert.match(JSON.stringify(trace.referenceCalls), /reference hidden thinking/);
       assert.match(JSON.stringify(trace.primaryEvents), /primary thinking/);
       assert.match(JSON.stringify(trace.finalContext), /Mixture of Agents reference context/);
-      assert.match(trace.finalContext.systemPrompt ?? "", /Mixture of Agents reference context/);
+      assert.doesNotMatch(trace.finalContext.systemPrompt ?? "", /Mixture of Agents reference context/);
       assert.match(JSON.stringify(trace.finalMessage), /final text/);
       assert.doesNotMatch(JSON.stringify(trace), /sk-secret-reference|Bearer secret|sk-secret-preset|Bearer preset-secret|preset-key/);
     } finally {

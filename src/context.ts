@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import type { AssistantMessage, Context, Message, TextContent, UserMessage } from "@earendil-works/pi-ai/compat";
-import type { FullMoaResult, PolicyDecision } from "./types.js";
+import type { FullMoaResult, PolicyDecision, ToolObservationSummary } from "./types.js";
 
 export function latestUserText(context: Context, preserveMarkers = false): string {
   for (let i = context.messages.length - 1; i >= 0; i--) {
@@ -11,6 +12,128 @@ export function latestUserText(context: Context, preserveMarkers = false): strin
 
 export function hasRecentToolResults(context: Context): boolean {
   return context.messages.slice(-4).some((m) => m.role === "toolResult");
+}
+
+export function isToolLoopContinuation(context: Context): boolean {
+  let latestToolResultIndex = -1;
+  let latestUserIndex = -1;
+  context.messages.forEach((message, index) => {
+    if (message.role === "toolResult") latestToolResultIndex = index;
+    if (message.role === "user") latestUserIndex = index;
+  });
+  return latestToolResultIndex >= 0 && latestToolResultIndex > latestUserIndex;
+}
+
+export function latestMessageHasMoaMarker(context: Context): boolean {
+  const latest = context.messages.at(-1);
+  if (latest?.role !== "user") return false;
+  return /<!--\s*gsd-moa:(advisor|on|full|full_moa|single|off)\s*-->/i.test(rawMessageText(latest));
+}
+
+export function buildToolObservationSummary(context: Context, maxToolResults = 4): ToolObservationSummary | undefined {
+  let latestUserIndex = -1;
+  context.messages.forEach((message, index) => {
+    if (message.role === "user") latestUserIndex = index;
+  });
+  const currentTurnMessages = context.messages.slice(latestUserIndex + 1);
+  const allToolResults = currentTurnMessages.filter((msg) => msg.role === "toolResult");
+  const toolResults = allToolResults.slice(-maxToolResults);
+  if (toolResults.length === 0) return undefined;
+
+  const chunks = toolResults.map((msg, index) => {
+    const raw = redactSensitiveText(msg.content.map((item) => item.type === "text" ? item.text : "[image]").join("\n"));
+    const importantLines = extractImportantLines(raw);
+    return {
+      index: index + 1,
+      toolName: msg.toolName,
+      isError: Boolean(msg.isError),
+      raw,
+      importantLines,
+    };
+  });
+  const latestChunk = chunks.at(-1);
+  const latestFailureSignals = latestChunk ? unique(detectFailureSignals(latestChunk.raw, latestChunk.isError)) : [];
+  const failureSignals = unique(chunks.flatMap((chunk) => detectFailureSignals(chunk.raw, chunk.isError)));
+  const successSignals = unique(chunks.flatMap((chunk) => detectSuccessSignals(chunk.raw, chunk.isError)));
+  const filesMentioned = unique(chunks.flatMap((chunk) => Array.from(chunk.raw.matchAll(/[A-Za-z0-9_./-]+\.[A-Za-z0-9_/-]+/g)).map((match) => match[0]).slice(0, 10))).slice(0, 20);
+  const likelyStateChange = chunks.some((chunk) => /\b(wrote|created|updated|modified|deleted|patched|installed|saved|generated)\b/i.test(chunk.raw));
+  const text = [
+    "Recent tool observations:",
+    ...chunks.map((chunk) => [
+      `- Tool result ${chunk.index}: ${chunk.toolName}${chunk.isError ? " (tool marked error)" : ""}`,
+      ...chunk.importantLines.map((line) => `  ${line}`),
+    ].join("\n")),
+    failureSignals.length ? `Failure signals: ${failureSignals.join("; ")}` : undefined,
+    successSignals.length ? `Success/progress signals: ${successSignals.join("; ")}` : undefined,
+    filesMentioned.length ? `Files mentioned: ${filesMentioned.join(", ")}` : undefined,
+    "Update your advice based on these observations. Do not repeat the initial plan unless it is still directly relevant.",
+  ].filter(Boolean).join("\n");
+
+  return {
+    toolResultCount: toolResults.length,
+    totalToolResultCount: allToolResults.length,
+    failedToolResultCount: chunks.filter((chunk) => chunk.isError).length,
+    latestFailureSignals,
+    failureSignals,
+    successSignals,
+    filesMentioned,
+    likelyStateChange,
+    digest: createHash("sha256").update(text).digest("hex"),
+    text,
+  };
+}
+
+export function redactSensitiveText(raw: string): string {
+  return raw
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[REDACTED_PRIVATE_KEY]")
+    .replace(/\b(["']?Authorization["']?(?:\s*[:=]\s*["']?|\s+))[^'"`,;}\r\n]+/gi, "$1[REDACTED_AUTH]")
+    .replace(/\b(["']?[A-Z0-9_.-]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|AUTH[_-]?TOKEN|ACCESS[_-]?TOKEN|REFRESH[_-]?TOKEN)[A-Z0-9_.-]*["']?\s*[:=]\s*["']?)[^\s'"`,;}]+/gi, "$1[REDACTED_SECRET]")
+    .replace(/([?&](?:api[_-]?key|token|secret|password|auth[_-]?token|access[_-]?token)=)[^\s&'"`]+/gi, "$1[REDACTED_SECRET]")
+    .replace(/(\/\/[\w.-]+\/:_authToken=)[^\s'"`]+/gi, "$1[REDACTED_SECRET]")
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{20,})\b/g, "[REDACTED_TOKEN]")
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^\s/@]+)@/gi, "$1[REDACTED_USERINFO]@");
+}
+
+function extractImportantLines(raw: string): string[] {
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const important = lines.filter((line) => /\b(error|fail|failed|failure|exception|timeout|timed out|not found|command not found|module not found|assert|expected|actual|exit|fatal|warning|passed|success|created|wrote|updated|modified)\b/i.test(line));
+  const selected = important.length ? important : lines.slice(0, 8);
+  return selected.slice(0, 12).map((line) => line.length > 240 ? `${line.slice(0, 237)}...` : line);
+}
+
+function detectFailureSignals(raw: string, isError: boolean): string[] {
+  const signals: string[] = [];
+  if (isError) signals.push("tool-result-error");
+  const patterns: Array<[RegExp, string]> = [
+    [/\b(exit code|exited with|status)\s*[:=]?\s*(?:1|2|[3-9]\d*)\b/i, "nonzero-exit"],
+    [/\b(error|failed|failure|exception|traceback|fatal)\b/i, "error-output"],
+    [/\b(timeout|timed out)\b/i, "timeout"],
+    [/\b(command not found|not found|module not found|cannot find module)\b/i, "missing-dependency"],
+    [/\b(assertion|expected|actual)\b/i, "test-assertion"],
+    [/\b(segmentation fault|sigsegv|core dumped)\b/i, "process-crash"],
+  ];
+  const scan = stripNegatedFailurePhrases(raw);
+  for (const [pattern, signal] of patterns) if (pattern.test(scan)) signals.push(signal);
+  return signals;
+}
+
+function stripNegatedFailurePhrases(raw: string): string {
+  return raw.replace(/\b(?:0\s+(?:errors?|failed|failures?)|no\s+(?:errors?|failed|failures?)|without\s+errors?)\b/gi, " ");
+}
+
+function detectSuccessSignals(raw: string, isError: boolean): string[] {
+  if (isError) return [];
+  const signals: string[] = [];
+  const patterns: Array<[RegExp, string]> = [
+    [/\b(passed|success|ok|done)\b/i, "success-output"],
+    [/\b(created|wrote|updated|modified|generated|saved)\b/i, "state-change"],
+  ];
+  for (const [pattern, signal] of patterns) if (pattern.test(raw)) signals.push(signal);
+  return signals;
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
 }
 
 export interface ReferenceSanitizeOptions {
@@ -82,6 +205,7 @@ export function stripMarkersFromContext(context: Context): Context {
 
 export function withAdvisorGuidance(context: Context, guidance: string, policy: PolicyDecision): Context {
   const advice = [
+    "[gsd-moa advisor guidance — private context from the provider's reference layer, not from the user]",
     "Private advisor guidance from the configured reference model. Use it as optional critique; do not mention it unless useful.",
     `Routing: requested=${policy.requestedMode}, selected=${policy.mode}, reason=${policy.reason}.`,
     "Guidance:",
@@ -90,12 +214,13 @@ export function withAdvisorGuidance(context: Context, guidance: string, policy: 
 
   return {
     ...context,
-    systemPrompt: [context.systemPrompt, advice].filter(Boolean).join("\n\n"),
+    messages: [...context.messages, { role: "user", content: advice, timestamp: Date.now() } satisfies UserMessage],
   };
 }
 
 export function withFullMoaGuidance(context: Context, result: FullMoaResult, policy: PolicyDecision): Context {
   const guidance = [
+    "[gsd-moa full MoA guidance — private context from the provider's reference layer, not from the user]",
     "[Mixture of Agents reference context]",
     `Routing: requested=${policy.requestedMode}, selected=${policy.mode}, reason=${policy.reason}.`,
     `Acting model: final primary model with normal Pi tools.`,
@@ -119,7 +244,7 @@ export function withFullMoaGuidance(context: Context, result: FullMoaResult, pol
 
   const finalContext = {
     ...context,
-    systemPrompt: [context.systemPrompt, guidance].filter(Boolean).join("\n\n"),
+    messages: [...context.messages, { role: "user", content: guidance, timestamp: Date.now() } satisfies UserMessage],
   };
 
   if (!context.tools?.length) return finalContext;

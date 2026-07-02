@@ -5,8 +5,8 @@
 ```mermaid
 flowchart TD
   A[Pi/GSD calls provider gsd-moa<br/>model: gpt55-glm52-full] --> B[streamGsdMoa]
-  B --> C[chooseMode => full_moa]
-  C --> D[sanitizeReferenceContext<br/>drop tools, tool calls, tool results,<br/>and Pi system prompt]
+  B --> C[chooseAction => checkpoint policy]
+  C --> D[sanitizeReferenceContext<br/>drop tools, tool calls, raw tool results,<br/>and Pi system prompt]
   D --> E[Parallel tool-less reference layer]
   E --> E1[GLM-5.2 reference<br/>Z.ai]
   E --> E2[GPT-5.5 reference<br/>Factory proxy]
@@ -29,8 +29,9 @@ sequenceDiagram
   participant GPT as GPT-5.5 / Factory proxy
 
   Pi->>MoA: streamSimple(model=gpt55-glm52-full, context, tools)
+  MoA->>MoA: chooseAction(checkpoint policy)
   MoA->>MoA: strip routing markers from final context
-  MoA->>MoA: sanitizeReferenceContext(context)
+  MoA->>MoA: sanitizeReferenceContext(context + optional compact observations)
   par reference fan-out
     MoA->>Cache: read GLM-5.2 reference key
     MoA->>R: complete(tool-less sanitized context) if miss
@@ -44,6 +45,17 @@ sequenceDiagram
   MoA-->>Pi: final stream events
   MoA-->>Pi: final done/error includes combined usage and diagnostics
 ```
+
+## Checkpoint semantics
+
+`full_moa` is not rerun on every provider invocation. Forced full-MoA aliases and markers start a checkpoint policy:
+
+- initial or explicit full-MoA turn: run references/synthesis and inject guidance.
+- ordinary tool-result continuation: skip references and continue with the primary model only.
+- latest failed tool result: rerun references/synthesis with a compact observation summary.
+- drift checkpoint after `checkpoint.driftToolResultThreshold` recent tool results: rerun references with compact observations.
+
+This prevents stale cached MoA bundles from being replayed after every tool call while still letting references react to failures and long-running drift.
 
 ## Default reference portfolio
 

@@ -1,4 +1,4 @@
-import type { AliasMode, GsdMoaConfig, MoaMode, PolicyDecision, PolicyInput } from "./types.js";
+import type { AliasMode, GsdMoaConfig, MoaAction, MoaMode, PolicyDecision, PolicyInput } from "./types.js";
 
 const ADVISOR_MARKERS = ["<!-- gsd-moa:advisor -->", "<!-- gsd-moa:on -->"];
 const FULL_MOA_MARKERS = ["<!-- gsd-moa:full -->", "<!-- gsd-moa:full_moa -->"];
@@ -57,6 +57,69 @@ export function chooseMode(config: GsdMoaConfig, input: PolicyInput): PolicyDeci
   if (advisorHit) return decision(requestedMode, "advisor", `advisor keyword: ${advisorHit}`, strippedText, markers);
 
   return decision(requestedMode, config.auto.defaultMode, "auto default", strippedText, markers);
+}
+
+export function chooseAction(config: GsdMoaConfig, policy: PolicyDecision, input: PolicyInput): MoaAction {
+  const explicitAdvisor = policy.markers.some((m) => ADVISOR_MARKERS.includes(m));
+  const explicitFull = policy.markers.some((m) => FULL_MOA_MARKERS.includes(m));
+  const explicitSingle = policy.markers.some((m) => SINGLE_MARKERS.includes(m));
+  const explicitFreshMoaMarker = Boolean(input.hasFreshMoaMarker && (explicitAdvisor || explicitFull));
+  const summary = input.recentToolSummary;
+
+  if (explicitSingle) return { kind: "single", reason: policy.reason };
+
+  if (!config.checkpoint.enabled && input.hasToolResults && !explicitFreshMoaMarker) {
+    return { kind: "single", reason: "checkpoint policy disabled for tool-loop continuation" };
+  }
+
+  if (!input.hasToolResults) {
+    if (policy.mode === "advisor" || policy.mode === "full_moa") {
+      return {
+        kind: "run",
+        mode: policy.mode,
+        scope: explicitAdvisor || explicitFull ? "explicit" : "initial",
+        reason: policy.reason,
+      };
+    }
+    return { kind: "single", reason: policy.reason };
+  }
+
+  if (explicitFreshMoaMarker) {
+    return {
+      kind: "run",
+      mode: explicitFull && config.fullMoa.enabled ? "full_moa" : "advisor",
+      scope: "explicit",
+      reason: `${policy.reason}; fresh marker on tool continuation`,
+      observationSummary: summary,
+    };
+  }
+
+  if (summary && summary.latestFailureSignals.length > 0) {
+    const requested = policy.requestedMode === "full_moa" || policy.mode === "full_moa";
+    const repeatedOrSevere = summary.failedToolResultCount >= 2 || summary.latestFailureSignals.includes("timeout") || summary.latestFailureSignals.includes("process-crash");
+    const mode = requested || repeatedOrSevere ? "full_moa" : "advisor";
+    return {
+      kind: "run",
+      mode: mode === "full_moa" && config.fullMoa.enabled ? "full_moa" : "advisor",
+      scope: "failure",
+      reason: `MoA checkpoint after latest tool failure: ${summary.latestFailureSignals.join(", ")}`,
+      observationSummary: summary,
+    };
+  }
+
+  const driftEligible = policy.mode === "advisor" || policy.mode === "full_moa" || policy.requestedMode === "auto";
+  if (summary && summary.totalToolResultCount > 0 && summary.totalToolResultCount % config.checkpoint.driftToolResultThreshold === 0 && driftEligible) {
+    const mode = policy.mode === "full_moa" && config.fullMoa.enabled ? "full_moa" : "advisor";
+    return {
+      kind: "run",
+      mode,
+      scope: "drift",
+      reason: `MoA drift checkpoint after ${summary.totalToolResultCount} total tool results`,
+      observationSummary: summary,
+    };
+  }
+
+  return { kind: "single", reason: "tool-loop continuation without checkpoint signal" };
 }
 
 function decision(
