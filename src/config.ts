@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { buildDefaultAliasMap } from "./registry.js";
 import type { AliasMode, FullMoaConfig, FullMoaProposerConfig, FullMoaSynthesisConfig, GsdMoaConfig, ModelRef, UpstreamRoute } from "./types.js";
 import { PROVIDER_ID } from "./types.js";
 
@@ -88,26 +89,7 @@ export const DEFAULT_CONFIG: GsdMoaConfig = {
       prompt: "Synthesize the reference responses into a private execution memo for the final acting model, not a user-facing answer. Include: goal, likely tool calls or commands, files/services to inspect, verification commands, risks, and disagreements. If tools are available and the task requires repository, file, terminal, or environment changes, tell the final actor to execute with tools rather than merely describe setup. Do not call tools or write patches.",
     },
   },
-  aliases: {
-    "gpt55-glm52-single": { mode: "single" },
-    "gpt55-glm52-advisor": { mode: "advisor" },
-    "gpt55-glm52-full": { mode: "full_moa" },
-    "gpt55-glm52-auto": { mode: "auto" },
-    "gpt55-gemini35flash-single": { mode: "single" },
-    "gpt55-gemini35flash-advisor": { mode: "advisor" },
-    "gpt55-gemini35flash-full": { mode: "full_moa" },
-    "gpt55-gemini35flash-auto": { mode: "auto" },
-    "gpt55-glm52-gemini35flash-full": { mode: "full_moa" },
-    "gpt55-cliproxycodex-single": { mode: "single" },
-    "gpt55-cliproxycodex-advisor": { mode: "advisor" },
-    "gpt55-cliproxycodex-full": { mode: "full_moa" },
-    "gpt55-cliproxycodex-auto": { mode: "auto" },
-    "gpt55-cliproxycodex-glm52-nosynth-full": { mode: "full_moa" },
-    "gpt55-cliproxycodex-glm52-gemini35flash-full": { mode: "full_moa" },
-    "gpt55-cliproxycodex-glm52-claudeopus48-full": { mode: "full_moa" },
-    "glm52-zai-gpt55-cliproxycodex-full": { mode: "full_moa" },
-    "glm52-zai-gpt55-cliproxycodex-nosynth-full": { mode: "full_moa" },
-  },
+  aliases: buildDefaultAliasMap(),
   auto: {
     defaultMode: "single",
     advisorKeywords: ["plan", "review", "audit", "verify", "security", "architecture", "debug", "requirements"],
@@ -198,33 +180,69 @@ function routeFromModelRef(value: unknown): UpstreamRoute | undefined {
   return { provider, model };
 }
 
+interface ConfigCacheEntry {
+  state: "absent" | "present";
+  mtimeMs?: number;
+  config: GsdMoaConfig;
+}
+
+const configCache = new Map<string, ConfigCacheEntry>();
+
+export function resetConfigCache(): void {
+  configCache.clear();
+}
+
 export function loadConfig(path = DEFAULT_CONFIG_PATH, cwd = process.cwd()): GsdMoaConfig {
   const fullPath = resolve(cwd, path);
-  if (!existsSync(fullPath)) {
-    const cfg = structuredClone(DEFAULT_CONFIG);
-    applyEnvOverrides(cfg);
-    validateConfig(cfg);
-    return cfg;
+  const base = loadConfigBase(fullPath, path);
+  const cfg = structuredClone(base);
+  applyEnvOverrides(cfg);
+  validateConfig(cfg);
+  return cfg;
+}
+
+function loadConfigBase(fullPath: string, displayPath: string): GsdMoaConfig {
+  const stat = statConfig(fullPath);
+  const state = stat ? "present" : "absent";
+  const cached = configCache.get(fullPath);
+  if (cached && cached.state === state && cached.mtimeMs === stat?.mtimeMs) {
+    return cached.config;
   }
 
+  const config = stat ? parseConfigFile(fullPath, displayPath) : structuredClone(DEFAULT_CONFIG);
+  validateConfig(config);
+  configCache.set(fullPath, { state, mtimeMs: stat?.mtimeMs, config });
+  return config;
+}
+
+function statConfig(fullPath: string): { mtimeMs: number } | undefined {
+  try {
+    return { mtimeMs: statSync(fullPath).mtimeMs };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+function parseConfigFile(fullPath: string, displayPath: string): GsdMoaConfig {
   const parsed = JSON.parse(readFileSync(fullPath, "utf8")) as unknown;
-  if (!isRecord(parsed)) throw new Error(`${path} must contain a JSON object`);
+  if (!isRecord(parsed)) throw new Error(`${displayPath} must contain a JSON object`);
 
   const routePresets = isRecord(parsed.routePresets)
     ? mergeRoutePresets(DEFAULT_CONFIG.routePresets, parsed.routePresets)
     : structuredClone(DEFAULT_CONFIG.routePresets);
-  const cfg: GsdMoaConfig = {
+  return {
     ...structuredClone(DEFAULT_CONFIG),
     routePresets,
     primary: mergeRoute(defaultPrimaryRoute(routePresets), parsed.primary),
     reference: mergeRoute(defaultReferenceRoute(routePresets), parsed.reference),
     fullMoa: mergeFullMoa(DEFAULT_CONFIG.fullMoa, parsed.fullMoa),
     aliases: isRecord(parsed.aliases)
-      ? { ...DEFAULT_CONFIG.aliases, ...(parsed.aliases as GsdMoaConfig["aliases"]) }
-      : DEFAULT_CONFIG.aliases,
+      ? { ...structuredClone(DEFAULT_CONFIG.aliases), ...(parsed.aliases as GsdMoaConfig["aliases"]) }
+      : structuredClone(DEFAULT_CONFIG.aliases),
     auto: isRecord(parsed.auto)
       ? {
-          ...DEFAULT_CONFIG.auto,
+          ...structuredClone(DEFAULT_CONFIG.auto),
           ...parsed.auto,
           advisorKeywords: Array.isArray(parsed.auto.advisorKeywords)
             ? (parsed.auto.advisorKeywords as string[])
@@ -236,16 +254,13 @@ export function loadConfig(path = DEFAULT_CONFIG_PATH, cwd = process.cwd()): Gsd
             ? (parsed.auto.singleKeywords as string[])
             : DEFAULT_CONFIG.auto.singleKeywords,
         }
-      : DEFAULT_CONFIG.auto,
+      : structuredClone(DEFAULT_CONFIG.auto),
     cache: isRecord(parsed.cache) ? { ...DEFAULT_CONFIG.cache, ...parsed.cache } as GsdMoaConfig["cache"] : structuredClone(DEFAULT_CONFIG.cache),
     trace: isRecord(parsed.trace) ? { ...DEFAULT_CONFIG.trace, ...parsed.trace } as GsdMoaConfig["trace"] : structuredClone(DEFAULT_CONFIG.trace),
     prompts: isRecord(parsed.prompts) ? { ...DEFAULT_CONFIG.prompts, ...parsed.prompts } as GsdMoaConfig["prompts"] : structuredClone(DEFAULT_CONFIG.prompts),
     checkpoint: isRecord(parsed.checkpoint) ? { ...DEFAULT_CONFIG.checkpoint, ...parsed.checkpoint } as GsdMoaConfig["checkpoint"] : structuredClone(DEFAULT_CONFIG.checkpoint),
     referenceTimeoutMs: typeof parsed.referenceTimeoutMs === "number" ? parsed.referenceTimeoutMs : DEFAULT_CONFIG.referenceTimeoutMs,
   };
-  applyEnvOverrides(cfg);
-  validateConfig(cfg);
-  return cfg;
 }
 
 function applyEnvOverrides(cfg: GsdMoaConfig): void {

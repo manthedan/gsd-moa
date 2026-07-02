@@ -1,0 +1,172 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { DEFAULT_CONFIG, resolveProposerRoute, resolveSynthesisRoute } from "../src/config.ts";
+import { GSD_MOA_MODELS } from "../src/models.ts";
+import { applyModelPreset } from "../src/presets.ts";
+import {
+  ALIAS_PRESETS,
+  applyAliasPreset,
+  buildDefaultAliasMap,
+  buildProviderModelConfigs,
+  type AliasPresetEntry,
+} from "../src/registry.ts";
+
+function routeId(route: { provider: string; model: string }): string {
+  return `${route.provider}/${route.model}`;
+}
+
+function fingerprint(alias: string) {
+  const cfg = applyModelPreset(structuredClone(DEFAULT_CONFIG), alias);
+  const synthesisRoute = resolveSynthesisRoute(cfg.reference, cfg.fullMoa.synthesis, cfg.routePresets);
+  return {
+    primary: routeId(cfg.primary),
+    reference: routeId(cfg.reference),
+    synthesis: {
+      enabled: cfg.fullMoa.synthesis.enabled,
+      modelRef: cfg.fullMoa.synthesis.modelRef,
+      routePreset: cfg.fullMoa.synthesis.routePreset,
+      route: routeId(synthesisRoute),
+    },
+    proposers: cfg.fullMoa.proposers.map((proposer) => ({
+      id: proposer.id,
+      enabled: proposer.enabled,
+      modelRef: proposer.modelRef,
+      routePreset: proposer.routePreset,
+      route: routeId(resolveProposerRoute(cfg.reference, proposer, cfg.routePresets)),
+      when: proposer.when ? true : undefined,
+    })),
+  };
+}
+
+const DEFAULT_FP = {
+  primary: "factory-codex/gpt-5.5",
+  reference: "zai/glm-5.2",
+  synthesis: { enabled: true, modelRef: "factory-codex/gpt-5.5", routePreset: "factory-codex-local", route: "factory-codex/gpt-5.5" },
+  proposers: [
+    { id: "glm52", enabled: undefined, modelRef: undefined, routePreset: undefined, route: "zai/glm-5.2", when: undefined },
+    { id: "gpt55", enabled: undefined, modelRef: "factory-codex/gpt-5.5", routePreset: "factory-codex-local", route: "factory-codex/gpt-5.5", when: undefined },
+  ],
+};
+
+const GEMINI_REFERENCE_FP = {
+  ...DEFAULT_FP,
+  reference: "antigravity/gemini-3-flash",
+  proposers: [
+    ...DEFAULT_FP.proposers,
+    { id: "gemini35flash", enabled: undefined, modelRef: "antigravity/gemini-3-flash", routePreset: "cliproxyapi", route: "antigravity/gemini-3-flash", when: true },
+    { id: "claude46", enabled: false, modelRef: "antigravity/claude-sonnet-4-6", routePreset: "cliproxyapi", route: "antigravity/claude-sonnet-4-6", when: true },
+  ],
+};
+
+const CODEX_FP = {
+  primary: "openai-codex/gpt-5.5",
+  reference: "zai/glm-5.2",
+  synthesis: { enabled: true, modelRef: "openai-codex/gpt-5.5", routePreset: "cliproxyapi-codex", route: "openai-codex/gpt-5.5" },
+  proposers: [
+    { id: "glm52", enabled: undefined, modelRef: undefined, routePreset: undefined, route: "zai/glm-5.2", when: undefined },
+    { id: "gpt55", enabled: undefined, modelRef: "openai-codex/gpt-5.5", routePreset: "cliproxyapi-codex", route: "openai-codex/gpt-5.5", when: undefined },
+  ],
+};
+
+const CURRENT_ALIAS_IDS = [
+  "gpt55-glm52-single",
+  "gpt55-glm52-advisor",
+  "gpt55-glm52-full",
+  "gpt55-glm52-auto",
+  "gpt55-gemini35flash-single",
+  "gpt55-gemini35flash-advisor",
+  "gpt55-gemini35flash-full",
+  "gpt55-gemini35flash-auto",
+  "gpt55-glm52-gemini35flash-full",
+  "gpt55-cliproxycodex-single",
+  "gpt55-cliproxycodex-advisor",
+  "gpt55-cliproxycodex-full",
+  "gpt55-cliproxycodex-auto",
+  "gpt55-cliproxycodex-glm52-nosynth-full",
+  "gpt55-cliproxycodex-glm52-gemini35flash-full",
+  "gpt55-cliproxycodex-glm52-claudeopus48-full",
+  "glm52-zai-gpt55-cliproxycodex-full",
+  "glm52-zai-gpt55-cliproxycodex-nosynth-full",
+] as const;
+
+const EXPECTED = new Map<string, ReturnType<typeof fingerprint>>([
+  ["gpt55-glm52-single", DEFAULT_FP],
+  ["gpt55-glm52-advisor", DEFAULT_FP],
+  ["gpt55-glm52-full", DEFAULT_FP],
+  ["gpt55-glm52-auto", DEFAULT_FP],
+  ["gpt55-gemini35flash-single", GEMINI_REFERENCE_FP],
+  ["gpt55-gemini35flash-advisor", GEMINI_REFERENCE_FP],
+  ["gpt55-gemini35flash-full", GEMINI_REFERENCE_FP],
+  ["gpt55-gemini35flash-auto", GEMINI_REFERENCE_FP],
+  ["gpt55-glm52-gemini35flash-full", {
+    ...DEFAULT_FP,
+    proposers: [
+      ...DEFAULT_FP.proposers,
+      { id: "gemini35flash", enabled: true, modelRef: "antigravity/gemini-3-flash", routePreset: "cliproxyapi", route: "antigravity/gemini-3-flash", when: undefined },
+    ],
+  }],
+  ["gpt55-cliproxycodex-single", CODEX_FP],
+  ["gpt55-cliproxycodex-advisor", CODEX_FP],
+  ["gpt55-cliproxycodex-full", CODEX_FP],
+  ["gpt55-cliproxycodex-auto", CODEX_FP],
+  ["gpt55-cliproxycodex-glm52-nosynth-full", { ...CODEX_FP, synthesis: { ...CODEX_FP.synthesis, enabled: false } }],
+  ["gpt55-cliproxycodex-glm52-gemini35flash-full", {
+    ...CODEX_FP,
+    proposers: [
+      ...CODEX_FP.proposers,
+      { id: "gemini35flash", enabled: true, modelRef: "antigravity/gemini-3-flash", routePreset: "cliproxyapi", route: "antigravity/gemini-3-flash", when: undefined },
+    ],
+  }],
+  ["gpt55-cliproxycodex-glm52-claudeopus48-full", {
+    ...CODEX_FP,
+    proposers: [
+      ...CODEX_FP.proposers,
+      { id: "claudeopus48", enabled: true, modelRef: "antigravity/claude-opus-4-8", routePreset: "cliproxyapi", route: "antigravity/claude-opus-4-8", when: undefined },
+    ],
+  }],
+  ["glm52-zai-gpt55-cliproxycodex-full", { ...CODEX_FP, primary: "zai/glm-5.2" }],
+  ["glm52-zai-gpt55-cliproxycodex-nosynth-full", { ...CODEX_FP, primary: "zai/glm-5.2", synthesis: { ...CODEX_FP.synthesis, enabled: false } }],
+]);
+
+describe("alias registry", () => {
+  it("keeps exact preset fingerprints for the original 18 built-in aliases", () => {
+    const registeredIds = new Set(ALIAS_PRESETS.map((entry) => entry.id));
+    for (const id of CURRENT_ALIAS_IDS) {
+      assert.ok(registeredIds.has(id), id);
+      assert.deepEqual(fingerprint(id), EXPECTED.get(id), id);
+    }
+  });
+
+  it("derives honest model-card metadata from effective primary routes", () => {
+    const codex = GSD_MOA_MODELS.find((model) => model.id === "gpt55-cliproxycodex-full");
+    assert.ok(codex);
+    assert.equal(codex.contextWindow, 128_000);
+    assert.equal(codex.maxTokens, 16_384);
+    assert.deepEqual(codex.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+
+    const glmDriver = GSD_MOA_MODELS.find((model) => model.id === "glm52-zai-gpt55-cliproxycodex-full");
+    assert.ok(glmDriver);
+    assert.equal(glmDriver.contextWindow, 1_000_000);
+    assert.equal(glmDriver.maxTokens, 8192);
+    assert.deepEqual(glmDriver.input, ["text"]);
+    assert.deepEqual(glmDriver.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+  });
+
+  it("lets a hypothetical alias be added through one registry entry", () => {
+    const synthetic: AliasPresetEntry = {
+      id: "synthetic-registry-alias",
+      name: "Synthetic registry alias",
+      mode: "advisor",
+      apply(config) {
+        const cfg = structuredClone(config);
+        cfg.primary = { ...cfg.primary, provider: "synthetic", model: "driver" };
+        return cfg;
+      },
+    };
+    const entries = [...ALIAS_PRESETS, synthetic];
+
+    assert.equal(buildDefaultAliasMap(entries)[synthetic.id]?.mode, "advisor");
+    assert.equal(buildProviderModelConfigs(DEFAULT_CONFIG, entries).find((model) => model.id === synthetic.id)?.name, synthetic.name);
+    assert.equal(applyAliasPreset(structuredClone(DEFAULT_CONFIG), synthetic.id, entries).primary.provider, "synthetic");
+  });
+});

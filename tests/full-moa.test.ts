@@ -278,6 +278,7 @@ describe("full MoA orchestration", () => {
       const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
       assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 2);
       assert.equal(details.innerCalls.some((call: any) => call.role === "synthesizer"), false);
+      assert.equal(details.synthesisFailedReason, "synthesis down");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

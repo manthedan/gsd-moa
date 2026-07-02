@@ -52,10 +52,12 @@ export async function runFullMoa(
   if (proposals.length === 0) throw new Error(`all full_moa proposers failed: ${[...failedById.values()].join("; ")}`);
 
   let synthesis: NonNullable<FullMoaResult["synthesis"]> | undefined;
+  let synthesisError: string | undefined;
   if (config.fullMoa.synthesis.enabled) {
     try {
       synthesis = await runSynthesis(config, context, policy, proposals, upstream, options, trace, observationSummary);
-    } catch {
+    } catch (error) {
+      synthesisError = safeErrorMessage(error);
       synthesis = undefined;
     }
   }
@@ -84,7 +86,7 @@ export async function runFullMoa(
       : []),
   ];
 
-  return { proposals, synthesis, guidance, usage, innerCalls, portfolio: finalPortfolio };
+  return { proposals, synthesis, synthesisError, guidance, usage, innerCalls, portfolio: finalPortfolio };
 }
 
 async function runProposer(

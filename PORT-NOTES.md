@@ -47,7 +47,7 @@ npm run check
 Result: passed.
 
 - TypeScript: `tsc --noEmit` passed.
-- Tests: `node --import tsx --test tests/**/*.test.ts` passed, 65/65 tests.
+- Tests: `node --import tsx --test tests/**/*.test.ts` passed, 71/71 tests.
 
 ## Smoke test
 
@@ -84,3 +84,9 @@ omp --no-session -e ./src/index.ts --model "gsd-moa/gpt55-cliproxycodex-glm52-no
 ```
 
 Both single and full-MoA modes work end-to-end under the omp runtime, including the local `AssistantMessageEventStream` compat class being consumed by omp's stream loop.
+
+## Registry architecture
+
+Alias/model/preset knowledge is centralized in `src/registry.ts` as `ALIAS_PRESETS`. `src/config.ts` derives `DEFAULT_CONFIG.aliases` from that registry, `src/models.ts` derives built-in `ProviderModelConfig` cards by applying each preset to `DEFAULT_CONFIG` and reading the effective primary route, and `src/presets.ts` dispatches by exact alias id. User-defined aliases loaded from `.pi/gsd-moa.json` are appended during provider registration with cards derived from the loaded primary route; invalid config falls back to built-in registration and reports the error on first stream call.
+
+Full-MoA synthesis failures are no longer silent: successful proposals are still injected, and stream diagnostics include `synthesisFailedReason` with the redacted failure message.

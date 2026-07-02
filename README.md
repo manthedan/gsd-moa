@@ -104,7 +104,7 @@ Additional alias families are available for local subscription/proxy setups:
 | `gpt55-*-full` portfolio aliases | Force specific full-MoA reference portfolios, including Gemini or Claude variants. |
 | `glm52-zai-gpt55-cliproxycodex-*` | Experimental GLM-5.2 acting model with GPT-5.5/Codex references. |
 
-See `src/models.ts` for the exact registered model IDs.
+See `src/registry.ts` for the exact registered alias IDs, preset transforms, and display names. Built-in model cards and default alias config are generated from that registry.
 
 ## Install
 

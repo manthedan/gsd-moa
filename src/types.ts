@@ -186,6 +186,7 @@ export interface FullMoaResult {
     model: string;
     key: string;
   };
+  synthesisError?: string;
   guidance: string;
   usage?: Usage;
   innerCalls: InnerCallDetails[];
@@ -205,6 +206,7 @@ export interface MoaRunDetails {
   cacheHit?: boolean;
   guidanceInjected?: boolean;
   guidanceSkippedReason?: string;
+  synthesisFailedReason?: string;
   innerCalls: InnerCallDetails[];
   portfolio?: PortfolioDecision[];
 }

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { Context } from "../src/pi-compat.js";
-import { DEFAULT_CONFIG, loadConfig, resolveProposerRoute, resolveSynthesisRoute, validateConfig } from "../src/config.ts";
+import { DEFAULT_CONFIG, loadConfig, resetConfigCache, resolveProposerRoute, resolveSynthesisRoute, validateConfig } from "../src/config.ts";
 import { readCacheByKey, referenceCacheKey, writeAdvisorCache } from "../src/cache.ts";
 import { buildToolObservationSummary, hasRecentToolResults, latestUserText, sanitizeReferenceContext } from "../src/context.ts";
 import { chooseAction, chooseMode, stripMoaMarkers } from "../src/policy.ts";
@@ -354,6 +354,32 @@ describe("mode policy", () => {
     } finally {
       if (oldTimeout === undefined) delete process.env.GSD_MOA_REFERENCE_TIMEOUT_MS;
       else process.env.GSD_MOA_REFERENCE_TIMEOUT_MS = oldTimeout;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reloads cached config when the file mtime changes and applies env after cache retrieval", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gsd-moa-config-cache-test-"));
+    const configPath = join(dir, "gsd-moa.json");
+    const oldTrace = process.env.GSD_MOA_TRACE;
+    try {
+      resetConfigCache();
+      writeFileSync(configPath, JSON.stringify({ referenceTimeoutMs: 5000 }));
+      assert.equal(loadConfig("gsd-moa.json", dir).referenceTimeoutMs, 5000);
+
+      writeFileSync(configPath, JSON.stringify({ referenceTimeoutMs: 6000 }));
+      const future = new Date(Date.now() + 2000);
+      utimesSync(configPath, future, future);
+      assert.equal(loadConfig("gsd-moa.json", dir).referenceTimeoutMs, 6000);
+
+      process.env.GSD_MOA_TRACE = "1";
+      assert.equal(loadConfig("gsd-moa.json", dir).trace.enabled, true);
+      delete process.env.GSD_MOA_TRACE;
+      assert.equal(loadConfig("gsd-moa.json", dir).trace.enabled, DEFAULT_CONFIG.trace.enabled);
+    } finally {
+      if (oldTrace === undefined) delete process.env.GSD_MOA_TRACE;
+      else process.env.GSD_MOA_TRACE = oldTrace;
+      resetConfigCache();
       rmSync(dir, { recursive: true, force: true });
     }
   });

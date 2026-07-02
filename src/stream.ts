@@ -160,6 +160,7 @@ function moaDiagnostic(
       : advisor?.cacheHit,
     guidanceInjected,
     ...(guidanceSkippedReason ? { guidanceSkippedReason } : {}),
+    ...(fullMoa?.synthesisError ? { synthesisFailedReason: fullMoa.synthesisError } : {}),
     innerCalls: [
       ...(advisor
         ? [{ role: "reference" as const, provider: config.reference.provider, model: config.reference.model, usage: advisor.usage, cacheHit: advisor.cacheHit }]
