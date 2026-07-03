@@ -23,7 +23,7 @@ Configure with environment variables passed to Harbor/the task container:
   PI_GSD_MOA_CLI=omp                     # omp (default) or pi
   PI_GSD_MOA_RUNTIME_TAR=/workspace/gsd-moa/.proof/omp-runtime.tar  # optional prebuilt OMP bundle
   PI_GSD_MOA_PI_RUNTIME_TAR=/workspace/gsd-moa/.proof/pi-runtime.tar  # optional prebuilt pi bundle
-  PI_GSD_MOA_THINKING_LEVEL=high
+  PI_GSD_MOA_THINKING_LEVEL=high        # default; set inherit to omit --thinking
   GSD_MOA_PRIMARY_BASE_URL=http://host.docker.internal:8317/v1
   GSD_MOA_GEMINI_BASE_URL=http://host.docker.internal:8318/v1
   GSD_MOA_CODEX_BASE_URL=http://host.docker.internal:8318/v1
@@ -378,12 +378,12 @@ class PiGsdMoaAgent(BaseInstalledAgent):
         return "gsd-moa/gpt55-glm52-single"
 
     def _thinking_args(self) -> list[str]:
-        level = self._env_value("PI_GSD_MOA_THINKING_LEVEL")
-        if not level:
+        level = self._env_value("PI_GSD_MOA_THINKING_LEVEL", "high") or "high"
+        if level == "inherit":
             return []
         allowed = {"off", "minimal", "low", "medium", "high", "xhigh"}
         if level not in allowed:
-            raise ValueError(f"invalid PI_GSD_MOA_THINKING_LEVEL={level!r}; expected one of {sorted(allowed)}")
+            raise ValueError(f"invalid PI_GSD_MOA_THINKING_LEVEL={level!r}; expected one of {sorted(allowed | {'inherit'})}")
         return ["--thinking", level]
 
     def _run_command(self, instruction: str, out_dir: str, source_env: str) -> str:

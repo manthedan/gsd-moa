@@ -134,6 +134,7 @@ Minimal example:
 
 ```jsonc
 {
+  "defaultEffort": "high",
   "primary": {
     "provider": "factory-codex",
     "model": "gpt-5.5"
@@ -162,11 +163,14 @@ export ZAI_API_KEY=...
 export CLIPROXY_API_KEY=...          # for CLIProxyAPI presets
 export GSD_MOA_CODEX_MODEL=gpt-5.5   # optional Codex preset override
 export GSD_MOA_GEMINI_MODEL=gemini-3-flash
+export GSD_MOA_EFFORT=high           # minimal|low|medium|high|xhigh|inherit
 export GSD_MOA_CHECKPOINTS=true
 export GSD_MOA_CHECKPOINT_DRIFT_TOOL_RESULTS=3
 ```
 
 The default GPT-5.5 route expects a local OpenAI-compatible Codex/Factory-style proxy. The default GLM-5.2 route expects a Z.ai-compatible endpoint. CLIProxyAPI route presets default to `http://127.0.0.1:8318/v1`. Override route presets in `.pi/gsd-moa.json` when using a different provider, proxy, port, model ID, or subscription path.
+
+Reasoning effort defaults to `high` for every upstream call: primary, advisor/reference, full-MoA proposers, and synthesis. Configure globally with top-level `defaultEffort` (`minimal`, `low`, `medium`, `high`, `xhigh`, or `inherit`) or per route with `effort` (`minimal` through `xhigh`). Resolution order is: route `effort`, host CLI/options `reasoning`, `GSD_MOA_EFFORT`, then `defaultEffort`. Set `GSD_MOA_EFFORT=inherit` or `defaultEffort: "inherit"` to restore passthrough behavior when the host did not set a thinking level.
 
 See `docs/TIME-AWARE.md` for the harness deadline env contract, LemonHarness-style phase schedule, async advisor experiment, and Codex model-limit note.
 
@@ -240,7 +244,7 @@ Final assistant messages include `gsd-moa.details`, which records:
 - checkpoint scope when references ran (`initial`, `explicit`, `failure`, or `drift`)
 - compact observation digest/signals for failure or drift checkpoints
 - cache hit/miss
-- inner provider/model calls
+- inner provider/model calls and resolved reasoning effort
 - selected or skipped MoA references
 - combined usage for the current turn
 

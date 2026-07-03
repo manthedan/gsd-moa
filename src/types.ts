@@ -6,6 +6,8 @@ export type MoaMode = "single" | "advisor" | "full_moa";
 export type AliasMode = MoaMode | "auto";
 export type ModelRef = string | { provider: string; model: string };
 export type InputCapability = "text" | "image" | "video" | "audio";
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+export type DefaultReasoningEffort = ReasoningEffort | "inherit";
 
 export interface UpstreamRoute {
   provider: string;
@@ -16,6 +18,7 @@ export interface UpstreamRoute {
   headers?: Record<string, string>;
   authHeader?: boolean;
   reasoning?: boolean;
+  effort?: ReasoningEffort;
   thinkingLevelMap?: ThinkingLevelMap;
   input?: ("text" | "image")[];
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
@@ -118,6 +121,7 @@ export interface FullMoaConfig {
 }
 
 export interface GsdMoaConfig {
+  defaultEffort: DefaultReasoningEffort;
   routePresets: Record<string, RoutePresetConfig>;
   primary: UpstreamRoute;
   reference: UpstreamRoute;
@@ -175,6 +179,7 @@ export interface AdvisorResult {
   cacheHit: boolean;
   key: string;
   durationMs: number;
+  effort?: string;
 }
 
 export interface InnerCallDetails {
@@ -187,6 +192,7 @@ export interface InnerCallDetails {
   cacheHit?: boolean;
   durationMs?: number;
   selectionReason?: string;
+  effort?: string;
 }
 
 export interface PortfolioDecision {
@@ -207,6 +213,7 @@ export interface FullMoaProposal {
   key: string;
   durationMs: number;
   selectionReason?: string;
+  effort?: string;
 }
 
 export interface FullMoaResult {
@@ -219,6 +226,7 @@ export interface FullMoaResult {
     model: string;
     key: string;
     durationMs: number;
+    effort?: string;
   };
   synthesisError?: string;
   guidance: string;

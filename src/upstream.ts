@@ -9,7 +9,7 @@ import {
   type Model,
   type SimpleStreamOptions,
 } from "./pi-compat.js";
-import type { UpstreamRoute } from "./types.js";
+import type { DefaultReasoningEffort, ReasoningEffort, UpstreamRoute } from "./types.js";
 
 export interface UpstreamClient {
   stream(model: Model<Api>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream;
@@ -53,15 +53,33 @@ export function resolveConfigValue(value: string | undefined, label = "config va
   return resolved;
 }
 
-export function streamOptionsForRoute(route: UpstreamRoute, options?: SimpleStreamOptions): SimpleStreamOptions {
+export function streamOptionsForRoute(route: UpstreamRoute, options?: SimpleStreamOptions, defaultEffort: DefaultReasoningEffort = "high"): SimpleStreamOptions {
   const apiKey = resolveConfigValue(route.apiKey, "route apiKey");
   const { apiKey: _providerApiKey, ...rest } = options ?? {};
   const headers = Object.fromEntries(
     Object.entries(route.headers ?? {}).map(([key, value]) => [key, resolveConfigValue(value, `route header ${key}`) ?? ""]),
   );
+  const resolvedEffort = resolveEffort(route, options, defaultEffort);
   return {
     ...rest,
+    ...(resolvedEffort !== undefined ? { reasoning: resolvedEffort } : {}),
     ...(apiKey ? { apiKey } : {}),
     headers: { ...(options?.headers ?? {}), ...headers },
   };
+}
+
+function resolveEffort(route: UpstreamRoute, options: SimpleStreamOptions | undefined, defaultEffort: DefaultReasoningEffort): SimpleStreamOptions["reasoning"] | undefined {
+  if (route.effort !== undefined) return route.effort as SimpleStreamOptions["reasoning"];
+  if (options?.reasoning !== undefined) return options.reasoning;
+  const envEffort = parseEnvEffort(process.env.GSD_MOA_EFFORT);
+  if (envEffort === "inherit") return undefined;
+  if (envEffort !== undefined) return envEffort as SimpleStreamOptions["reasoning"];
+  if (defaultEffort === "inherit") return undefined;
+  return defaultEffort as SimpleStreamOptions["reasoning"];
+}
+
+function parseEnvEffort(value: string | undefined): ReasoningEffort | "inherit" | undefined {
+  if (value === undefined) return undefined;
+  if (["minimal", "low", "medium", "high", "xhigh", "inherit"].includes(value)) return value as ReasoningEffort | "inherit";
+  throw new Error("GSD_MOA_EFFORT must be one of: minimal, low, medium, high, xhigh, inherit");
 }

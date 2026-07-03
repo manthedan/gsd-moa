@@ -112,14 +112,16 @@ export function streamGsdMoa(
 
       trace?.recordFinalContext(finalContext);
       const primaryModel = routeToModel(config.primary);
-      const inner = upstream.stream(primaryModel, finalContext, streamOptionsForRoute(config.primary, options));
+      const primaryOptions = streamOptionsForRoute(config.primary, options, config.defaultEffort);
+      trace?.recordPrimaryCall({ route: config.primary, effort: primaryOptions.reasoning, startedAt: Date.now() });
+      const inner = upstream.stream(primaryModel, finalContext, primaryOptions);
       for await (const event of inner) {
         trace?.recordPrimaryEvent(event);
         if (event.type === "done") {
           const primaryUsage = event.message.usage;
           const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
           event.message.usage = combinedUsage;
-          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor);
+          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryOptions.reasoning, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor);
           event.message.diagnostics = [
             ...(event.message.diagnostics ?? []),
             diagnostic,
@@ -129,7 +131,7 @@ export function streamGsdMoa(
           const primaryUsage = event.error.usage;
           const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
           event.error.usage = combinedUsage;
-          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor);
+          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryOptions.reasoning, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor);
           event.error.diagnostics = [
             ...(event.error.diagnostics ?? []),
             diagnostic,
@@ -161,6 +163,7 @@ function moaDiagnostic(
   fullMoa: FullMoaResult | undefined,
   primaryUsage: AssistantMessage["usage"],
   combinedUsage: AssistantMessage["usage"],
+  primaryEffort?: string,
   tracePath?: string,
   guidanceInjected?: boolean,
   guidanceSkippedReason?: string,
@@ -203,10 +206,10 @@ function moaDiagnostic(
     } : {}),
     innerCalls: [
       ...(advisor
-        ? [{ role: "reference" as const, provider: config.reference.provider, model: config.reference.model, usage: advisor.usage, cacheHit: advisor.cacheHit, durationMs: advisor.durationMs }]
+        ? [{ role: "reference" as const, provider: config.reference.provider, model: config.reference.model, usage: advisor.usage, cacheHit: advisor.cacheHit, durationMs: advisor.durationMs, effort: advisor.effort }]
         : []),
       ...(fullMoa?.innerCalls ?? []),
-      { role: "primary" as const, provider: config.primary.provider, model: config.primary.model, usage: primaryUsage },
+      { role: "primary" as const, provider: config.primary.provider, model: config.primary.model, usage: primaryUsage, effort: primaryEffort },
     ],
     ...(fullMoa ? { portfolio: fullMoa.portfolio } : {}),
     combinedUsage,

@@ -34,6 +34,7 @@ export interface InnerCallSummary {
   role?: string;
   provider?: string;
   model?: string;
+  effort?: string;
   usage?: Partial<UsageSummary>;
   durationMs?: number;
 }
@@ -75,6 +76,7 @@ export interface MoaAggregate {
   combinedUsageTurns: number;
   combinedUsage: UsageSummary;
   innerCallsByRoleModel: CountMap;
+  effortsByRole: Record<string, CountMap>;
 }
 
 export interface TrialRecord {
@@ -168,6 +170,7 @@ function emptyMoaAggregate(): MoaAggregate {
     combinedUsageTurns: 0,
     combinedUsage: emptyUsage(),
     innerCallsByRoleModel: {},
+    effortsByRole: {},
   };
 }
 
@@ -409,6 +412,7 @@ function summarizeInnerCalls(value: unknown): InnerCallSummary[] {
       role: firstString(record.role),
       provider: firstString(record.provider),
       model: firstString(record.model),
+      effort: firstString(record.effort) ?? "unset",
       ...(usage ? { usage } : {}),
       ...(durationMs !== null ? { durationMs } : {}),
     };
@@ -437,8 +441,11 @@ function applyMoaEvent(aggregate: MoaAggregate, event: MoaEventSummary): void {
     addUsage(aggregate.combinedUsage, event.combinedUsage);
   }
   for (const call of event.innerCalls) {
-    const key = [call.role ?? "unknown-role", call.provider ?? "unknown-provider", call.model ?? "unknown-model"].join("/");
+    const role = call.role ?? "unknown-role";
+    const key = [role, call.provider ?? "unknown-provider", call.model ?? "unknown-model"].join("/");
     increment(aggregate.innerCallsByRoleModel, key);
+    aggregate.effortsByRole[role] ??= {};
+    increment(aggregate.effortsByRole[role], call.effort ?? "unset");
   }
 }
 
@@ -647,6 +654,10 @@ function mergeMoa(target: MoaAggregate, source: MoaAggregate): void {
   for (const [key, value] of Object.entries(source.synthesisFailures)) increment(target.synthesisFailures, key, value);
   for (const [key, value] of Object.entries(source.timeAwareSuppressionPhases)) increment(target.timeAwareSuppressionPhases, key, value);
   for (const [key, value] of Object.entries(source.innerCallsByRoleModel)) increment(target.innerCallsByRoleModel, key, value);
+  for (const [role, efforts] of Object.entries(source.effortsByRole)) {
+    target.effortsByRole[role] ??= {};
+    for (const [effort, value] of Object.entries(efforts)) increment(target.effortsByRole[role], effort, value);
+  }
 }
 
 function addTrialToGroup(group: MutableGroup, trial: TrialRecord): void {
@@ -781,6 +792,19 @@ function formatCounts(map: CountMap): string {
   return entries.length ? entries.map(([key, value]) => `${key}: ${value}`).join(", ") : "-";
 }
 
+function formatEffortsByRole(effortsByRole: Record<string, CountMap>): string {
+  const roles = Object.keys(effortsByRole).sort();
+  if (!roles.length) return "-";
+  return roles.map((role) => {
+    const efforts = Object.entries(effortsByRole[role] ?? {})
+      .filter(([, count]) => count > 0)
+      .map(([effort]) => effort)
+      .sort()
+      .join("/") || "unset";
+    return `${role}: ${efforts}`;
+  }).join(", ");
+}
+
 function formatCache(group: GroupAggregate): string {
   const lookups = group.moa.cacheLookups;
   if (!lookups) return "n/a";
@@ -799,6 +823,7 @@ function groupDetails(group: GroupAggregate): string[] {
   if (group.moa.synthesisFailureCount) parts.push(`synthesis failures {${formatCounts(group.moa.synthesisFailures)}}`);
   if (group.moa.timeAwareSuppressions) parts.push(`time-aware suppressions {${formatCounts(group.moa.timeAwareSuppressionPhases)}}`);
   if (Object.keys(group.moa.innerCallsByRoleModel).length) parts.push(`inner calls {${formatCounts(group.moa.innerCallsByRoleModel)}}`);
+  if (Object.keys(group.moa.effortsByRole).length) parts.push(`efforts {${formatEffortsByRole(group.moa.effortsByRole)}}`);
   return parts;
 }
 

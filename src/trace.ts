@@ -17,10 +17,17 @@ export interface TraceRecorder {
   recordReferenceCall(entry: TraceReferenceCall): void;
   recordReferenceFailure(entry: TraceReferenceCall): void;
   recordReferenceLayerFailure(layer: "advisor" | "full_moa", error: unknown): void;
+  recordPrimaryCall(entry: TracePrimaryCall): void;
   recordPrimaryEvent(event: AssistantMessageEvent): void;
   finish(message: AssistantMessage, diagnostics: unknown): void;
   finishError(message: AssistantMessage, diagnostics: unknown): void;
   fail(error: unknown, diagnostics?: unknown): void;
+}
+
+export interface TracePrimaryCall {
+  route: UpstreamRoute;
+  effort?: string;
+  startedAt: number;
 }
 
 export interface TraceReferenceCall {
@@ -28,6 +35,7 @@ export interface TraceReferenceCall {
   id?: string;
   label?: string;
   route: UpstreamRoute;
+  effort?: string;
   context?: Context;
   message?: AssistantMessage;
   cacheHit: boolean;
@@ -51,6 +59,7 @@ interface TraceFile {
   inputContext?: Context;
   finalContext?: Context;
   referenceCalls: TraceReferenceCall[];
+  primaryCall?: TracePrimaryCall;
   primaryEvents: unknown[];
   finalMessage?: AssistantMessage;
   diagnostics?: unknown;
@@ -109,6 +118,13 @@ class JsonTraceRecorder implements TraceRecorder {
 
   recordReferenceFailure(entry: TraceReferenceCall): void {
     this.recordReferenceCall(entry);
+  }
+
+  recordPrimaryCall(entry: TracePrimaryCall): void {
+    const clone = traceClone(entry);
+    redactRoute(clone.route);
+    this.data.primaryCall = clone;
+    this.flush();
   }
 
   recordReferenceLayerFailure(layer: "advisor" | "full_moa", error: unknown): void {

@@ -243,6 +243,8 @@ describe("trace capture", () => {
       const trace = JSON.parse(readFileSync(details.tracePath, "utf8"));
       assert.equal(trace.status, "done");
       assert.equal(trace.policy.mode, "full_moa");
+      assert.equal(trace.primaryCall.effort, "high");
+      assert.equal(trace.referenceCalls.every((call: any) => call.effort === "high"), true);
       assert.equal(trace.referenceCalls.filter((call: any) => call.role === "proposer").length, 2);
       assert.equal(trace.referenceCalls.filter((call: any) => call.role === "synthesizer").length, 1);
       assert.match(JSON.stringify(trace.referenceCalls), /reference hidden thinking/);

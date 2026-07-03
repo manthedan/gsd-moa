@@ -2,7 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { getRuntime } from "./pi-compat.js";
 import { buildDefaultAliasMap } from "./registry.js";
-import type { AliasMode, FullMoaConfig, FullMoaProposerConfig, FullMoaSynthesisConfig, GsdMoaConfig, ModelRef, UpstreamRoute } from "./types.js";
+import type { AliasMode, DefaultReasoningEffort, FullMoaConfig, FullMoaProposerConfig, FullMoaSynthesisConfig, GsdMoaConfig, ModelRef, ReasoningEffort, UpstreamRoute } from "./types.js";
 import { PROVIDER_ID } from "./types.js";
 
 export const DEFAULT_CONFIG_PATH = ".pi/gsd-moa.json";
@@ -28,6 +28,9 @@ function zaiCompat(): Record<string, unknown> {
     thinkingFormat: "zai",
     ...(getRuntime() === "pi" ? { zaiToolStream: true } : {}),
     supportsDeveloperRole: false,
+    supportsReasoningParams: true,
+    supportsReasoningEffort: true,
+    reasoningDisableMode: "zai-thinking-disabled",
     maxTokensField: "max_tokens",
   };
 }
@@ -40,6 +43,8 @@ export function buildDefaultRoutePresets(): GsdMoaConfig["routePresets"] {
       apiKey: "$FACTORY_GPT_API_KEY",
       compat: {
         supportsDeveloperRole: false,
+        supportsReasoningParams: true,
+        supportsReasoningEffort: true,
         maxTokensField: "max_tokens",
       },
     },
@@ -55,6 +60,8 @@ export function buildDefaultRoutePresets(): GsdMoaConfig["routePresets"] {
       apiKey: "$CLIPROXY_API_KEY",
       compat: {
         supportsDeveloperRole: false,
+        supportsReasoningParams: true,
+        supportsReasoningEffort: true,
         maxTokensField: "max_tokens",
       },
     },
@@ -64,6 +71,8 @@ export function buildDefaultRoutePresets(): GsdMoaConfig["routePresets"] {
       apiKey: "$CLIPROXY_API_KEY",
       compat: {
         supportsDeveloperRole: false,
+        supportsReasoningParams: true,
+        supportsReasoningEffort: true,
         maxTokensField: "max_tokens",
       },
     },
@@ -73,6 +82,7 @@ export function buildDefaultRoutePresets(): GsdMoaConfig["routePresets"] {
 export const DEFAULT_ROUTE_PRESETS: GsdMoaConfig["routePresets"] = buildDefaultRoutePresets();
 
 export const DEFAULT_CONFIG: GsdMoaConfig = {
+  defaultEffort: "high",
   routePresets: structuredClone(DEFAULT_ROUTE_PRESETS),
   primary: defaultPrimaryRoute(DEFAULT_ROUTE_PRESETS),
   reference: defaultReferenceRoute(DEFAULT_ROUTE_PRESETS),
@@ -159,6 +169,21 @@ function defaultReferenceRoute(routePresets: GsdMoaConfig["routePresets"]): Upst
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const EFFORT_VALUES = ["minimal", "low", "medium", "high", "xhigh"] as const;
+const DEFAULT_EFFORT_VALUES = [...EFFORT_VALUES, "inherit"] as const;
+
+function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return typeof value === "string" && (EFFORT_VALUES as readonly string[]).includes(value);
+}
+
+function isDefaultEffort(value: unknown): value is DefaultReasoningEffort {
+  return typeof value === "string" && (DEFAULT_EFFORT_VALUES as readonly string[]).includes(value);
+}
+
+function parseDefaultEffort(value: unknown, fallback: DefaultReasoningEffort): DefaultReasoningEffort {
+  return value === undefined ? fallback : value as DefaultReasoningEffort;
 }
 
 function mergeRoute(defaults: UpstreamRoute, override: unknown): UpstreamRoute {
@@ -257,6 +282,7 @@ function parseConfigFile(fullPath: string, displayPath: string): GsdMoaConfig {
     : structuredClone(DEFAULT_CONFIG.routePresets);
   return {
     ...structuredClone(DEFAULT_CONFIG),
+    defaultEffort: parseDefaultEffort(parsed.defaultEffort, DEFAULT_CONFIG.defaultEffort),
     routePresets,
     primary: mergeRoute(defaultPrimaryRoute(routePresets), parsed.primary),
     reference: mergeRoute(defaultReferenceRoute(routePresets), parsed.reference),
@@ -327,6 +353,9 @@ function applyEnvOverrides(cfg: GsdMoaConfig): void {
   if (process.env.GSD_MOA_REFERENCE_TIMEOUT_MS !== undefined) {
     cfg.referenceTimeoutMs = Number(process.env.GSD_MOA_REFERENCE_TIMEOUT_MS);
   }
+  if (process.env.GSD_MOA_EFFORT !== undefined) {
+    cfg.defaultEffort = parseDefaultEffort(process.env.GSD_MOA_EFFORT, cfg.defaultEffort);
+  }
 }
 
 function applyRouteBaseUrlOverride(
@@ -348,6 +377,7 @@ function applyRouteBaseUrlOverride(
 }
 
 export function validateConfig(cfg: GsdMoaConfig): void {
+  validateDefaultEffort("defaultEffort", cfg.defaultEffort);
   validateRoutePresets(cfg.routePresets);
   validateRoute("primary", cfg.primary);
   validateRoute("reference", cfg.reference);
@@ -514,7 +544,16 @@ function validateRoutePresets(routePresets: GsdMoaConfig["routePresets"]): void 
   for (const [name, preset] of Object.entries(routePresets)) {
     if (!name.trim()) throw new Error("routePresets must not contain blank names");
     if (!isRecord(preset)) throw new Error(`routePresets.${name} must be an object`);
+    validateRouteEffort(`routePresets.${name}.effort`, preset.effort);
   }
+}
+
+function validateDefaultEffort(label: string, effort: unknown): void {
+  if (!isDefaultEffort(effort)) throw new Error(`${label} must be one of: ${DEFAULT_EFFORT_VALUES.join(", ")}`);
+}
+
+function validateRouteEffort(label: string, effort: unknown): void {
+  if (effort !== undefined && !isReasoningEffort(effort)) throw new Error(`${label} must be one of: ${EFFORT_VALUES.join(", ")}`);
 }
 
 function validateFullMoa(fullMoa: FullMoaConfig, reference: UpstreamRoute, routePresets: GsdMoaConfig["routePresets"]): void {
@@ -568,6 +607,7 @@ function validateWhen(label: string, when: FullMoaProposerConfig["when"]): void 
 function validateRoute(label: string, route: UpstreamRoute): void {
   if (!route.provider) throw new Error(`${label}.provider is required`);
   if (!route.model) throw new Error(`${label}.model is required`);
+  validateRouteEffort(`${label}.effort`, route.effort);
   if (route.provider === PROVIDER_ID) {
     throw new Error(`${label}.provider must not be '${PROVIDER_ID}' (recursion guard)`);
   }

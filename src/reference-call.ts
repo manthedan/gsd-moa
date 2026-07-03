@@ -22,6 +22,7 @@ export interface ReferenceCallResult {
   provider: string;
   model: string;
   durationMs: number;
+  effort?: string;
 }
 
 export async function runReferenceCall(
@@ -37,11 +38,13 @@ export async function runReferenceCall(
   const key = referenceCacheKey(config, context, route, metadata.cacheScope, metadata.promptVersion);
   const cache = readCacheByKey(config, key, process.cwd());
   const startedAt = Date.now();
+  const callOptions = referenceStreamOptionsForRoute(config, route, options, timeState);
   const traceBase = {
     role: metadata.role,
     id: metadata.id,
     label: metadata.label,
     route,
+    effort: callOptions.reasoning,
     context,
     cacheKey: key,
     startedAt,
@@ -63,12 +66,13 @@ export async function runReferenceCall(
       model: route.model,
       key,
       durationMs: endedAt - startedAt,
+      effort: callOptions.reasoning,
     };
   }
 
   try {
     const model = routeToModel(route);
-    const message = await upstream.complete(model, context, referenceStreamOptionsForRoute(config, route, options, timeState));
+    const message = await upstream.complete(model, context, callOptions);
     const text = assistantText(message).trim();
     if (text) writeAdvisorCache(config, key, text, message.usage);
     const endedAt = Date.now();
@@ -86,6 +90,7 @@ export async function runReferenceCall(
       model: route.model,
       key,
       durationMs: endedAt - startedAt,
+      effort: callOptions.reasoning,
     };
   } catch (error) {
     trace?.recordReferenceFailure({
@@ -99,7 +104,7 @@ export async function runReferenceCall(
 }
 
 function referenceStreamOptionsForRoute(config: GsdMoaConfig, route: UpstreamRoute, options?: SimpleStreamOptions, timeState?: TimeState): SimpleStreamOptions {
-  const base = streamOptionsForRoute(route, options);
+  const base = streamOptionsForRoute(route, options, config.defaultEffort);
   const timeBudgetMs = referenceBudgetMs(config.timeAware, timeState);
   const effectiveTimeoutMs = timeBudgetMs === undefined
     ? config.referenceTimeoutMs

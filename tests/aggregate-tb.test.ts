@@ -45,6 +45,7 @@ describe("Terminal-Bench results aggregation", () => {
     assert.match(markdown, /model-a/);
     assert.match(markdown, /matrix-e1-single/);
     assert.match(markdown, /Time tool\/refΣ\/non-tool/);
+    assert.match(markdown, /efforts \{primary: unset, proposer: unset\}/);
     assert.match(markdown, /Voids/);
   });
 });

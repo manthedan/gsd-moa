@@ -50,4 +50,4 @@ export { streamGsdMoa } from "./stream.js";
 export { computeTimeState } from "./time.js";
 export { createTraceRecorder } from "./trace.js";
 export { PROVIDER_ID } from "./types.js";
-export type { AsyncAdvisorConfig, CheckpointPolicyConfig, CheckpointScope, FullMoaProposal, FullMoaResult, GsdMoaConfig, ModelRef, MoaAction, MoaMode, PolicyDecision, PortfolioDecision, ReferenceWhenConfig, TimeAwareConfig, TimeState, TraceConfig, UpstreamRoute } from "./types.js";
+export type { AsyncAdvisorConfig, CheckpointPolicyConfig, CheckpointScope, DefaultReasoningEffort, FullMoaProposal, FullMoaResult, GsdMoaConfig, ModelRef, MoaAction, MoaMode, PolicyDecision, PortfolioDecision, ReasoningEffort, ReferenceWhenConfig, TimeAwareConfig, TimeState, TraceConfig, UpstreamRoute } from "./types.js";

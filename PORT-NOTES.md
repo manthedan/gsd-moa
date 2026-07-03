@@ -51,6 +51,14 @@ Adapter behavior is intentionally narrow:
 - `thinkingLevelMap` is restored on `UpstreamRoute` and is passed through in `routeToModel` as `route.thinkingLevelMap ?? builtin?.thinkingLevelMap`.
 - Z.ai route defaults include `compat.zaiToolStream: true` only when `getRuntime() === "pi"`; `omp` route/compat defaults stay unchanged.
 - Provider registration adds display `name: "GSD MoA"` only for upstream `pi`; `omp` keeps the OMP provider config shape without `name`.
+- Both runtimes use the same `SimpleStreamOptions.reasoning` field. Upstream `@earendil-works/pi-ai` types use `reasoning?: ThinkingLevel`; OMP uses the same option name, so `src/pi-compat.ts` does not need a field-name translation.
+
+## Reasoning effort addendum
+
+- gsd-moa resolves effort before every upstream call and writes it to `options.reasoning`; default is `high` unless a route, host option, env override, or `inherit` changes it.
+- The custom OpenAI-compatible route presets now include sparse compat flags `supportsReasoningParams: true` and `supportsReasoningEffort: true`; without these flags OMP's OpenAI-completions compat policy can omit `reasoning_effort` for sparse custom routes.
+- Z.ai/GLM-5.2 routes use `compat.thinkingFormat: "zai"`, `reasoningDisableMode: "zai-thinking-disabled"`, and `supportsReasoningEffort: true`. In OMP's `openai-completions` serializer this emits `thinking: { type: "enabled" }` plus `reasoning_effort: <effort>` for GLM-5.2 reasoning turns; `high` therefore enables GLM thinking and sends the tier. The route's model cards do not need `thinking.efforts`; `resolveOpenAICompletionsRoutingEffort` passes through unmapped efforts when no metadata is present.
+- GPT-5.5 through CLIProxy/Codex also receives the unmapped effort string as `reasoning_effort`; `xhigh` remains configurable and passes through for Codex-compatible backends that accept it.
 
 Upstream pi no-secrets extension-load smoke:
 
@@ -75,7 +83,7 @@ npm run check
 Result: passed.
 
 - TypeScript: `tsc --noEmit` passed.
-- Tests: `node --import tsx --test tests/**/*.test.ts` passed under both `GSD_MOA_RUNTIME=omp` and `GSD_MOA_RUNTIME=pi`, 87/87 tests in each run.
+- Tests: `node --import tsx --test tests/**/*.test.ts` passed under both `GSD_MOA_RUNTIME=omp` and `GSD_MOA_RUNTIME=pi`, 91/91 tests in each run.
 
 ## Smoke test
 

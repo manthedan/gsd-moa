@@ -97,10 +97,12 @@ describe("advisor orchestration", () => {
           assert.equal(seenContext.tools, undefined);
           assert.match(seenContext.systemPrompt ?? "", /private advisor/i);
           assert.ok(seenOptions?.signal instanceof AbortSignal);
+          assert.equal(seenOptions?.reasoning, "high");
           return message(seenModel, "Check tests and edge cases.", usage(10, 20));
         },
-        stream(seenModel, seenContext) {
+        stream(seenModel, seenContext, seenOptions) {
           primaryCalls++;
+          assert.equal(seenOptions?.reasoning, "high");
           assert.equal(seenModel.provider, "factory-codex");
           assert.equal(seenContext.tools?.[0]?.name, "Bash");
           assert.doesNotMatch(seenContext.systemPrompt ?? "", /Check tests and edge cases/);
@@ -119,6 +121,7 @@ describe("advisor orchestration", () => {
       assert.equal(details.mode, "advisor");
       assert.equal(details.cacheHit, false);
       assert.equal(details.innerCalls.length, 2);
+      assert.deepEqual(details.innerCalls.map((call: any) => [call.role, call.effort]), [["reference", "high"], ["primary", "high"]]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
