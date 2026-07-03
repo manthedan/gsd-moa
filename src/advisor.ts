@@ -22,7 +22,7 @@ export async function runAdvisor(
     cacheScope: "advisor",
     promptVersion: config.prompts.advisorVersion,
   }, upstream, options, trace, timeState);
-  return { text: result.text, usage: result.usage, cacheHit: result.cacheHit, key: result.key };
+  return { text: result.text, usage: result.usage, cacheHit: result.cacheHit, key: result.key, durationMs: result.durationMs };
 }
 
 export function buildAdvisorContext(config: GsdMoaConfig, context: Context, policy: PolicyDecision, observationSummary?: ToolObservationSummary, timeState?: TimeState): Context {

@@ -1,0 +1,7 @@
+{
+  "task_name": "terminal-bench/demo-task",
+  "trial_name": "demo-task__nested-pass",
+  "verifier_result": { "reward": 1 },
+  "started_at": "2026-01-01T01:00:00.000Z",
+  "finished_at": "2026-01-01T01:01:00.000Z"
+}

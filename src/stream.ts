@@ -203,7 +203,7 @@ function moaDiagnostic(
     } : {}),
     innerCalls: [
       ...(advisor
-        ? [{ role: "reference" as const, provider: config.reference.provider, model: config.reference.model, usage: advisor.usage, cacheHit: advisor.cacheHit }]
+        ? [{ role: "reference" as const, provider: config.reference.provider, model: config.reference.model, usage: advisor.usage, cacheHit: advisor.cacheHit, durationMs: advisor.durationMs }]
         : []),
       ...(fullMoa?.innerCalls ?? []),
       { role: "primary" as const, provider: config.primary.provider, model: config.primary.model, usage: primaryUsage },

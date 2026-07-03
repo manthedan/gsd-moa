@@ -76,6 +76,7 @@ export async function runFullMoa(
       model: proposal.model,
       usage: proposal.usage,
       cacheHit: proposal.cacheHit,
+      durationMs: proposal.durationMs,
       selectionReason: proposal.selectionReason,
     })),
     ...(synthesis
@@ -85,6 +86,7 @@ export async function runFullMoa(
           model: synthesis.model,
           usage: synthesis.usage,
           cacheHit: synthesis.cacheHit,
+          durationMs: synthesis.durationMs,
         }]
       : []),
   ];
@@ -122,6 +124,7 @@ async function runProposer(
     provider: result.provider,
     model: result.model,
     key: result.key,
+    durationMs: result.durationMs,
     selectionReason,
   };
 }
@@ -151,6 +154,7 @@ async function runSynthesis(
     provider: result.provider,
     model: result.model,
     key: result.key,
+    durationMs: result.durationMs,
   };
 }
 

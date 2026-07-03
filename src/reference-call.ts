@@ -21,6 +21,7 @@ export interface ReferenceCallResult {
   key: string;
   provider: string;
   model: string;
+  durationMs: number;
 }
 
 export async function runReferenceCall(
@@ -47,11 +48,12 @@ export async function runReferenceCall(
   };
 
   if (cache.hit) {
+    const endedAt = Date.now();
     trace?.recordReferenceCall({
       ...traceBase,
       cacheHit: true,
       cachedText: cache.text,
-      endedAt: Date.now(),
+      endedAt,
     });
     return {
       text: cache.text,
@@ -60,6 +62,7 @@ export async function runReferenceCall(
       provider: route.provider,
       model: route.model,
       key,
+      durationMs: endedAt - startedAt,
     };
   }
 
@@ -68,11 +71,12 @@ export async function runReferenceCall(
     const message = await upstream.complete(model, context, referenceStreamOptionsForRoute(config, route, options, timeState));
     const text = assistantText(message).trim();
     if (text) writeAdvisorCache(config, key, text, message.usage);
+    const endedAt = Date.now();
     trace?.recordReferenceCall({
       ...traceBase,
       message,
       cacheHit: false,
-      endedAt: Date.now(),
+      endedAt,
     });
     return {
       text,
@@ -81,6 +85,7 @@ export async function runReferenceCall(
       provider: route.provider,
       model: route.model,
       key,
+      durationMs: endedAt - startedAt,
     };
   } catch (error) {
     trace?.recordReferenceFailure({

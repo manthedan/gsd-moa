@@ -9,15 +9,19 @@ describe("Terminal-Bench results aggregation", () => {
   it("groups trials and summarizes pass rate, exceptions, and MoA telemetry", () => {
     const report = aggregateTbResults(fixtureDir);
 
-    assert.equal(report.trialCount, 2);
+    assert.equal(report.trialCount, 5);
+    assert.ok(report.trialRecords.some((trial) => trial.trialName === "demo-task__env-timeout-no-result"));
     assert.equal(report.tasks.length, 1);
     assert.equal(report.tasks[0].task, "terminal-bench/demo-task");
+    assert.equal(report.tasks[0].groups.length, 2);
 
-    const group = report.tasks[0].groups.find((candidate) => candidate.alias === "model-a");
+    const group = report.tasks[0].groups.find((candidate) => candidate.alias === "model-a" && candidate.label === "-");
     assert.ok(group);
     assert.equal(group.trials, 2);
+    assert.equal(group.voids, 2);
     assert.equal(group.passes, 1);
     assert.equal(group.passRate, 0.5);
+    assert.equal(group.voidReasons["Trial demo-task__env-timeout failed: Environment start timed out after 600.0 seconds"], 1);
     assert.equal(group.exceptionsByClass.AgentTimeoutError, 1);
     assert.equal(group.timeouts, 1);
     assert.equal(group.moa.checkpointRuns.drift, 1);
@@ -26,9 +30,21 @@ describe("Terminal-Bench results aggregation", () => {
     assert.equal(group.moa.combinedUsage.input, 15);
     assert.equal(group.moa.combinedUsage.output, 26);
     assert.equal(group.moa.combinedUsage.cost, 0.03);
+    assert.equal(group.time.toolMeanMs, 7000);
+    assert.equal(group.time.referenceMeanMs, 10000);
+    assert.equal(group.time.modelOtherMeanMs, 62000);
+
+    const nested = report.tasks[0].groups.find((candidate) => candidate.alias === "model-a" && candidate.label === "matrix-e1-single");
+    assert.ok(nested);
+    assert.equal(nested.trials, 1);
+    assert.equal(nested.passes, 1);
+    assert.equal(nested.passRate, 1);
 
     const markdown = renderMarkdown(report);
     assert.match(markdown, /## terminal-bench\/demo-task/);
     assert.match(markdown, /model-a/);
+    assert.match(markdown, /matrix-e1-single/);
+    assert.match(markdown, /Time tool\/refΣ\/non-tool/);
+    assert.match(markdown, /Voids/);
   });
 });

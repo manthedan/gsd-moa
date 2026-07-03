@@ -1,0 +1,5 @@
+{
+  "task": { "name": "terminal-bench/demo-task" },
+  "trial_name": "demo-task__env-timeout-no-result",
+  "agent": { "model_name": "model-a" }
+}

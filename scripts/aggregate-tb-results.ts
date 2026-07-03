@@ -15,8 +15,8 @@
  *   `agent/pi-gsd-moa/pi-output.jsonl`; `turn_end` duplicates are intentionally ignored.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { basename, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export type CountMap = Record<string, number>;
@@ -35,6 +35,14 @@ export interface InnerCallSummary {
   provider?: string;
   model?: string;
   usage?: Partial<UsageSummary>;
+  durationMs?: number;
+}
+
+export interface TrialTimeSummary {
+  toolExecMs: number | null;
+  referenceMs: number | null;
+  turnSpanMs: number | null;
+  modelOtherMs: number | null;
 }
 
 export interface MoaEventSummary {
@@ -73,13 +81,16 @@ export interface TrialRecord {
   jobName: string;
   trialName: string;
   path: string;
+  label: string;
   task: string;
   alias: string;
   reward: number | null;
   passed: boolean;
+  voidReason: string | null;
   exceptionClass: string | null;
   wallTimeMs: number | null;
-  moa: MoaAggregate & { eventSummaries: MoaEventSummary[] };
+  time: TrialTimeSummary;
+  moa: MoaAggregate & { eventSummaries: MoaEventSummary[]; time: TrialTimeSummary };
 }
 
 export interface WallTimeAggregate {
@@ -88,16 +99,31 @@ export interface WallTimeAggregate {
   samples: number;
 }
 
+export interface GroupTimeAggregate {
+  toolMeanMs: number | null;
+  referenceMeanMs: number | null;
+  modelOtherMeanMs: number | null;
+  samples: {
+    tool: number;
+    reference: number;
+    modelOther: number;
+  };
+}
+
 export interface GroupAggregate {
   task?: string;
   alias: string;
+  label: string;
   trials: number;
   passes: number;
+  voids: number;
   passRate: number;
   exceptionsByClass: CountMap;
+  voidReasons: CountMap;
   timeouts: number;
   otherExceptions: number;
   wallTimeMs: WallTimeAggregate;
+  time: GroupTimeAggregate;
   moa: MoaAggregate;
 }
 
@@ -115,8 +141,11 @@ export interface AggregateReport {
   totalsByAlias: GroupAggregate[];
 }
 
-interface MutableGroup extends Omit<GroupAggregate, "wallTimeMs" | "passRate"> {
+interface MutableGroup extends Omit<GroupAggregate, "wallTimeMs" | "time" | "passRate"> {
   wallSamples: number[];
+  toolTimeSamples: number[];
+  referenceTimeSamples: number[];
+  modelOtherTimeSamples: number[];
 }
 
 const CHECKPOINT_SCOPES = ["initial", "explicit", "failure", "drift"];
@@ -200,12 +229,11 @@ function listDirectories(path: string): string[] {
 }
 
 function isTrialDir(path: string): boolean {
-  return basename(path).includes("__")
-    && existsSync(join(path, "config.json"))
-    && (existsSync(join(path, "trial.log"))
-      || existsSync(join(path, "exception.txt"))
-      || existsSync(join(path, "agent"))
-      || existsSync(join(path, "verifier")));
+  const name = basename(path);
+  if (!/^.+__.+$/.test(name)) return false;
+  if (/^\d{4}-\d{2}-\d{2}__\d{2}-\d{2}-\d{2}$/.test(name)) return false;
+  if (!existsSync(join(path, "config.json"))) return false;
+  return ["result.json", "exception.txt", "trial.log", "agent", "verifier"].some((entry) => existsSync(join(path, entry)));
 }
 
 export function findTrialDirs(dir = "jobs"): string[] {
@@ -213,13 +241,24 @@ export function findTrialDirs(dir = "jobs"): string[] {
   if (!existsSync(root)) return [];
 
   const trials: string[] = [];
-  for (const jobDir of listDirectories(root)) {
-    if (isTrialDir(jobDir)) trials.push(jobDir);
-    for (const trialDir of listDirectories(jobDir)) {
-      if (isTrialDir(trialDir)) trials.push(trialDir);
+  const maxDepthBelowRoot = 3;
+  const walk = (current: string, depth: number): void => {
+    for (const child of listDirectories(current)) {
+      const childDepth = depth + 1;
+      if (childDepth > maxDepthBelowRoot) continue;
+      if (isTrialDir(child)) trials.push(child);
+      if (childDepth < maxDepthBelowRoot) walk(child, childDepth);
     }
-  }
+  };
+  walk(root, 0);
   return trials.sort();
+}
+
+function trialLabel(rootDir: string | undefined, trialDir: string): string {
+  if (!rootDir) return "-";
+  const parts = relative(resolve(rootDir), resolve(trialDir)).split(/[\\/]+/).filter(Boolean);
+  if (parts.length <= 2) return "-";
+  return parts.slice(0, -2).join("/") || "-";
 }
 
 function rewardFrom(result: unknown): number | null {
@@ -273,10 +312,47 @@ function exceptionClassFrom(trialDir: string, result: unknown): string | null {
   return firstString(getPath(result, "exception_info.exception_type")) ?? null;
 }
 
+function envStartTimeoutReasonFromText(text: string): string | null {
+  const line = text.split(/\r?\n/).find((candidate) => /Environment start timed out/i.test(candidate));
+  return line?.trim() || (/Environment start timed out/i.test(text) ? "Environment start timed out" : null);
+}
+
+function readTail(path: string, maxBytes = 64 * 1024): string {
+  let fd: number | undefined;
+  try {
+    const stat = statSync(path);
+    const length = Math.min(stat.size, maxBytes);
+    const buffer = Buffer.alloc(length);
+    fd = openSync(path, "r");
+    readSync(fd, buffer, 0, length, stat.size - length);
+    return buffer.toString("utf8");
+  } catch {
+    return "";
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+function voidReasonFrom(trialDir: string): string | null {
+  const exceptionPath = join(trialDir, "exception.txt");
+  if (existsSync(exceptionPath)) {
+    const reason = envStartTimeoutReasonFromText(readFileSync(exceptionPath, "utf8"));
+    if (reason) return reason;
+  }
+  const trialLogPath = join(trialDir, "trial.log");
+  if (existsSync(trialLogPath)) return envStartTimeoutReasonFromText(readTail(trialLogPath));
+  return null;
+}
+
 function parseTimestamp(value: unknown): number | null {
   if (typeof value !== "string") return null;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function timestampMs(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value < 10_000_000_000 ? value * 1000 : value;
+  return parseTimestamp(value);
 }
 
 function wallTimeFrom(trialDir: string, result: unknown): number | null {
@@ -328,11 +404,13 @@ function summarizeInnerCalls(value: unknown): InnerCallSummary[] {
   return value.map((call) => {
     const record = asRecord(call) ?? {};
     const usage = usageFrom(record.usage);
+    const durationMs = numberValue(record.durationMs);
     return {
       role: firstString(record.role),
       provider: firstString(record.provider),
       model: firstString(record.model),
       ...(usage ? { usage } : {}),
+      ...(durationMs !== null ? { durationMs } : {}),
     };
   });
 }
@@ -391,12 +469,49 @@ function moaEventFromDiagnostic(diagnostic: unknown): MoaEventSummary | null {
   };
 }
 
-export function parseMoaTelemetry(trialDir: string): MoaAggregate & { eventSummaries: MoaEventSummary[] } {
-  const aggregate = emptyMoaAggregate() as MoaAggregate & { eventSummaries: MoaEventSummary[] };
+function emptyTrialTime(): TrialTimeSummary {
+  return { toolExecMs: null, referenceMs: null, turnSpanMs: null, modelOtherMs: null };
+}
+
+function toolCallId(record: Record<string, unknown>): string | undefined {
+  return firstString(record.toolCallId, record.tool_call_id, record.callId, record.call_id, record.id, getPath(record, "toolCall.id"));
+}
+
+function toolDurationFromEnd(record: Record<string, unknown>): number | null {
+  return numberValue(getPath(record, "result.details.wallTimeMs"))
+    ?? numberValue(getPath(record, "result.details.durationMs"))
+    ?? numberValue(getPath(record, "details.wallTimeMs"))
+    ?? numberValue(getPath(record, "details.durationMs"));
+}
+
+function eventStartTimestamp(record: Record<string, unknown>): number | null {
+  return timestampMs(record.timestamp)
+    ?? timestampMs(record.startedAt)
+    ?? timestampMs(getPath(record, "message.timestamp"));
+}
+
+function eventEndTimestamp(record: Record<string, unknown>): number | null {
+  return timestampMs(record.timestamp)
+    ?? timestampMs(record.endedAt)
+    ?? timestampMs(getPath(record, "message.timestamp"));
+}
+
+export function parseMoaTelemetry(trialDir: string): MoaAggregate & { eventSummaries: MoaEventSummary[]; time: TrialTimeSummary } {
+  const aggregate = emptyMoaAggregate() as MoaAggregate & { eventSummaries: MoaEventSummary[]; time: TrialTimeSummary };
   aggregate.eventSummaries = [];
+  aggregate.time = emptyTrialTime();
 
   const jsonlPath = join(trialDir, "agent", "pi-gsd-moa", "pi-output.jsonl");
   if (!existsSync(jsonlPath)) return aggregate;
+
+  const toolStarts = new Map<string, number | null>();
+  let toolExecMs = 0;
+  let toolDurationSamples = 0;
+  let sawToolEvent = false;
+  let referenceMs = 0;
+  let hasReferenceDuration = false;
+  let firstMessageTs: number | null = null;
+  let lastMessageEndTs: number | null = null;
 
   const lines = readFileSync(jsonlPath, "utf8").split(/\r?\n/);
   for (const line of lines) {
@@ -408,50 +523,112 @@ export function parseMoaTelemetry(trialDir: string): MoaAggregate & { eventSumma
       continue;
     }
     const record = asRecord(event);
-    if (!record || record.type !== "message_end") continue;
+    if (!record) continue;
+
+    const messageTs = timestampMs(getPath(record, "message.timestamp"));
+    if (messageTs !== null && firstMessageTs === null) firstMessageTs = messageTs;
+    if (record.type === "message_end" && messageTs !== null) lastMessageEndTs = messageTs;
+
+    if (record.type === "tool_execution_start") {
+      sawToolEvent = true;
+      const id = toolCallId(record);
+      if (id) toolStarts.set(id, eventStartTimestamp(record));
+      continue;
+    }
+    if (record.type === "tool_execution_end") {
+      sawToolEvent = true;
+      const id = toolCallId(record);
+      if (id && toolStarts.has(id)) {
+        const startTs = toolStarts.get(id) ?? null;
+        const endTs = eventEndTimestamp(record);
+        const fromTimestamps = startTs !== null && endTs !== null && endTs >= startTs ? endTs - startTs : null;
+        const duration = fromTimestamps ?? toolDurationFromEnd(record);
+        if (duration !== null) {
+          toolExecMs += duration;
+          toolDurationSamples += 1;
+        }
+        toolStarts.delete(id);
+      }
+      continue;
+    }
+
+    if (record.type !== "message_end") continue;
     const diagnostics = getPath(record, "message.diagnostics");
     if (!Array.isArray(diagnostics)) continue;
     for (const diagnostic of diagnostics) {
       const summary = moaEventFromDiagnostic(diagnostic);
       if (!summary) continue;
+      for (const call of summary.innerCalls) {
+        if (call.role !== "primary" && call.durationMs !== undefined) {
+          referenceMs += call.durationMs;
+          hasReferenceDuration = true;
+        }
+      }
       aggregate.eventSummaries.push(summary);
       applyMoaEvent(aggregate, summary);
     }
   }
+
+  const turnSpanMs = firstMessageTs !== null && lastMessageEndTs !== null && lastMessageEndTs >= firstMessageTs
+    ? lastMessageEndTs - firstMessageTs
+    : null;
+  // Reference durations are cumulative provider-call time; full-MoA proposers run
+  // concurrently, so do not subtract that sum from elapsed wall-clock time.
+  const referenceTimeMs = hasReferenceDuration ? referenceMs : null;
+  const toolTimeMs = toolDurationSamples || !sawToolEvent ? toolExecMs : null;
+  const modelOtherMs = turnSpanMs !== null && toolTimeMs !== null
+    ? Math.max(0, turnSpanMs - toolTimeMs)
+    : null;
+  aggregate.time = {
+    toolExecMs: toolTimeMs,
+    referenceMs: referenceTimeMs,
+    turnSpanMs,
+    modelOtherMs,
+  };
   return aggregate;
 }
 
-export function readTrial(trialDir: string): TrialRecord {
+export function readTrial(trialDir: string, rootDir?: string): TrialRecord {
   const config = readJson(join(trialDir, "config.json"));
   const result = readJson(join(trialDir, "result.json"));
   const reward = rewardFrom(result);
   const task = taskFrom(config, result, trialDir);
   const alias = aliasFrom(config, result);
+  const moa = parseMoaTelemetry(trialDir);
 
   return {
     jobName: basename(resolve(trialDir, "..")),
     trialName: basename(trialDir),
     path: trialDir,
+    label: trialLabel(rootDir, trialDir),
     task,
     alias,
     reward,
     passed: reward !== null && reward >= 1,
+    voidReason: voidReasonFrom(trialDir),
     exceptionClass: exceptionClassFrom(trialDir, result),
     wallTimeMs: wallTimeFrom(trialDir, result),
-    moa: parseMoaTelemetry(trialDir),
+    time: moa.time,
+    moa,
   };
 }
 
-function newMutableGroup(alias: string, task?: string): MutableGroup {
+function newMutableGroup(alias: string, label: string, task?: string): MutableGroup {
   return {
     ...(task ? { task } : {}),
     alias,
+    label,
     trials: 0,
     passes: 0,
+    voids: 0,
     exceptionsByClass: {},
+    voidReasons: {},
     timeouts: 0,
     otherExceptions: 0,
     wallSamples: [],
+    toolTimeSamples: [],
+    referenceTimeSamples: [],
+    modelOtherTimeSamples: [],
     moa: emptyMoaAggregate(),
   };
 }
@@ -473,6 +650,12 @@ function mergeMoa(target: MoaAggregate, source: MoaAggregate): void {
 }
 
 function addTrialToGroup(group: MutableGroup, trial: TrialRecord): void {
+  if (trial.voidReason) {
+    group.voids += 1;
+    increment(group.voidReasons, trial.voidReason);
+    return;
+  }
+
   group.trials += 1;
   if (trial.passed) group.passes += 1;
   if (trial.exceptionClass) {
@@ -481,52 +664,77 @@ function addTrialToGroup(group: MutableGroup, trial: TrialRecord): void {
     else group.otherExceptions += 1;
   }
   if (trial.wallTimeMs !== null) group.wallSamples.push(trial.wallTimeMs);
+  if (trial.time.toolExecMs !== null) group.toolTimeSamples.push(trial.time.toolExecMs);
+  if (trial.time.referenceMs !== null) group.referenceTimeSamples.push(trial.time.referenceMs);
+  if (trial.time.modelOtherMs !== null) group.modelOtherTimeSamples.push(trial.time.modelOtherMs);
   mergeMoa(group.moa, trial.moa);
+}
+
+function meanSample(values: number[]): number | null {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
 
 function finalizeGroup(group: MutableGroup): GroupAggregate {
   const max = group.wallSamples.length ? Math.max(...group.wallSamples) : null;
-  const mean = group.wallSamples.length ? group.wallSamples.reduce((sum, value) => sum + value, 0) / group.wallSamples.length : null;
-  const { wallSamples, ...rest } = group;
+  const mean = meanSample(group.wallSamples);
+  const {
+    wallSamples,
+    toolTimeSamples,
+    referenceTimeSamples,
+    modelOtherTimeSamples,
+    ...rest
+  } = group;
   return {
     ...rest,
     passRate: group.trials ? group.passes / group.trials : 0,
     wallTimeMs: { meanMs: mean, maxMs: max, samples: wallSamples.length },
+    time: {
+      toolMeanMs: meanSample(toolTimeSamples),
+      referenceMeanMs: meanSample(referenceTimeSamples),
+      modelOtherMeanMs: meanSample(modelOtherTimeSamples),
+      samples: {
+        tool: toolTimeSamples.length,
+        reference: referenceTimeSamples.length,
+        modelOther: modelOtherTimeSamples.length,
+      },
+    },
   };
 }
 
 export function aggregateTbResults(dir = "jobs"): AggregateReport {
   const sourceDir = resolve(dir);
-  const trialRecords = findTrialDirs(sourceDir).map(readTrial);
+  const trialRecords = findTrialDirs(sourceDir).map((trialDir) => readTrial(trialDir, sourceDir));
   const taskMaps = new Map<string, Map<string, MutableGroup>>();
   const totalsMap = new Map<string, MutableGroup>();
 
   for (const trial of trialRecords) {
+    const groupKey = `${trial.alias}\0${trial.label}`;
     let byAlias = taskMaps.get(trial.task);
     if (!byAlias) {
       byAlias = new Map();
       taskMaps.set(trial.task, byAlias);
     }
-    let group = byAlias.get(trial.alias);
+    let group = byAlias.get(groupKey);
     if (!group) {
-      group = newMutableGroup(trial.alias, trial.task);
-      byAlias.set(trial.alias, group);
+      group = newMutableGroup(trial.alias, trial.label, trial.task);
+      byAlias.set(groupKey, group);
     }
     addTrialToGroup(group, trial);
 
-    let total = totalsMap.get(trial.alias);
+    let total = totalsMap.get(groupKey);
     if (!total) {
-      total = newMutableGroup(trial.alias);
-      totalsMap.set(trial.alias, total);
+      total = newMutableGroup(trial.alias, trial.label);
+      totalsMap.set(groupKey, total);
     }
     addTrialToGroup(total, trial);
   }
 
+  const sortGroups = (a: GroupAggregate, b: GroupAggregate): number => a.alias.localeCompare(b.alias) || a.label.localeCompare(b.label);
   const tasks = [...taskMaps.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([task, groups]) => ({
       task,
-      groups: [...groups.values()].map(finalizeGroup).sort((a, b) => a.alias.localeCompare(b.alias)),
+      groups: [...groups.values()].map(finalizeGroup).sort(sortGroups),
     }));
 
   return {
@@ -535,7 +743,7 @@ export function aggregateTbResults(dir = "jobs"): AggregateReport {
     trialCount: trialRecords.length,
     trialRecords,
     tasks,
-    totalsByAlias: [...totalsMap.values()].map(finalizeGroup).sort((a, b) => a.alias.localeCompare(b.alias)),
+    totalsByAlias: [...totalsMap.values()].map(finalizeGroup).sort(sortGroups),
   };
 }
 
@@ -548,6 +756,14 @@ function formatMs(value: number | null): string {
   const seconds = value / 1000;
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
   return `${(seconds / 60).toFixed(1)}m`;
+}
+
+function formatMinutes(value: number | null): string {
+  return value === null ? "n/a" : `${(value / 60_000).toFixed(1)}`;
+}
+
+function formatTimeBreakdown(group: GroupAggregate): string {
+  return [group.time.toolMeanMs, group.time.referenceMeanMs, group.time.modelOtherMeanMs].map(formatMinutes).join("/");
 }
 
 function formatNumber(value: number): string {
@@ -578,6 +794,7 @@ function formatUsage(group: GroupAggregate): string {
 
 function groupDetails(group: GroupAggregate): string[] {
   const parts: string[] = [];
+  if (Object.keys(group.voidReasons).length) parts.push(`voids {${formatCounts(group.voidReasons)}}`);
   if (Object.keys(group.moa.guidanceSkipped).length) parts.push(`skips {${formatCounts(group.moa.guidanceSkipped)}}`);
   if (group.moa.synthesisFailureCount) parts.push(`synthesis failures {${formatCounts(group.moa.synthesisFailures)}}`);
   if (group.moa.timeAwareSuppressions) parts.push(`time-aware suppressions {${formatCounts(group.moa.timeAwareSuppressionPhases)}}`);
@@ -587,17 +804,20 @@ function groupDetails(group: GroupAggregate): string[] {
 
 function tableForGroups(groups: GroupAggregate[]): string[] {
   const lines = [
-    "| Model alias | Trials | Passes | Pass rate | Exceptions | Wall mean/max | Checkpoints | Cache hit | Tokens in/out | Cost | Suppressions |",
-    "|---|---:|---:|---:|---|---:|---|---:|---:|---:|---:|",
+    "| Model alias | Label | Trials | Voids | Passes | Pass rate | Exceptions | Wall mean/max | Time tool/refΣ/non-tool | Checkpoints | Cache hit | Tokens in/out | Cost | Suppressions |",
+    "|---|---|---:|---:|---:|---:|---|---:|---:|---|---:|---:|---:|---:|",
   ];
   for (const group of groups) {
     lines.push([
       `| ${group.alias}`,
+      group.label,
       group.trials,
+      group.voids,
       group.passes,
       formatPercent(group.passRate),
       formatCounts(group.exceptionsByClass),
       `${formatMs(group.wallTimeMs.meanMs)} / ${formatMs(group.wallTimeMs.maxMs)}`,
+      formatTimeBreakdown(group),
       formatCounts(group.moa.checkpointRuns),
       formatCache(group),
       formatUsage(group),
@@ -628,7 +848,7 @@ export function renderMarkdown(report: AggregateReport): string {
     lines.push(...tableForGroups(task.groups));
     const details = task.groups.flatMap((group) => {
       const parts = groupDetails(group);
-      return parts.length ? [`- ${group.alias}: ${parts.join("; ")}`] : [];
+      return parts.length ? [`- ${group.alias} [${group.label}]: ${parts.join("; ")}`] : [];
     });
     if (details.length) {
       lines.push("");

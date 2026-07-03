@@ -173,6 +173,7 @@ export interface AdvisorResult {
   usage?: Usage;
   cacheHit: boolean;
   key: string;
+  durationMs: number;
 }
 
 export interface InnerCallDetails {
@@ -183,6 +184,7 @@ export interface InnerCallDetails {
   model: string;
   usage?: Usage;
   cacheHit?: boolean;
+  durationMs?: number;
   selectionReason?: string;
 }
 
@@ -202,6 +204,7 @@ export interface FullMoaProposal {
   provider: string;
   model: string;
   key: string;
+  durationMs: number;
   selectionReason?: string;
 }
 
@@ -214,6 +217,7 @@ export interface FullMoaResult {
     provider: string;
     model: string;
     key: string;
+    durationMs: number;
   };
   synthesisError?: string;
   guidance: string;

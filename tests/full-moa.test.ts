@@ -512,7 +512,9 @@ describe("full MoA orchestration", () => {
       assert.equal(done.message.usage.totalTokens, 48);
       const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
       assert.equal(details.mode, "full_moa");
-      assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 2);
+      const proposerCalls = details.innerCalls.filter((call: any) => call.role === "proposer");
+      assert.equal(proposerCalls.length, 2);
+      assert.ok(proposerCalls.every((call: any) => typeof call.durationMs === "number" && call.durationMs >= 0));
       assert.equal(details.innerCalls.filter((call: any) => call.role === "synthesizer").length, 1);
       assert.equal(details.innerCalls.filter((call: any) => call.role === "primary").length, 1);
     } finally {
