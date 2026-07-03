@@ -62,7 +62,11 @@ Match: single-writer tools, advisory system prompt (ported verbatim-ish), saniti
 - mteb-leaderboard "failures" were infra voids (image pull > 600s env-start limit) — image now cached; aggregator classifies voids separately.
 - 0% reference cache hits is **intended** (see memory `moa-caching-philosophy-and-dev-mode`): cache hits = advisor saw nothing new. full_moa = dev mode for tuning `auto`.
 
-## Landed this session (all committed, 98/98 both runtimes)
+## INTEGRITY FINDING (2026-07-03 afternoon — read before interpreting ANY mteb result)
+
+Per https://www.tbench.ai/news/leaderboard-integrity-update, **every mteb-leaderboard "pass" we ever recorded was reward-hacked**: omp's web_search surfaced the benchmark's own artifacts (tbench.ai registry, `laude-institute/terminal-bench` `check.py` oracle, harbor-framework mirrors, marginlab.ai explorer, spylab.ai notes) because search queries echo the task text; one trial read check.py and git-checked-out the pinned results snapshot. Sweep of all passing trials: 4 tainted (all mteb), 11 clean (mcmc/gcode/overfull/extract-elf — offline tasks). Consequences: the probe's omp "3/3 mteb" is void; the omp-vs-pi mteb split is NOT a capability signal (pi's bash-only scraping simply couldn't find the artifacts); the effort-gap story loses its flagship datapoint. `127c60d` adds Integrity scoring to the aggregator (tainted would-passes zeroed — verified against the live arm) and a default-off `GSD_MOA_BENCH_INTEGRITY` directive (no omp web-tool blocklist exists; enforcement = directive + post-hoc audit). Memory: `benchmark-integrity`. **After the probe: enable `GSD_MOA_BENCH_INTEGRITY=1` in yukon env files for all future runs.**
+
+## Landed this session (all committed, 98/98 → 106/106 both runtimes)
 
 - `f0afe87` dual-runtime adapter; `b6831f6` effort config (default high; presets needed `supportsReasoningEffort` compat or omp's serializer silently drops the field); `befaee4` Hermes audit gaps: user-last reference views, `[failed: …]` notes to actor, `referenceMaxTokens`/`GSD_MOA_REFERENCE_MAX_TOKENS`, route `temperature`, and alias `gpt55-cliproxycodex-glm52-hermes-full` (refs once per fresh turn, no synth — ablation of checkpoint re-advice; see `docs/HERMES-DIVERGENCES.md`).
 - Yukon: checkout at `befaee4`; both bundles rebuilt (`.proof/omp-runtime.tar`, new `.proof/pi-runtime.tar` + `pi-runtime.Dockerfile`, validated in node:24 container); env files: `gsd-moa.env` has `GSD_MOA_EFFORT=high`, new `gsd-moa-inherit.env`; `run-probe.sh`.
