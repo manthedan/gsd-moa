@@ -1,6 +1,6 @@
 import type { Context, SimpleStreamOptions, UserMessage } from "./pi-compat.js";
 import { resolveProposerRoute, resolveSynthesisRoute } from "./config.js";
-import { latestUserText, redactSensitiveText, sanitizeReferenceContext } from "./context.js";
+import { benchmarkIntegrityReferenceLine, latestUserText, redactSensitiveText, sanitizeReferenceContext } from "./context.js";
 import { runReferenceCall } from "./reference-call.js";
 import { formatReferenceTimeLine } from "./time.js";
 import type { TraceRecorder } from "./trace.js";
@@ -194,6 +194,7 @@ export function buildProposerContext(
       selectionReason ? `Portfolio selection: ${selectionReason}.` : undefined,
       proposer.prompt,
       `Do not request or call tools. Do not claim to have changed files or executed commands.`,
+      benchmarkIntegrityReferenceLine(config),
       formatReferenceTimeLine(timeState),
       `Selected route: requested=${policy.requestedMode}, mode=${policy.mode}, reason=${policy.reason}.`,
     ].filter(Boolean).join("\n\n"),
@@ -229,6 +230,7 @@ export function buildSynthesisContext(
       `Prompt version: ${config.prompts.fullMoaVersion}.`,
       config.fullMoa.synthesis.prompt,
       `Do not request or call tools. Do not claim to have changed files or executed commands.`,
+      benchmarkIntegrityReferenceLine(config),
       formatReferenceTimeLine(timeState),
       `Selected route: requested=${policy.requestedMode}, mode=${policy.mode}, reason=${policy.reason}.`,
     ].join("\n"),

@@ -124,6 +124,7 @@ export interface FullMoaConfig {
 
 export interface GsdMoaConfig {
   defaultEffort: DefaultReasoningEffort;
+  benchmarkIntegrity: boolean;
   routePresets: Record<string, RoutePresetConfig>;
   primary: UpstreamRoute;
   reference: UpstreamRoute;
@@ -265,6 +266,7 @@ export interface MoaRunDetails {
     phase?: TimePhase;
     suppressed?: string;
   };
+  benchmarkIntegrity?: boolean;
   asyncAdvisor?: {
     status: "fired" | "pending" | "injected" | "failed";
     ageMs?: number;

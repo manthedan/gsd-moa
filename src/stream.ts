@@ -10,7 +10,7 @@ import {
 import { runAdvisor } from "./advisor.js";
 import { maybeUseAsyncAdvisor, type AsyncAdvisorDecision } from "./async-advisor.js";
 import { loadConfig } from "./config.js";
-import { buildToolObservationSummary, isToolLoopContinuation, latestMessageHasMoaMarker, latestUserText, redactSensitiveText, stripMarkersFromContext, withAdvisorGuidance, withFullMoaGuidance, withTimeAwarenessNote } from "./context.js";
+import { buildToolObservationSummary, isToolLoopContinuation, latestMessageHasMoaMarker, latestUserText, redactSensitiveText, stripMarkersFromContext, withAdvisorGuidance, withBenchmarkIntegrityNote, withFullMoaGuidance, withTimeAwarenessNote } from "./context.js";
 import { runFullMoa } from "./moa.js";
 import { chooseAction, chooseMode } from "./policy.js";
 import { applyModelPreset } from "./presets.js";
@@ -109,6 +109,7 @@ export function streamGsdMoa(
       }
 
       if (timeState) finalContext = withTimeAwarenessNote(finalContext, timeState);
+      if (config.benchmarkIntegrity) finalContext = withBenchmarkIntegrityNote(finalContext);
 
       trace?.recordFinalContext(finalContext);
       const primaryModel = routeToModel(config.primary);
@@ -189,6 +190,7 @@ function moaDiagnostic(
     guidanceInjected,
     ...(guidanceSkippedReason ? { guidanceSkippedReason } : {}),
     ...(fullMoa?.synthesisError ? { synthesisFailedReason: fullMoa.synthesisError } : {}),
+    ...(config.benchmarkIntegrity ? { benchmarkIntegrity: true } : {}),
     ...(timeState ? {
       timeAware: {
         remainingMs: timeState.remainingMs,

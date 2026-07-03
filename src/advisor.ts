@@ -1,5 +1,5 @@
 import type { Context, SimpleStreamOptions } from "./pi-compat.js";
-import { sanitizeReferenceContext } from "./context.js";
+import { benchmarkIntegrityReferenceLine, sanitizeReferenceContext } from "./context.js";
 import { runReferenceCall } from "./reference-call.js";
 import { formatReferenceTimeLine } from "./time.js";
 import type { TraceRecorder } from "./trace.js";
@@ -37,6 +37,7 @@ export function buildAdvisorContext(config: GsdMoaConfig, context: Context, poli
       `Prompt version: ${config.prompts.advisorVersion}.`,
       `Give concise critique, risks, missing tests, and implementation advice.`,
       `Do not request or call tools. Do not produce patches.`,
+      benchmarkIntegrityReferenceLine(config),
       formatReferenceTimeLine(timeState),
       `Selected route: requested=${policy.requestedMode}, mode=${policy.mode}, reason=${policy.reason}.`,
     ].filter(Boolean).join("\n"),

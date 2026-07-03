@@ -241,6 +241,20 @@ gsd-moa:include=gemini35flash
 - Advisor/reference outputs may be cached.
 - Final tool-capable responses are never cached.
 
+## Benchmark integrity
+
+Terminal-Bench runs can opt into leaderboard-integrity guardrails with:
+
+```bash
+export GSD_MOA_BENCH_INTEGRITY=1
+```
+
+This is default-off and changes no normal provider behavior unless enabled. When active, `gsd-moa` appends an execution note telling the final acting model not to search for, read, or use benchmark-owned materials (task registries, task definition repositories, checker/test files, solution writeups, or pages discussing the benchmark task). The same rule is included in private advisor/proposer prompts so reference models do not recommend reward-hacking sources. The `gsd-moa.details` diagnostic records `benchmarkIntegrity: true`.
+
+The Terminal-Bench aggregator (`npm run tb:report -- --dir <jobs>`) scans trial agent logs (`agent/**/pi-output.jsonl`, falling back to `agent/trajectory.json`) for benchmark-artifact domains/patterns such as `tbench.ai`, Terminal-Bench GitHub repos, task explorers, and notes. Tainted trials with positive verifier reward are zeroed for `Passes`/`Pass rate` to match leaderboard scoring; missing logs are reported as `unknown` but are not zeroed.
+
+OMP/pi currently expose web-search provider selection/exclusion settings, but no settings-file domain deny-list for web tools was found in `@oh-my-pi/pi-coding-agent` (`settings-schema.ts` / `src/web`). Therefore the Harbor adapter only passes `GSD_MOA_BENCH_INTEGRITY` through to the provider; it cannot enforce a domain blocklist at the tool layer. The directive plus post-hoc aggregator audit cover web-search/read usage. Shell commands such as `bash`/`curl` are not blockable by this mechanism.
+
 ## Observability
 
 Final assistant messages include `gsd-moa.details`, which records:

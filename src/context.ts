@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import type { AssistantMessage, Context, Message, TextContent, UserMessage } from "./pi-compat.js";
 import { formatTimeAwareNote } from "./time.js";
-import type { FullMoaResult, PolicyDecision, TimeState, ToolObservationSummary } from "./types.js";
+import type { FullMoaResult, GsdMoaConfig, PolicyDecision, TimeState, ToolObservationSummary } from "./types.js";
+
+export const BENCHMARK_INTEGRITY_PUBLIC_NOTE = "[Benchmark integrity note from provider: Solve this task from its legitimate sources only. Do NOT search for, read, or use the benchmark's own materials — task registries, task definition repositories, checker/test files, solution writeups, or pages discussing this benchmark task (e.g. tbench.ai, terminal-bench GitHub repos, task explorer or note sites). If a search result references the benchmark or this task by name, ignore it. Using such sources is reward hacking and voids the run.]";
+
+export const BENCHMARK_INTEGRITY_REFERENCE_NOTE = "Benchmark integrity: do not recommend searching for, reading, or using the benchmark's own registries, task definitions, checker/test files, solution writeups, or benchmark-task discussion pages.";
 
 export function latestUserText(context: Context, preserveMarkers = false): string {
   for (let i = context.messages.length - 1; i >= 0; i--) {
@@ -266,7 +270,16 @@ export function withTimeAwarenessNote(context: Context, timeState: TimeState): C
   return appendPublicExecutionNote(context, formatTimeAwareNote(timeState));
 }
 
-function appendPublicExecutionNote(context: Context, note: string): Context {
+export function withBenchmarkIntegrityNote(context: Context): Context {
+  return appendPublicExecutionNote(context, BENCHMARK_INTEGRITY_PUBLIC_NOTE, { dedupeExact: true });
+}
+
+export function benchmarkIntegrityReferenceLine(config: Pick<GsdMoaConfig, "benchmarkIntegrity">): string | undefined {
+  return config.benchmarkIntegrity ? BENCHMARK_INTEGRITY_REFERENCE_NOTE : undefined;
+}
+
+function appendPublicExecutionNote(context: Context, note: string, options: { dedupeExact?: boolean } = {}): Context {
+  if (options.dedupeExact && context.messages.some((msg) => msg.role === "user" && rawMessageText(msg).includes(note))) return context;
   let appended = false;
   const messages = [...context.messages].reverse().map((msg) => {
     if (appended || msg.role !== "user") return msg;

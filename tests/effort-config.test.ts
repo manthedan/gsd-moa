@@ -19,6 +19,18 @@ function withEffortEnv<T>(value: string | undefined, fn: () => T): T {
   }
 }
 
+function withBenchmarkIntegrityEnv<T>(value: string | undefined, fn: () => T): T {
+  const old = process.env.GSD_MOA_BENCH_INTEGRITY;
+  try {
+    if (value === undefined) delete process.env.GSD_MOA_BENCH_INTEGRITY;
+    else process.env.GSD_MOA_BENCH_INTEGRITY = value;
+    return fn();
+  } finally {
+    if (old === undefined) delete process.env.GSD_MOA_BENCH_INTEGRITY;
+    else process.env.GSD_MOA_BENCH_INTEGRITY = old;
+  }
+}
+
 function resolve(route: Partial<UpstreamRoute>, hostReasoning: string | undefined, env: string | undefined, defaultEffort: DefaultReasoningEffort | undefined): unknown {
   return withEffortEnv(env, () => streamOptionsForRoute(
     { provider: "p", model: "m", ...route } as UpstreamRoute,
@@ -75,6 +87,25 @@ describe("reasoning effort configuration", () => {
     assert.equal(streamOptionsForRoute({ provider: "p", model: "m" } as UpstreamRoute).temperature, undefined);
     assert.equal(streamOptionsForRoute({ provider: "p", model: "m", temperature: 0.6 } as UpstreamRoute).temperature, 0.6);
     assert.equal(streamOptionsForRoute({ provider: "p", model: "m" } as UpstreamRoute, { temperature: 0.2 }).temperature, 0.2);
+  });
+
+  it("loads and validates benchmark integrity default, file config, and env override", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gsd-moa-integrity-"));
+    try {
+      resetConfigCache();
+      withBenchmarkIntegrityEnv(undefined, () => assert.equal(loadConfig("missing.json", dir).benchmarkIntegrity, false));
+      writeFileSync(join(dir, "gsd-moa.json"), JSON.stringify({ benchmarkIntegrity: true }));
+      resetConfigCache();
+      withBenchmarkIntegrityEnv(undefined, () => assert.equal(loadConfig("gsd-moa.json", dir).benchmarkIntegrity, true));
+      resetConfigCache();
+      withBenchmarkIntegrityEnv("0", () => assert.equal(loadConfig("gsd-moa.json", dir).benchmarkIntegrity, false));
+      resetConfigCache();
+      withBenchmarkIntegrityEnv("true", () => assert.equal(loadConfig("missing.json", dir).benchmarkIntegrity, true));
+      assert.throws(() => validateConfig({ ...DEFAULT_CONFIG, benchmarkIntegrity: "yes" as never }), /benchmarkIntegrity must be boolean/);
+    } finally {
+      resetConfigCache();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("loads and validates GSD_MOA_EFFORT and defaultEffort", () => {

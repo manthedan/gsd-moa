@@ -46,6 +46,27 @@ export interface TrialTimeSummary {
   modelOtherMs: number | null;
 }
 
+export interface IntegrityPattern {
+  label: string;
+  pattern: string | RegExp;
+}
+
+export type TrialIntegrityStatus = "clean" | "tainted" | "unknown";
+
+export interface TrialIntegritySummary {
+  status: TrialIntegrityStatus;
+  matchedPatterns: string[];
+  scannedFiles: string[];
+  wouldPassZeroed: boolean;
+}
+
+export interface GroupIntegrityAggregate {
+  tainted: number;
+  unknown: number;
+  wouldPassZeroed: number;
+  patterns: CountMap;
+}
+
 export interface MoaEventSummary {
   mode?: string;
   requestedMode?: string;
@@ -88,6 +109,8 @@ export interface TrialRecord {
   alias: string;
   reward: number | null;
   passed: boolean;
+  rawPassed: boolean;
+  integrity: TrialIntegritySummary;
   voidReason: string | null;
   exceptionClass: string | null;
   wallTimeMs: number | null;
@@ -126,6 +149,7 @@ export interface GroupAggregate {
   otherExceptions: number;
   wallTimeMs: WallTimeAggregate;
   time: GroupTimeAggregate;
+  integrity: GroupIntegrityAggregate;
   moa: MoaAggregate;
 }
 
@@ -149,6 +173,15 @@ interface MutableGroup extends Omit<GroupAggregate, "wallTimeMs" | "time" | "pas
   referenceTimeSamples: number[];
   modelOtherTimeSamples: number[];
 }
+
+export const TBENCH_INTEGRITY_PATTERNS: IntegrityPattern[] = [
+  { label: "tbench.ai", pattern: "tbench.ai" },
+  { label: "laude-institute/terminal-bench", pattern: "laude-institute/terminal-bench" },
+  { label: "harbor-framework/terminal-bench", pattern: "harbor-framework/terminal-bench" },
+  { label: "marginlab.ai/explorers", pattern: "marginlab.ai/explorers" },
+  { label: "spylab.ai/notes", pattern: "spylab.ai/notes" },
+  { label: "terminal-?bench-?artifact", pattern: /terminal-?bench-?artifact/i },
+];
 
 const CHECKPOINT_SCOPES = ["initial", "explicit", "failure", "drift"];
 
@@ -229,6 +262,70 @@ function listDirectories(path: string): string[] {
   } catch {
     return [];
   }
+}
+
+function findFilesByBasename(root: string, filename: string): string[] {
+  const matches: string[] = [];
+  const walk = (current: string): void => {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const child = join(current, entry.name);
+      if (entry.isDirectory()) walk(child);
+      else if (entry.isFile() && entry.name === filename) matches.push(child);
+    }
+  };
+  walk(root);
+  return matches.sort();
+}
+
+function integrityLogFiles(trialDir: string): string[] {
+  const agentDir = join(trialDir, "agent");
+  if (!existsSync(agentDir)) return [];
+  const jsonl = findFilesByBasename(agentDir, "pi-output.jsonl");
+  if (jsonl.length) return jsonl;
+  const trajectory = join(agentDir, "trajectory.json");
+  return existsSync(trajectory) ? [trajectory] : [];
+}
+
+function scanIntegrityLine(line: string, matches: Set<string>): void {
+  const lower = line.toLowerCase();
+  for (const { label, pattern } of TBENCH_INTEGRITY_PATTERNS) {
+    if (typeof pattern === "string") {
+      if (lower.includes(pattern.toLowerCase())) matches.add(label);
+    } else if (pattern.test(line)) {
+      matches.add(label);
+    }
+  }
+}
+
+export function scanTrialIntegrity(trialDir: string, reward: number | null = null): TrialIntegritySummary {
+  const files = integrityLogFiles(trialDir);
+  if (!files.length) return { status: "unknown", matchedPatterns: [], scannedFiles: [], wouldPassZeroed: false };
+  const matches = new Set<string>();
+  const scannedFiles: string[] = [];
+  for (const file of files) {
+    let text = "";
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    scannedFiles.push(file);
+    for (const line of text.split(/\r?\n/)) scanIntegrityLine(line, matches);
+  }
+  if (!scannedFiles.length) return { status: "unknown", matchedPatterns: [], scannedFiles: [], wouldPassZeroed: false };
+  const matchedPatterns = [...matches].sort();
+  return {
+    status: matchedPatterns.length ? "tainted" : "clean",
+    matchedPatterns,
+    scannedFiles,
+    wouldPassZeroed: matchedPatterns.length > 0 && reward !== null && reward > 0,
+  };
 }
 
 function isTrialDir(path: string): boolean {
@@ -599,6 +696,8 @@ export function readTrial(trialDir: string, rootDir?: string): TrialRecord {
   const config = readJson(join(trialDir, "config.json"));
   const result = readJson(join(trialDir, "result.json"));
   const reward = rewardFrom(result);
+  const rawPassed = reward !== null && reward >= 1;
+  const integrity = scanTrialIntegrity(trialDir, reward);
   const task = taskFrom(config, result, trialDir);
   const alias = aliasFrom(config, result);
   const moa = parseMoaTelemetry(trialDir);
@@ -611,7 +710,9 @@ export function readTrial(trialDir: string, rootDir?: string): TrialRecord {
     task,
     alias,
     reward,
-    passed: reward !== null && reward >= 1,
+    passed: rawPassed && !integrity.wouldPassZeroed,
+    rawPassed,
+    integrity,
     voidReason: voidReasonFrom(trialDir),
     exceptionClass: exceptionClassFrom(trialDir, result),
     wallTimeMs: wallTimeFrom(trialDir, result),
@@ -636,8 +737,16 @@ function newMutableGroup(alias: string, label: string, task?: string): MutableGr
     toolTimeSamples: [],
     referenceTimeSamples: [],
     modelOtherTimeSamples: [],
+    integrity: { tainted: 0, unknown: 0, wouldPassZeroed: 0, patterns: {} },
     moa: emptyMoaAggregate(),
   };
+}
+
+function applyIntegrity(group: MutableGroup, trial: TrialRecord): void {
+  if (trial.integrity.status === "tainted") group.integrity.tainted += 1;
+  if (trial.integrity.status === "unknown") group.integrity.unknown += 1;
+  if (trial.integrity.wouldPassZeroed) group.integrity.wouldPassZeroed += 1;
+  for (const pattern of trial.integrity.matchedPatterns) increment(group.integrity.patterns, pattern);
 }
 
 function mergeMoa(target: MoaAggregate, source: MoaAggregate): void {
@@ -661,6 +770,8 @@ function mergeMoa(target: MoaAggregate, source: MoaAggregate): void {
 }
 
 function addTrialToGroup(group: MutableGroup, trial: TrialRecord): void {
+  applyIntegrity(group, trial);
+
   if (trial.voidReason) {
     group.voids += 1;
     increment(group.voidReasons, trial.voidReason);
@@ -805,6 +916,10 @@ function formatEffortsByRole(effortsByRole: Record<string, CountMap>): string {
   }).join(", ");
 }
 
+function formatIntegrity(group: GroupAggregate): string {
+  return group.integrity.tainted ? `tainted: ${group.integrity.tainted}` : "clean";
+}
+
 function formatCache(group: GroupAggregate): string {
   const lookups = group.moa.cacheLookups;
   if (!lookups) return "n/a";
@@ -822,6 +937,15 @@ function groupDetails(group: GroupAggregate): string[] {
   if (Object.keys(group.moa.guidanceSkipped).length) parts.push(`skips {${formatCounts(group.moa.guidanceSkipped)}}`);
   if (group.moa.synthesisFailureCount) parts.push(`synthesis failures {${formatCounts(group.moa.synthesisFailures)}}`);
   if (group.moa.timeAwareSuppressions) parts.push(`time-aware suppressions {${formatCounts(group.moa.timeAwareSuppressionPhases)}}`);
+  if (group.integrity.tainted || group.integrity.unknown) {
+    const segments = [
+      group.integrity.tainted ? `${group.integrity.tainted} tainted` : undefined,
+      group.integrity.unknown ? `${group.integrity.unknown} unknown` : undefined,
+      group.integrity.wouldPassZeroed ? `(${group.integrity.wouldPassZeroed} would-pass zeroed)` : undefined,
+      group.integrity.tainted ? `{${formatCounts(group.integrity.patterns)}}` : undefined,
+    ].filter(Boolean);
+    parts.push(`integrity: ${segments.join(" ")}`);
+  }
   if (Object.keys(group.moa.innerCallsByRoleModel).length) parts.push(`inner calls {${formatCounts(group.moa.innerCallsByRoleModel)}}`);
   if (Object.keys(group.moa.effortsByRole).length) parts.push(`efforts {${formatEffortsByRole(group.moa.effortsByRole)}}`);
   return parts;
@@ -829,8 +953,8 @@ function groupDetails(group: GroupAggregate): string[] {
 
 function tableForGroups(groups: GroupAggregate[]): string[] {
   const lines = [
-    "| Model alias | Label | Trials | Voids | Passes | Pass rate | Exceptions | Wall mean/max | Time tool/refΣ/non-tool | Checkpoints | Cache hit | Tokens in/out | Cost | Suppressions |",
-    "|---|---|---:|---:|---:|---:|---|---:|---:|---|---:|---:|---:|---:|",
+    "| Model alias | Label | Trials | Voids | Passes | Pass rate | Integrity | Exceptions | Wall mean/max | Time tool/refΣ/non-tool | Checkpoints | Cache hit | Tokens in/out | Cost | Suppressions |",
+    "|---|---|---:|---:|---:|---:|---|---|---:|---:|---|---:|---:|---:|---:|",
   ];
   for (const group of groups) {
     lines.push([
@@ -840,6 +964,7 @@ function tableForGroups(groups: GroupAggregate[]): string[] {
       group.voids,
       group.passes,
       formatPercent(group.passRate),
+      formatIntegrity(group),
       formatCounts(group.exceptionsByClass),
       `${formatMs(group.wallTimeMs.meanMs)} / ${formatMs(group.wallTimeMs.maxMs)}`,
       formatTimeBreakdown(group),

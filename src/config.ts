@@ -83,6 +83,7 @@ export const DEFAULT_ROUTE_PRESETS: GsdMoaConfig["routePresets"] = buildDefaultR
 
 export const DEFAULT_CONFIG: GsdMoaConfig = {
   defaultEffort: "high",
+  benchmarkIntegrity: false,
   routePresets: structuredClone(DEFAULT_ROUTE_PRESETS),
   primary: defaultPrimaryRoute(DEFAULT_ROUTE_PRESETS),
   reference: defaultReferenceRoute(DEFAULT_ROUTE_PRESETS),
@@ -284,6 +285,7 @@ function parseConfigFile(fullPath: string, displayPath: string): GsdMoaConfig {
   return {
     ...structuredClone(DEFAULT_CONFIG),
     defaultEffort: parseDefaultEffort(parsed.defaultEffort, DEFAULT_CONFIG.defaultEffort),
+    benchmarkIntegrity: typeof parsed.benchmarkIntegrity === "boolean" ? parsed.benchmarkIntegrity : DEFAULT_CONFIG.benchmarkIntegrity,
     routePresets,
     primary: mergeRoute(defaultPrimaryRoute(routePresets), parsed.primary),
     reference: mergeRoute(defaultReferenceRoute(routePresets), parsed.reference),
@@ -352,6 +354,9 @@ function applyEnvOverrides(cfg: GsdMoaConfig): void {
   if (process.env.GSD_MOA_TIME_AWARE !== undefined) {
     cfg.timeAware.enabled = /^(1|true|yes|on)$/i.test(process.env.GSD_MOA_TIME_AWARE);
   }
+  if (process.env.GSD_MOA_BENCH_INTEGRITY !== undefined) {
+    cfg.benchmarkIntegrity = /^(1|true|yes|on)$/i.test(process.env.GSD_MOA_BENCH_INTEGRITY);
+  }
   if (process.env.GSD_MOA_REFERENCE_TIMEOUT_MS !== undefined) {
     cfg.referenceTimeoutMs = Number(process.env.GSD_MOA_REFERENCE_TIMEOUT_MS);
   }
@@ -383,6 +388,7 @@ function applyRouteBaseUrlOverride(
 
 export function validateConfig(cfg: GsdMoaConfig): void {
   validateDefaultEffort("defaultEffort", cfg.defaultEffort);
+  if (typeof cfg.benchmarkIntegrity !== "boolean") throw new Error("benchmarkIntegrity must be boolean");
   validateRoutePresets(cfg.routePresets);
   validateRoute("primary", cfg.primary);
   validateRoute("reference", cfg.reference);
