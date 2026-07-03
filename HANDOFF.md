@@ -1,21 +1,37 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench dev experiments
 
-Last updated: 2026-07-02 ~23:30 PT. Previous session: full audit → fix cycle → oh-my-pi port → yukon experiment infrastructure → 36-trial dev matrix + reruns.
+Last updated: 2026-07-03 (day session). Previous: audit → omp port → yukon infra → 36-trial matrix + reruns. This session: rerun analysis → **effort-level discovery** → dual-runtime adapter landed → effort-config codex task launched → Hermes MoA audit.
 
 ## Where you are
 
 - **Worktree**: `/Users/macthedan/projects/gsd-moa-omp`, branch `oh-my-pi-port` (main repo: `~/projects/gsd-moa`, branch `main` — diverged, do not confuse). Other experiment worktrees exist (`gsd-moa-factory-droid-proxy`, etc.).
-- **HEAD**: `db33555` — history (all reviewed, 80/80 tests, `npm run check` green):
-  `ec1c1ba` audit fixes (fail-open refs, guidance-in-messages, periodic drift, `src/reference-call.ts`) → port to `@oh-my-pi/*` 16.3.2 via `src/pi-compat.ts` adapter → live omp smoke tests → `src/registry.ts` single-source alias registry → time-aware execution (`src/time.ts`, LemonHarness arXiv:2606.24311) + async advisor (default OFF) + **corrected GPT-5.5 codex limits 272K/128K (verified by live probe)** → `GSD_MOA_TIME_AWARE` env kill-switch → tar-layout + agent quoting fixes → pure-single policy fix (single aliases no longer fire failure checkpoints) → forensics aggregator.
-- **Remote**: bare repo `ssh://yukon/~/repos/gsd-moa.git` (git remote `yukon`). The user's codex agent AMENDS pushed commits — on non-FF rejects, diff remote vs local, confirm local is a superset, then `--force-with-lease`. See memory `multi-agent-git-conventions`.
+- **HEAD**: `f0afe87` **dual-runtime adapter** — same commit runs on omp AND upstream pi (`GSD_MOA_RUNTIME=pi|omp` or Bun auto-detect; `@earendil-works/*` optional peers; harbor agent `PI_GSD_MOA_CLI=pi`; 87/87 tests both runtimes; live smokes pass on both, incl. pi full-MoA with GLM ref). Prior history at `db33555`: audit fixes → omp port → registry → time-aware (LemonHarness arXiv:2606.24311) + async advisor (default OFF) + corrected GPT-5.5 codex limits 272K/128K → `GSD_MOA_TIME_AWARE` kill-switch → pure-single policy fix → forensics aggregator.
+- **Remote**: bare repo `ssh://yukon/~/repos/gsd-moa.git` (git remote `yukon`). The user's codex agent AMENDS pushed commits — on non-FF rejects, diff remote vs local, confirm local is a superset, then `--force-with-lease`. See memory `multi-agent-git-conventions`. **f0afe87 not yet pushed to yukon.**
 
 ## RUNNING RIGHT NOW (check first!)
 
-**Pure-single reruns on yukon**, started 23:11 PT, ~2.5–3h, detached:
-```bash
-ssh yukon 'tail -3 ~/projects/gsd-moa/reruns.log; pgrep -f run-reruns.sh >/dev/null && echo RUNNING'
-```
-Arms: `e1b-single` (mteb-leaderboard, dna-insert, mcmc-sampling-stan, raman-fitting, gcode-to-text, caffe-cifar-10) + `e2b-single` (torch-tensor-parallelism, overfull-hbox), k=2, on `db33555` (post policy-fix). Ends with `RERUNS DONE`.
+**Codex task `effort-config`** (local pi CLI, background) implementing configurable reasoning effort, spec at scratchpad `effort-config-spec.md`. When done: review diff, `npm run check`, live smokes (omp + pi), commit.
+
+## THE EFFORT DISCOVERY (2026-07-03 — biggest confounder found so far)
+
+**All our TB runs sent NO reasoning_effort.** Chain: run scripts never set `PI_GSD_MOA_THINKING_LEVEL` → harbor agent passes no `--thinking` → `omp --no-session` fresh container has no default → `options.reasoning` undefined → serializer omits the field → backend default (likely medium) applied. Traces confirm: zero effort keys. **Meanwhile harbor's codex agent hard-defaults `model_reasoning_effort=high`** — so the public Codex CLI leaderboard numbers are at HIGH. Every leaderboard comparison we made is effort-confounded; the "public agents pass, we fail" cluster (mteb, dna-insert, raman, caffe) may be an effort gap, not a harness gap. LemonHarness paper doesn't disclose effort. `xhigh` exists for GPT-5.5-codex.
+
+User decision: GPT **and** GLM run at high; effort configurable; default high; benchmarks pinned high. → the running `effort-config` codex task (route-level `effort`, `GSD_MOA_EFFORT` env, default high, precedence route > host --thinking > env > default, effort recorded in traces + aggregator, harbor agent defaults `--thinking high`). After it lands: set `GSD_MOA_EFFORT=high` in yukon `.proof/*.env` too.
+
+## Rerun results (e1b/e2b clean-single, k=2 — aggregated 2026-07-03)
+
+- **The single-alias checkpoint bug cost TIME, not passes**: clean single ≈ half the wall time (dna 3.9m vs 13.5m, torch 9.8m vs 19.6m), 2/16 cancellations vs 22/34 in MoA arms.
+- **mcmc**: clean single 2/2 @ 20.5m — matches ta-on full-MoA 2/2 @ 26.3m, cheaper. E3's "win" = time-aware rescues MoA from its own overhead, NOT MoA+ta > single.
+- **MoA shows zero pass-rate lift over clean single at k=2 anywhere.** June torch full-MoA win looks like k=1 variance (torch now 0/2 all modes; e2b no cancellations — genuinely hard).
+- gcode 1/2 → 0/2 (variance); mteb now runs (image cached) but fails 0/2 on merit.
+
+## Planned: pi-vs-omp probe (falsification test of the omp choice)
+
+Single-mode only, 4 tasks where public GPT-5.5 agents pass but we fail (mteb-leaderboard, dna-insert, raman-fitting, caffe-cifar-10), pi vs omp, same commit/route, k=3, **effort pinned high both arms** + a third omp-at-default-effort arm to isolate the effort effect. ~1 overnight. Needs: pi-runtime bundle for yukon (Node-based `pi-runtime.tar`, mirror omp bundle pattern; Dockerfile target in gitignored `.proof/` — scp it), run-probe.sh. If pi ≈ omp → commit to omp, delete legacy path. Don't run full-matrix runtime A/B — waste.
+
+## Hermes MoA audit (2026-07-03, vs moa_loop.py @2c9b017)
+
+Match: single-writer tools, advisory system prompt (ported verbatim-ish), sanitized text-only reference view, parallel fan-out, fail-open, recursion guards, tail injection. Deliberate divergences (keep): checkpoint-driven re-advice with tool observations (Hermes runs refs ONCE per user turn, never sees tool results), separate synthesis layer, conditional portfolio, secret redaction, untrusted-guidance directive. **Gaps worth fixing (user not yet asked→asked, pending decision)**: (1) no trailing-assistant strip in `sanitizeReferenceContext` — Anthropic-style refs can 400 on prefill (matters for parked Claude alias); (2) failed references vanish silently from actor's view (Hermes injects `[failed: …]` notes); (3) no `referenceMaxTokens` output cap — direct latency lever vs our cancellation-dominant failure mode; (4) no ref/synthesis temperature knobs; (5) consider a "hermes-style" arm (refs once per turn, checkpoints off) as ablation of our central bet.
 
 ## Yukon infrastructure (all working)
 
@@ -41,11 +57,11 @@ Arms: `e1b-single` (mteb-leaderboard, dna-insert, mcmc-sampling-stan, raman-fitt
 
 ## Next steps (in order)
 
-1. When `RERUNS DONE`: run the aggregator on yukon, compare e1b/e2b (clean single) vs matrix arms vs June baselines vs public leaderboard (`docs/TERMINAL-BENCH-LEADERBOARD-COMPARISON.md`).
-2. Rewrite `docs/TERMINAL-BENCH-RESULTS.md` as the new evidence snapshot (supersedes June table).
-3. Decisions the data supports: make deadline/budget env plumbing standard for all runs (E3); prototype **async advisor** ablation next (`asyncAdvisor.enabled` config exists, default off — needs an experiment arm), since cancellations dominate even with time-aware on.
-4. Raise k selectively on interesting deltas (mcmc, gcode, overfull) before believing them.
-5. Backlog: dual-runtime decision (upstream pi vs omp — `pi-compat.ts` makes dual-target feasible); Z.ai key in `.proof/gsd-moa.env` still unrotated (flagged in audit); tool-time pairing yields 0.0 on some older artifacts (harmless, n/a-safe); model-limits fix for factory proxy route unverified (only codex route probed).
+1. When codex `effort-config` finishes: review, check, live smokes both runtimes, commit. Then set `GSD_MOA_EFFORT=high` in yukon `.proof/*.env`, push `oh-my-pi-port` to yukon (`--force-with-lease` rules apply), rebuild omp bundle if deps changed.
+2. Build the pi-runtime bundle + run-probe.sh; run the pi-vs-omp + effort probe (see "Planned" section above). This supersedes the old "compare vs leaderboard" step — comparisons are effort-confounded until rerun at high.
+3. Rewrite `docs/TERMINAL-BENCH-RESULTS.md` as the new evidence snapshot (supersedes June table; note the effort caveat on all pre-2026-07-03 data).
+4. Pending user decision: Hermes audit gaps 1–3 (trailing-assistant strip, failed-ref notes, referenceMaxTokens) as a follow-up codex spec; "hermes-style" ablation arm; async advisor arm (cancellations dominate).
+5. Backlog: Gemini-as-perception-tool track (LemonHarness pattern — needs multimodal task slice + antigravity tokens on yukon); Z.ai key in `.proof/gsd-moa.env` still unrotated; tool-time pairing 0.0 on old artifacts (harmless); factory proxy model-limits fix unverified.
 
 ## Workflow conventions
 
