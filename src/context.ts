@@ -168,6 +168,12 @@ export function sanitizeReferenceContext(context: Context, decision?: PolicyDeci
     }
   }
 
+  while (messages.at(-1)?.role === "assistant") messages.pop();
+  if (messages.length === 0) {
+    const fallback = latestUserText(context);
+    if (fallback) messages.push({ role: "user", content: fallback, timestamp: Date.now() } satisfies UserMessage);
+  }
+
   return { messages };
 }
 
@@ -225,7 +231,10 @@ export function withFullMoaGuidance(context: Context, result: FullMoaResult, pol
     "[Mixture of Agents reference context]",
     `Routing: requested=${policy.requestedMode}, selected=${policy.mode}, reason=${policy.reason}.`,
     `Acting model: final primary model with normal Pi tools.`,
-    `References: ${result.proposals.map((proposal) => `${proposal.label} (${proposal.provider}/${proposal.model})`).join(", ")}.`,
+    `References: ${[
+      ...result.proposals.map((proposal) => `${proposal.label} (${proposal.provider}/${proposal.model})`),
+      ...result.failures.map((failure) => `${failure.label} (failed)`),
+    ].join(", ")}.`,
     "",
     "Use the reference responses below as private context. You are the aggregator and acting model: answer the user directly or call tools as needed. If tools are available and the task requires repository, file, terminal, or environment changes, call tools rather than merely describing commands for the user to run.",
     "",
@@ -234,6 +243,7 @@ export function withFullMoaGuidance(context: Context, result: FullMoaResult, pol
       `Reference ${index + 1}: ${proposal.label} (${proposal.provider}/${proposal.model}, cacheHit=${proposal.cacheHit})`,
       proposal.text.trim(),
     ].join("\n")),
+    ...result.failures.map((failure, index) => `Reference ${result.proposals.length + index + 1}: ${failure.label} — [failed: ${failure.message}]`),
     ...(result.synthesis
       ? [
           "Synthesis / execution memo:",

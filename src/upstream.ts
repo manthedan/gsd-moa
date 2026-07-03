@@ -63,6 +63,7 @@ export function streamOptionsForRoute(route: UpstreamRoute, options?: SimpleStre
   return {
     ...rest,
     ...(resolvedEffort !== undefined ? { reasoning: resolvedEffort } : {}),
+    ...(route.temperature !== undefined ? { temperature: route.temperature } : {}),
     ...(apiKey ? { apiKey } : {}),
     headers: { ...(options?.headers ?? {}), ...headers },
   };

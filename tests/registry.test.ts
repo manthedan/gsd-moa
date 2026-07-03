@@ -137,6 +137,17 @@ describe("alias registry", () => {
     }
   });
 
+  it("registers the Hermes-style no-synthesis alias with initial-only checkpoints", () => {
+    const id = "gpt55-cliproxycodex-glm52-hermes-full";
+    const registered = ALIAS_PRESETS.find((entry) => entry.id === id);
+    assert.ok(registered);
+    assert.deepEqual(fingerprint(id), EXPECTED.get("gpt55-cliproxycodex-glm52-nosynth-full"));
+    const cfg = applyModelPreset(structuredClone(DEFAULT_CONFIG), id);
+    assert.equal(cfg.checkpoint.enabled, false);
+    assert.equal(buildDefaultAliasMap()[id]?.mode, "full_moa");
+    assert.ok(GSD_MOA_MODELS.find((model) => model.id === id));
+  });
+
   it("derives honest model-card metadata from effective primary routes", () => {
     const codex = GSD_MOA_MODELS.find((model) => model.id === "gpt55-cliproxycodex-full");
     assert.ok(codex);

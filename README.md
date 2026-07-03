@@ -101,8 +101,9 @@ Additional alias families are available for local subscription/proxy setups:
 |---|---|
 | `gpt55-gemini35flash-*` | Use Gemini Flash via CLIProxyAPI/Antigravity as advisor or conditional specialist. |
 | `gpt55-cliproxycodex-*` | Route GPT/Codex calls through CLIProxyAPI instead of Factory. |
-| `gpt55-*-full` portfolio aliases | Force specific full-MoA reference portfolios, including Gemini or Claude variants. |
+| `gpt55-*-full` portfolio aliases | Force specific full-MoA reference portfolios, including Gemini, Claude, or Hermes-style ablation variants. |
 | `glm52-zai-gpt55-cliproxycodex-*` | Experimental GLM-5.2 acting model with GPT-5.5/Codex references. |
+| `gpt55-cliproxycodex-glm52-hermes-full` | Hermes-style ablation: GLM-5.2 + GPT-5.5 references once on the initial turn, no synthesis, raw bundle to the actor. |
 
 See `src/registry.ts` for the exact registered alias IDs, preset transforms, and display names. Built-in model cards and default alias config are generated from that registry.
 
@@ -164,6 +165,7 @@ export CLIPROXY_API_KEY=...          # for CLIProxyAPI presets
 export GSD_MOA_CODEX_MODEL=gpt-5.5   # optional Codex preset override
 export GSD_MOA_GEMINI_MODEL=gemini-3-flash
 export GSD_MOA_EFFORT=high           # minimal|low|medium|high|xhigh|inherit
+export GSD_MOA_REFERENCE_MAX_TOKENS=600 # optional advisory-output cap only
 export GSD_MOA_CHECKPOINTS=true
 export GSD_MOA_CHECKPOINT_DRIFT_TOOL_RESULTS=3
 ```
@@ -172,7 +174,11 @@ The default GPT-5.5 route expects a local OpenAI-compatible Codex/Factory-style 
 
 Reasoning effort defaults to `high` for every upstream call: primary, advisor/reference, full-MoA proposers, and synthesis. Configure globally with top-level `defaultEffort` (`minimal`, `low`, `medium`, `high`, `xhigh`, or `inherit`) or per route with `effort` (`minimal` through `xhigh`). Resolution order is: route `effort`, host CLI/options `reasoning`, `GSD_MOA_EFFORT`, then `defaultEffort`. Set `GSD_MOA_EFFORT=inherit` or `defaultEffort: "inherit"` to restore passthrough behavior when the host did not set a thinking level.
 
-See `docs/TIME-AWARE.md` for the harness deadline env contract, LemonHarness-style phase schedule, async advisor experiment, and Codex model-limit note.
+Advisory latency can be bounded with top-level `referenceMaxTokens` or `GSD_MOA_REFERENCE_MAX_TOKENS`; individual full-MoA proposers can override with `maxTokens`. These caps apply only to advisor/reference/proposer calls. They are never applied to the synthesis call or final acting call.
+
+Routes also accept optional `temperature` (0–2), which is forwarded only when set. Leave it unset for Codex/OpenAI reasoning routes unless you know the backend accepts sampling controls; the OMP/pi serializers omit `temperature` cleanly when unset, and some Codex paths defensively strip unsupported sampling fields, but OpenAI-compatible proxies can still reject explicit temperatures.
+
+See `docs/TIME-AWARE.md` for the harness deadline env contract, LemonHarness-style phase schedule, async advisor experiment, and Codex model-limit note. See `docs/HERMES-DIVERGENCES.md` for the Hermes MoA audit record and ablation alias.
 
 ## Modular specialists
 

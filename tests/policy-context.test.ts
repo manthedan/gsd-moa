@@ -8,6 +8,7 @@ import { DEFAULT_CONFIG, loadConfig, resetConfigCache, resolveProposerRoute, res
 import { readCacheByKey, referenceCacheKey, writeAdvisorCache } from "../src/cache.ts";
 import { buildToolObservationSummary, hasRecentToolResults, latestUserText, sanitizeReferenceContext } from "../src/context.ts";
 import { chooseAction, chooseMode, stripMoaMarkers } from "../src/policy.ts";
+import { applyModelPreset } from "../src/presets.ts";
 import { resolveConfigValue, streamOptionsForRoute } from "../src/upstream.ts";
 
 const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
@@ -27,6 +28,41 @@ describe("mode policy", () => {
       "advisor",
     );
     assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-auto", latestUserText: "fix a typo" }).mode, "single");
+  });
+
+  it("Hermes-style alias runs initial full MoA but suppresses failure/drift checkpoints", () => {
+    const cfg = applyModelPreset(structuredClone(DEFAULT_CONFIG), "gpt55-cliproxycodex-glm52-hermes-full");
+    const initialInput = {
+      alias: "gpt55-cliproxycodex-glm52-hermes-full",
+      latestUserText: "deep review this",
+      hasToolResults: false,
+      hasFreshMoaMarker: false,
+    };
+    const initialPolicy = chooseMode(cfg, initialInput);
+    assert.deepEqual(chooseAction(cfg, initialPolicy, initialInput), {
+      kind: "run",
+      mode: "full_moa",
+      scope: "initial",
+      reason: "full MoA alias",
+    });
+
+    const summary = buildToolObservationSummary({
+      messages: [
+        { role: "user", content: "deep review this", timestamp: 1 },
+        { role: "toolResult", toolCallId: "t1", toolName: "bash", content: [{ type: "text", text: "error: failed with exit code 1" }], isError: true, timestamp: 2 },
+      ],
+    } as never, cfg.checkpoint.maxToolResults);
+    const failureInput = {
+      alias: "gpt55-cliproxycodex-glm52-hermes-full",
+      latestUserText: "deep review this",
+      hasToolResults: true,
+      hasFreshMoaMarker: false,
+      recentToolSummary: summary,
+    };
+    const failurePolicy = chooseMode(cfg, failureInput);
+    const failureAction = chooseAction(cfg, failurePolicy, failureInput);
+    assert.equal(failureAction.kind, "single");
+    assert.match(failureAction.reason, /checkpoint policy disabled/);
   });
 
   it("honors and strips explicit markers", () => {
@@ -350,18 +386,26 @@ describe("mode policy", () => {
     }
   });
 
-  it("loads and validates reference timeout config and env overrides", () => {
+  it("loads and validates reference timeout/max-token config and env overrides", () => {
     const dir = mkdtempSync(join(tmpdir(), "gsd-moa-timeout-test-"));
     const oldTimeout = process.env.GSD_MOA_REFERENCE_TIMEOUT_MS;
+    const oldMaxTokens = process.env.GSD_MOA_REFERENCE_MAX_TOKENS;
     try {
-      writeFileSync(join(dir, "gsd-moa.json"), JSON.stringify({ referenceTimeoutMs: 5000 }));
+      writeFileSync(join(dir, "gsd-moa.json"), JSON.stringify({ referenceTimeoutMs: 5000, referenceMaxTokens: 700 }));
       assert.equal(loadConfig("gsd-moa.json", dir).referenceTimeoutMs, 5000);
+      assert.equal(loadConfig("gsd-moa.json", dir).referenceMaxTokens, 700);
       process.env.GSD_MOA_REFERENCE_TIMEOUT_MS = "2500";
+      process.env.GSD_MOA_REFERENCE_MAX_TOKENS = "600";
       assert.equal(loadConfig("gsd-moa.json", dir).referenceTimeoutMs, 2500);
+      assert.equal(loadConfig("gsd-moa.json", dir).referenceMaxTokens, 600);
       assert.throws(() => validateConfig({ ...DEFAULT_CONFIG, referenceTimeoutMs: 0 }), /referenceTimeoutMs/);
+      assert.throws(() => validateConfig({ ...DEFAULT_CONFIG, referenceMaxTokens: 0 }), /referenceMaxTokens/);
+      assert.throws(() => validateConfig({ ...DEFAULT_CONFIG, fullMoa: { ...DEFAULT_CONFIG.fullMoa, proposers: [{ ...DEFAULT_CONFIG.fullMoa.proposers[0]!, maxTokens: 0 }, DEFAULT_CONFIG.fullMoa.proposers[1]!] } }), /fullMoa\.proposers\.glm52\.maxTokens/);
     } finally {
       if (oldTimeout === undefined) delete process.env.GSD_MOA_REFERENCE_TIMEOUT_MS;
       else process.env.GSD_MOA_REFERENCE_TIMEOUT_MS = oldTimeout;
+      if (oldMaxTokens === undefined) delete process.env.GSD_MOA_REFERENCE_MAX_TOKENS;
+      else process.env.GSD_MOA_REFERENCE_MAX_TOKENS = oldMaxTokens;
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -506,16 +550,61 @@ describe("reference context sanitization", () => {
     assert.equal(hasRecentToolResults(context), true);
   });
 
-  it("drops tools, tool calls, tool results, and system prompt for advisor calls", () => {
+  it("drops tools, tool calls, tool results, system prompt, and trailing assistant turns for advisor calls", () => {
     const sanitized = sanitizeReferenceContext(context);
     assert.equal(sanitized.systemPrompt, undefined);
     assert.equal(sanitized.tools, undefined);
-    assert.equal(sanitized.messages.length, 2);
+    assert.equal(sanitized.messages.length, 1);
     assert.equal(sanitized.messages[0]?.role, "user");
     assert.equal((sanitized.messages[0] as any).content, "make a plan");
-    const assistant = sanitized.messages[1] as any;
-    assert.equal(assistant.role, "assistant");
-    assert.deepEqual(assistant.content, [{ type: "text", text: "I will call a tool" }]);
+  });
+
+  it("keeps the latest user message when stripping trailing assistant turns", () => {
+    const sanitized = sanitizeReferenceContext({
+      messages: [
+        { role: "user", content: "<!-- gsd-moa:advisor -->", timestamp: 1 },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "prior answer" }],
+          api: "openai-completions",
+          provider: "factory-codex",
+          model: "gpt-5.5",
+          usage,
+          stopReason: "stop",
+          timestamp: 2,
+        },
+        { role: "user", content: "continue the task", timestamp: 3 },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "trailing prefill" }],
+          api: "openai-completions",
+          provider: "factory-codex",
+          model: "gpt-5.5",
+          usage,
+          stopReason: "stop",
+          timestamp: 4,
+        },
+      ],
+    } as Context);
+    assert.equal(sanitized.messages.at(-1)?.role, "user");
+    assert.deepEqual(sanitized.messages.at(-1), { role: "user", content: "continue the task", timestamp: 3 });
+    assert.doesNotMatch(JSON.stringify(sanitized.messages), /trailing prefill/);
+  });
+
+  it("returns an empty view if trailing-assistant stripping leaves no genuine user text", () => {
+    const sanitized = sanitizeReferenceContext({
+      messages: [{
+        role: "assistant",
+        content: [{ type: "text", text: "orphan assistant" }],
+        api: "openai-completions",
+        provider: "factory-codex",
+        model: "gpt-5.5",
+        usage,
+        stopReason: "stop",
+        timestamp: 1,
+      }],
+    } as Context);
+    assert.deepEqual(sanitized.messages, []);
   });
 });
 

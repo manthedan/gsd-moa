@@ -151,6 +151,7 @@ export const DEFAULT_CONFIG: GsdMoaConfig = {
     maxPendingMs: 600_000,
   },
   referenceTimeoutMs: 120000,
+  referenceMaxTokens: undefined,
 };
 
 function defaultPrimaryRoute(routePresets: GsdMoaConfig["routePresets"]): UpstreamRoute {
@@ -312,6 +313,7 @@ function parseConfigFile(fullPath: string, displayPath: string): GsdMoaConfig {
     timeAware: isRecord(parsed.timeAware) ? { ...DEFAULT_CONFIG.timeAware, ...parsed.timeAware } as GsdMoaConfig["timeAware"] : structuredClone(DEFAULT_CONFIG.timeAware),
     asyncAdvisor: isRecord(parsed.asyncAdvisor) ? { ...DEFAULT_CONFIG.asyncAdvisor, ...parsed.asyncAdvisor } as GsdMoaConfig["asyncAdvisor"] : structuredClone(DEFAULT_CONFIG.asyncAdvisor),
     referenceTimeoutMs: typeof parsed.referenceTimeoutMs === "number" ? parsed.referenceTimeoutMs : DEFAULT_CONFIG.referenceTimeoutMs,
+    referenceMaxTokens: typeof parsed.referenceMaxTokens === "number" ? parsed.referenceMaxTokens : DEFAULT_CONFIG.referenceMaxTokens,
   };
 }
 
@@ -352,6 +354,9 @@ function applyEnvOverrides(cfg: GsdMoaConfig): void {
   }
   if (process.env.GSD_MOA_REFERENCE_TIMEOUT_MS !== undefined) {
     cfg.referenceTimeoutMs = Number(process.env.GSD_MOA_REFERENCE_TIMEOUT_MS);
+  }
+  if (process.env.GSD_MOA_REFERENCE_MAX_TOKENS !== undefined) {
+    cfg.referenceMaxTokens = Number(process.env.GSD_MOA_REFERENCE_MAX_TOKENS);
   }
   if (process.env.GSD_MOA_EFFORT !== undefined) {
     cfg.defaultEffort = parseDefaultEffort(process.env.GSD_MOA_EFFORT, cfg.defaultEffort);
@@ -418,6 +423,7 @@ export function validateConfig(cfg: GsdMoaConfig): void {
   if (!Number.isInteger(cfg.referenceTimeoutMs) || cfg.referenceTimeoutMs < 1) {
     throw new Error("referenceTimeoutMs must be a positive integer");
   }
+  validateOptionalPositiveInteger("referenceMaxTokens", cfg.referenceMaxTokens);
 }
 
 function validateTimeAware(timeAware: GsdMoaConfig["timeAware"]): void {
@@ -545,6 +551,7 @@ function validateRoutePresets(routePresets: GsdMoaConfig["routePresets"]): void 
     if (!name.trim()) throw new Error("routePresets must not contain blank names");
     if (!isRecord(preset)) throw new Error(`routePresets.${name} must be an object`);
     validateRouteEffort(`routePresets.${name}.effort`, preset.effort);
+    validateRouteTemperature(`routePresets.${name}.temperature`, preset.temperature);
   }
 }
 
@@ -554,6 +561,18 @@ function validateDefaultEffort(label: string, effort: unknown): void {
 
 function validateRouteEffort(label: string, effort: unknown): void {
   if (effort !== undefined && !isReasoningEffort(effort)) throw new Error(`${label} must be one of: ${EFFORT_VALUES.join(", ")}`);
+}
+
+function validateRouteTemperature(label: string, temperature: unknown): void {
+  if (temperature !== undefined && (typeof temperature !== "number" || !Number.isFinite(temperature) || temperature < 0 || temperature > 2)) {
+    throw new Error(`${label} must be a number between 0 and 2`);
+  }
+}
+
+function validateOptionalPositiveInteger(label: string, value: unknown): void {
+  if (value !== undefined && (typeof value !== "number" || !Number.isInteger(value) || value < 1)) {
+    throw new Error(`${label} must be a positive integer`);
+  }
 }
 
 function validateFullMoa(fullMoa: FullMoaConfig, reference: UpstreamRoute, routePresets: GsdMoaConfig["routePresets"]): void {
@@ -571,6 +590,7 @@ function validateFullMoa(fullMoa: FullMoaConfig, reference: UpstreamRoute, route
       throw new Error(`fullMoa proposer ${proposer.id} enabled must be boolean`);
     }
     validateWhen(`fullMoa.proposers.${proposer.id}.when`, proposer.when);
+    validateOptionalPositiveInteger(`fullMoa.proposers.${proposer.id}.maxTokens`, proposer.maxTokens);
     if (proposer.routePreset !== undefined && typeof proposer.routePreset !== "string") {
       throw new Error(`fullMoa proposer ${proposer.id} routePreset must be a string`);
     }
@@ -608,6 +628,7 @@ function validateRoute(label: string, route: UpstreamRoute): void {
   if (!route.provider) throw new Error(`${label}.provider is required`);
   if (!route.model) throw new Error(`${label}.model is required`);
   validateRouteEffort(`${label}.effort`, route.effort);
+  validateRouteTemperature(`${label}.temperature`, route.temperature);
   if (route.provider === PROVIDER_ID) {
     throw new Error(`${label}.provider must not be '${PROVIDER_ID}' (recursion guard)`);
   }

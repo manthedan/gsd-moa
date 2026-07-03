@@ -19,6 +19,7 @@ export interface UpstreamRoute {
   authHeader?: boolean;
   reasoning?: boolean;
   effort?: ReasoningEffort;
+  temperature?: number;
   thinkingLevelMap?: ThinkingLevelMap;
   input?: ("text" | "image")[];
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
@@ -104,6 +105,7 @@ export interface FullMoaProposerConfig {
   routePreset?: string;
   route?: Partial<UpstreamRoute>;
   when?: ReferenceWhenConfig;
+  maxTokens?: number;
 }
 
 export interface FullMoaSynthesisConfig {
@@ -135,6 +137,7 @@ export interface GsdMoaConfig {
   timeAware: TimeAwareConfig;
   asyncAdvisor: AsyncAdvisorConfig;
   referenceTimeoutMs: number;
+  referenceMaxTokens?: number;
 }
 
 export interface ToolObservationSummary {
@@ -216,8 +219,15 @@ export interface FullMoaProposal {
   effort?: string;
 }
 
+export interface FullMoaFailure {
+  id: string;
+  label: string;
+  message: string;
+}
+
 export interface FullMoaResult {
   proposals: FullMoaProposal[];
+  failures: FullMoaFailure[];
   synthesis?: {
     text: string;
     usage?: Usage;

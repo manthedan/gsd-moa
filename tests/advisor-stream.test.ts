@@ -127,6 +127,31 @@ describe("advisor orchestration", () => {
     }
   });
 
+  it("caps advisor reference output with referenceMaxTokens while leaving final output uncapped", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    cfg.referenceMaxTokens = 321;
+    try {
+      const context: Context = { messages: [{ role: "user", content: "please review", timestamp: 1 }] };
+      const seen: Record<string, unknown> = {};
+      const upstream: UpstreamClient = {
+        async complete(seenModel, seenContext, seenOptions) {
+          seen.reference = seenOptions?.maxTokens;
+          return message(seenModel, "advice", usage(1, 1));
+        },
+        stream(seenModel, seenContext, seenOptions) {
+          seen.primary = seenOptions?.maxTokens;
+          return streamText(seenModel, "final", usage(1, 1));
+        },
+      };
+
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, undefined, { config: cfg, upstream }));
+      assert.deepEqual(seen, { reference: 321, primary: undefined });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("degrades to a primary-only call when advisor fails", async () => {
     const { cfg, dir } = tempConfig();
     cfg.cache.enabled = false;

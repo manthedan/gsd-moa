@@ -12,6 +12,7 @@ export interface ReferenceCallMetadata {
   label?: string;
   cacheScope: string;
   promptVersion: string;
+  maxTokens?: number;
 }
 
 export interface ReferenceCallResult {
@@ -38,7 +39,7 @@ export async function runReferenceCall(
   const key = referenceCacheKey(config, context, route, metadata.cacheScope, metadata.promptVersion);
   const cache = readCacheByKey(config, key, process.cwd());
   const startedAt = Date.now();
-  const callOptions = referenceStreamOptionsForRoute(config, route, options, timeState);
+  const callOptions = referenceStreamOptionsForRoute(config, route, metadata, options, timeState);
   const traceBase = {
     role: metadata.role,
     id: metadata.id,
@@ -103,8 +104,9 @@ export async function runReferenceCall(
   }
 }
 
-function referenceStreamOptionsForRoute(config: GsdMoaConfig, route: UpstreamRoute, options?: SimpleStreamOptions, timeState?: TimeState): SimpleStreamOptions {
+function referenceStreamOptionsForRoute(config: GsdMoaConfig, route: UpstreamRoute, metadata: ReferenceCallMetadata, options?: SimpleStreamOptions, timeState?: TimeState): SimpleStreamOptions {
   const base = streamOptionsForRoute(route, options, config.defaultEffort);
+  const referenceMaxTokens = metadata.role === "synthesizer" ? undefined : metadata.maxTokens ?? config.referenceMaxTokens;
   const timeBudgetMs = referenceBudgetMs(config.timeAware, timeState);
   const effectiveTimeoutMs = timeBudgetMs === undefined
     ? config.referenceTimeoutMs
@@ -113,6 +115,7 @@ function referenceStreamOptionsForRoute(config: GsdMoaConfig, route: UpstreamRou
   const signals = [options?.signal, timeoutSignal].filter((signal): signal is AbortSignal => Boolean(signal));
   return {
     ...base,
+    ...(referenceMaxTokens !== undefined ? { maxTokens: referenceMaxTokens } : {}),
     signal: signals.length === 1 ? signals[0] : AbortSignal.any(signals),
   };
 }

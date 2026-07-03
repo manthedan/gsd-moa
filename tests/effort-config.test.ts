@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { DEFAULT_CONFIG, loadConfig, resetConfigCache } from "../src/config.ts";
+import { DEFAULT_CONFIG, loadConfig, resetConfigCache, validateConfig } from "../src/config.ts";
 import { streamOptionsForRoute, routeToModel } from "../src/upstream.ts";
 import type { DefaultReasoningEffort, UpstreamRoute } from "../src/types.ts";
 
@@ -59,6 +59,12 @@ describe("reasoning effort configuration", () => {
     assert.equal(resolve({}, undefined, undefined, "inherit"), undefined);
   });
 
+  it("applies route temperature only when configured", () => {
+    assert.equal(streamOptionsForRoute({ provider: "p", model: "m" } as UpstreamRoute).temperature, undefined);
+    assert.equal(streamOptionsForRoute({ provider: "p", model: "m", temperature: 0.6 } as UpstreamRoute).temperature, 0.6);
+    assert.equal(streamOptionsForRoute({ provider: "p", model: "m" } as UpstreamRoute, { temperature: 0.2 }).temperature, 0.2);
+  });
+
   it("loads and validates GSD_MOA_EFFORT and defaultEffort", () => {
     const dir = mkdtempSync(join(tmpdir(), "gsd-moa-effort-"));
     try {
@@ -70,6 +76,7 @@ describe("reasoning effort configuration", () => {
       writeFileSync(join(dir, "gsd-moa.json"), JSON.stringify({ defaultEffort: "junk" }));
       resetConfigCache();
       withEffortEnv(undefined, () => assert.throws(() => loadConfig("gsd-moa.json", dir), /defaultEffort must be one of/));
+      assert.throws(() => validateConfig({ ...DEFAULT_CONFIG, primary: { ...DEFAULT_CONFIG.primary, temperature: 2.1 } }), /primary\.temperature/);
     } finally {
       resetConfigCache();
       rmSync(dir, { recursive: true, force: true });

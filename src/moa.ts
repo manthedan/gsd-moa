@@ -5,6 +5,7 @@ import { runReferenceCall } from "./reference-call.js";
 import { formatReferenceTimeLine } from "./time.js";
 import type { TraceRecorder } from "./trace.js";
 import type {
+  FullMoaFailure,
   FullMoaProposal,
   FullMoaProposerConfig,
   FullMoaResult,
@@ -44,28 +45,32 @@ export async function runFullMoa(
   const proposals = settled
     .filter((result): result is PromiseFulfilledResult<FullMoaProposal> => result.status === "fulfilled")
     .map((result) => result.value);
-  const failedById = new Map<string, string>();
+  const failures: FullMoaFailure[] = [];
   settled.forEach((result, index) => {
-    if (result.status === "rejected") failedById.set(selected[index]!.id, safeErrorMessage(result.reason));
+    if (result.status === "rejected") {
+      const decision = selected[index]!;
+      failures.push({ id: decision.id, label: decision.label, message: safeErrorMessage(result.reason) });
+    }
   });
+  const failedById = new Map(failures.map((failure) => [failure.id, failure.message]));
   const finalPortfolio = portfolio.map((decision) => {
     const failure = failedById.get(decision.id);
     return failure ? { ...decision, selected: true, reason: `failed: ${failure}` } : decision;
   });
-  if (proposals.length === 0) throw new Error(`all full_moa proposers failed: ${[...failedById.values()].join("; ")}`);
+  if (proposals.length === 0) throw new Error(`all full_moa proposers failed: ${failures.map((failure) => failure.message).join("; ")}`);
 
   let synthesis: NonNullable<FullMoaResult["synthesis"]> | undefined;
   let synthesisError: string | undefined;
   if (config.fullMoa.synthesis.enabled) {
     try {
-      synthesis = await runSynthesis(config, context, policy, proposals, upstream, options, trace, observationSummary, timeState);
+      synthesis = await runSynthesis(config, context, policy, proposals, failures, upstream, options, trace, observationSummary, timeState);
     } catch (error) {
       synthesisError = safeErrorMessage(error);
       synthesis = undefined;
     }
   }
 
-  const guidance = formatReferenceBundle(proposals, synthesis?.text);
+  const guidance = formatReferenceBundle(proposals, failures, synthesis?.text);
   const usage = addUsage(...proposals.map((proposal) => proposal.usage), synthesis?.usage);
   const innerCalls: InnerCallDetails[] = [
     ...proposals.map((proposal) => ({
@@ -93,7 +98,7 @@ export async function runFullMoa(
       : []),
   ];
 
-  return { proposals, synthesis, synthesisError, guidance, usage, innerCalls, portfolio: finalPortfolio };
+  return { proposals, failures, synthesis, synthesisError, guidance, usage, innerCalls, portfolio: finalPortfolio };
 }
 
 async function runProposer(
@@ -116,6 +121,7 @@ async function runProposer(
     label: proposer.label,
     cacheScope: `full_moa:reference:${proposer.id}`,
     promptVersion: config.prompts.fullMoaVersion,
+    maxTokens: proposer.maxTokens,
   }, upstream, options, trace, timeState);
   return {
     id: proposer.id,
@@ -137,6 +143,7 @@ async function runSynthesis(
   context: Context,
   policy: PolicyDecision,
   proposals: FullMoaProposal[],
+  failures: FullMoaFailure[],
   upstream: UpstreamClient,
   options?: SimpleStreamOptions,
   trace?: TraceRecorder,
@@ -144,7 +151,7 @@ async function runSynthesis(
   timeState?: TimeState,
 ): Promise<NonNullable<FullMoaResult["synthesis"]>> {
   const route = resolveSynthesisRoute(config.reference, config.fullMoa.synthesis, config.routePresets);
-  const synthesisContext = buildSynthesisContext(config, context, policy, proposals, route, observationSummary, timeState);
+  const synthesisContext = buildSynthesisContext(config, context, policy, proposals, failures, route, observationSummary, timeState);
   const result = await runReferenceCall(config, route, synthesisContext, {
     role: "synthesizer",
     cacheScope: "full_moa:synthesis",
@@ -199,6 +206,7 @@ export function buildSynthesisContext(
   context: Context,
   policy: PolicyDecision,
   proposals: FullMoaProposal[],
+  failures: FullMoaFailure[] = [],
   route: UpstreamRoute = config.reference,
   observationSummary?: ToolObservationSummary,
   timeState?: TimeState,
@@ -206,7 +214,7 @@ export function buildSynthesisContext(
   const safe = sanitizeReferenceContext(context, policy, { preserveImages: route.input?.includes("image") ?? false });
   const proposalMessage: UserMessage = {
     role: "user",
-    content: formatReferenceBundle(proposals, undefined, false),
+    content: formatReferenceBundle(proposals, failures, undefined, false),
     timestamp: Date.now(),
   };
   return {
@@ -228,7 +236,7 @@ export function buildSynthesisContext(
   };
 }
 
-function formatReferenceBundle(proposals: FullMoaProposal[], synthesis?: string, includeRuntimeMetadata = true): string {
+function formatReferenceBundle(proposals: FullMoaProposal[], failures: FullMoaFailure[] = [], synthesis?: string, includeRuntimeMetadata = true): string {
   return [
     "Full-MoA independent reference bundle:",
     ...proposals.map((proposal, index) => [
@@ -238,6 +246,7 @@ function formatReferenceBundle(proposals: FullMoaProposal[], synthesis?: string,
         : `id=${proposal.id}; route=${proposal.provider}/${proposal.model}`,
       proposal.text.trim(),
     ].join("\n")),
+    ...failures.map((failure, index) => `Reference ${proposals.length + index + 1}: ${failure.label} — [failed: ${failure.message}]`),
     ...(synthesis ? ["## Synthesis", synthesis.trim()] : []),
   ].join("\n\n");
 }

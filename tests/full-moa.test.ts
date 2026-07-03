@@ -224,19 +224,26 @@ describe("full MoA orchestration", () => {
     }
   });
 
-  it("continues full MoA with successful proposers when one selected proposer fails", async () => {
+  it("continues full MoA with visible redacted failure notes when one selected proposer fails", async () => {
     const { cfg, dir } = tempConfig();
     cfg.cache.enabled = false;
     try {
       const context: Context = { messages: [{ role: "user", content: "<!-- gsd-moa:full --> deep review", timestamp: 1 }] };
+      let synthesisInput = "";
       const upstream: UpstreamClient = {
-        async complete(seenModel) {
-          if (seenModel.provider === "zai") throw new Error("glm unavailable");
-          return message(seenModel, seenModel.id === "gpt-5.5" ? "gpt reference" : "synthesis", usage(1, 1));
+        async complete(seenModel, seenContext) {
+          if (seenModel.provider === "zai") throw new Error("glm unavailable Authorization: Bearer sk-reference-fail1234567890");
+          if ((seenContext.systemPrompt ?? "").includes("private synthesizer layer")) {
+            synthesisInput = JSON.stringify(seenContext.messages);
+            return message(seenModel, "synthesis", usage(1, 1));
+          }
+          return message(seenModel, "gpt reference", usage(1, 1));
         },
         stream(seenModel, seenContext) {
-          assert.match(JSON.stringify(seenContext.messages), /gpt reference/);
-          assert.doesNotMatch(JSON.stringify(seenContext.messages), /glm unavailable/);
+          const finalMessages = JSON.stringify(seenContext.messages);
+          assert.match(finalMessages, /gpt reference/);
+          assert.match(finalMessages, /Reference 2: GLM-5\.2 reference — \[failed: glm unavailable Authorization: \[REDACTED_AUTH\]\]/);
+          assert.doesNotMatch(finalMessages, /sk-reference-fail/);
           return streamText(seenModel, "final", usage(1, 1));
         },
       };
@@ -244,10 +251,43 @@ describe("full MoA orchestration", () => {
       const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
       const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
       assert.equal(done.type, "done");
+      assert.match(synthesisInput, /Reference 2: GLM-5\.2 reference — \[failed: glm unavailable Authorization: \[REDACTED_AUTH\]\]/);
+      assert.doesNotMatch(synthesisInput, /sk-reference-fail/);
+      assert.equal(done.message.usage.totalTokens, 6, "failed proposer usage is excluded from combined usage");
       const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
       assert.equal(details.guidanceInjected, true);
-      assert.match(details.portfolio.find((p: any) => p.id === "glm52")?.reason, /failed: glm unavailable/);
+      assert.match(details.portfolio.find((p: any) => p.id === "glm52")?.reason, /failed: glm unavailable Authorization: \[REDACTED_AUTH\]/);
       assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("caps proposer output with global and per-proposer referenceMaxTokens but leaves synthesis and final uncapped", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    cfg.referenceMaxTokens = 600;
+    cfg.fullMoa.proposers.find((proposer) => proposer.id === "gpt55")!.maxTokens = 123;
+    try {
+      const context: Context = { messages: [{ role: "user", content: "<!-- gsd-moa:full --> deep review", timestamp: 1 }] };
+      const seen: Record<string, unknown> = {};
+      const upstream: UpstreamClient = {
+        async complete(seenModel, seenContext, seenOptions) {
+          if ((seenContext.systemPrompt ?? "").includes("private synthesizer layer")) {
+            seen.synthesis = seenOptions?.maxTokens;
+            return message(seenModel, "synthesis", usage(1, 1));
+          }
+          seen[seenModel.provider === "zai" ? "glm" : "gpt"] = seenOptions?.maxTokens;
+          return message(seenModel, "proposal", usage(1, 1));
+        },
+        stream(seenModel, seenContext, seenOptions) {
+          seen.primary = seenOptions?.maxTokens;
+          return streamText(seenModel, "final", usage(1, 1));
+        },
+      };
+
+      await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
+      assert.deepEqual(seen, { glm: 600, gpt: 123, synthesis: undefined, primary: undefined });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
