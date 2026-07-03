@@ -10,7 +10,11 @@ Last updated: 2026-07-03 (day session). Previous: audit → omp port → yukon i
 
 ## RUNNING RIGHT NOW (check first!)
 
-**Codex task `effort-config`** (local pi CLI, background) implementing configurable reasoning effort, spec at scratchpad `effort-config-spec.md`. When done: review diff, `npm run check`, live smokes (omp + pi), commit.
+**pi-vs-omp + effort probe on yukon**, started 2026-07-03 10:37 PT, ~5–9h, detached:
+```bash
+ssh yukon 'tail -3 ~/projects/gsd-moa/probe.log; pgrep -f run-probe.sh >/dev/null && echo RUNNING'
+```
+Arms (single-mode, k=3, on `befaee4`): `p1-omp-high`, `p1-pi-high`, `p1-omp-inherit` × (mteb-leaderboard, dna-insert, raman-fitting, caffe-cifar-10). Ends with `PROBE DONE`. Reads: pi≈omp(high) → commit to omp, delete legacy path; omp(high)≫omp(inherit) → prior misses were the effort gap. Aggregate with the usual zero-bandwidth command; check the new `efforts` line per arm (should be `high`/`unset(=backend default)`).
 
 ## THE EFFORT DISCOVERY (2026-07-03 — biggest confounder found so far)
 
@@ -55,13 +59,17 @@ Match: single-writer tools, advisory system prompt (ported verbatim-ish), saniti
 - mteb-leaderboard "failures" were infra voids (image pull > 600s env-start limit) — image now cached; aggregator classifies voids separately.
 - 0% reference cache hits is **intended** (see memory `moa-caching-philosophy-and-dev-mode`): cache hits = advisor saw nothing new. full_moa = dev mode for tuning `auto`.
 
+## Landed this session (all committed, 98/98 both runtimes)
+
+- `f0afe87` dual-runtime adapter; `b6831f6` effort config (default high; presets needed `supportsReasoningEffort` compat or omp's serializer silently drops the field); `befaee4` Hermes audit gaps: user-last reference views, `[failed: …]` notes to actor, `referenceMaxTokens`/`GSD_MOA_REFERENCE_MAX_TOKENS`, route `temperature`, and alias `gpt55-cliproxycodex-glm52-hermes-full` (refs once per fresh turn, no synth — ablation of checkpoint re-advice; see `docs/HERMES-DIVERGENCES.md`).
+- Yukon: checkout at `befaee4`; both bundles rebuilt (`.proof/omp-runtime.tar`, new `.proof/pi-runtime.tar` + `pi-runtime.Dockerfile`, validated in node:24 container); env files: `gsd-moa.env` has `GSD_MOA_EFFORT=high`, new `gsd-moa-inherit.env`; `run-probe.sh`.
+
 ## Next steps (in order)
 
-1. When codex `effort-config` finishes: review, check, live smokes both runtimes, commit. Then set `GSD_MOA_EFFORT=high` in yukon `.proof/*.env`, push `oh-my-pi-port` to yukon (`--force-with-lease` rules apply), rebuild omp bundle if deps changed.
-2. Build the pi-runtime bundle + run-probe.sh; run the pi-vs-omp + effort probe (see "Planned" section above). This supersedes the old "compare vs leaderboard" step — comparisons are effort-confounded until rerun at high.
-3. Rewrite `docs/TERMINAL-BENCH-RESULTS.md` as the new evidence snapshot (supersedes June table; note the effort caveat on all pre-2026-07-03 data).
-4. Pending user decision: Hermes audit gaps 1–3 (trailing-assistant strip, failed-ref notes, referenceMaxTokens) as a follow-up codex spec; "hermes-style" ablation arm; async advisor arm (cancellations dominate).
-5. Backlog: Gemini-as-perception-tool track (LemonHarness pattern — needs multimodal task slice + antigravity tokens on yukon); Z.ai key in `.proof/gsd-moa.env` still unrotated; tool-time pairing 0.0 on old artifacts (harmless); factory proxy model-limits fix unverified.
+1. When `PROBE DONE`: aggregate, decide runtime (pi vs omp) and quantify the effort gap; then rewrite `docs/TERMINAL-BENCH-RESULTS.md` + `docs/TERMINAL-BENCH-LEADERBOARD-COMPARISON.md` (all pre-2026-07-03 data carries the effort caveat).
+2. Next experiment arms the data motivates: hermes-full ablation (alias exists) vs full checkpoint MoA at high; async advisor arm (cancellations dominate); consider `GSD_MOA_REFERENCE_MAX_TOKENS` (~600) as a latency lever.
+3. If pi wins the probe: reconsider runtime; if omp holds: delete legacy `pi.extensions` path and the dual-runtime scaffolding after the decision is final.
+4. Backlog: Gemini-as-perception-tool track (LemonHarness pattern — needs multimodal task slice + antigravity tokens on yukon); Z.ai key in `.proof/gsd-moa.env` still unrotated; tool-time pairing 0.0 on old artifacts (harmless); factory proxy model-limits fix unverified; `xhigh` arm on tasks with time headroom.
 
 ## Workflow conventions
 
