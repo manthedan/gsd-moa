@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { Context } from "../src/pi-compat.js";
 import { DEFAULT_CONFIG, loadConfig, resetConfigCache, resolveProposerRoute, resolveSynthesisRoute, validateConfig } from "../src/config.ts";
-import { readCacheByKey, referenceCacheKey, writeAdvisorCache } from "../src/cache.ts";
+import { advisorCacheKey, readAdvisorCache, readCacheByKey, referenceCacheKey, writeAdvisorCache } from "../src/cache.ts";
 import { buildToolObservationSummary, hasRecentToolResults, latestUserText, sanitizeReferenceContext } from "../src/context.ts";
 import { chooseAction, chooseMode, stripMoaMarkers } from "../src/policy.ts";
 import { applyModelPreset } from "../src/presets.ts";
@@ -506,6 +506,32 @@ describe("reference cache keys", () => {
       writeFileSync(expiredPath, JSON.stringify({ version: 1, createdAt: 1, expiresAt: 1, text: "old" }));
       assert.equal(readCacheByKey(cfg, "expired", dir).hit, false);
       assert.equal(existsSync(expiredPath), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keys reference cache by effective effort and max token controls", () => {
+    const route = DEFAULT_CONFIG.primary;
+    const context: Context = { messages: [{ role: "user", content: "same task", timestamp: 1 }] };
+    const base = referenceCacheKey(DEFAULT_CONFIG, context, route, "advisor", DEFAULT_CONFIG.prompts.advisorVersion, { effort: "high", maxTokens: 1000 });
+    assert.notEqual(base, referenceCacheKey(DEFAULT_CONFIG, context, route, "advisor", DEFAULT_CONFIG.prompts.advisorVersion, { effort: "low", maxTokens: 1000 }));
+    assert.notEqual(base, referenceCacheKey(DEFAULT_CONFIG, context, route, "advisor", DEFAULT_CONFIG.prompts.advisorVersion, { effort: "high", maxTokens: 2000 }));
+
+    const cfg = { ...structuredClone(DEFAULT_CONFIG), referenceMaxTokens: 1000 };
+    assert.equal(
+      advisorCacheKey(cfg, context),
+      referenceCacheKey(cfg, context, cfg.reference, "advisor", cfg.prompts.advisorVersion, { effort: "high", maxTokens: 1000 }),
+    );
+  });
+
+  it("reads advisor cache entries using the default effort and max-token controls", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gsd-moa-advisor-cache-test-"));
+    const cfg = { ...structuredClone(DEFAULT_CONFIG), cache: { enabled: true, dir: join(dir, "cache"), ttlSeconds: 60 }, referenceMaxTokens: 1000 };
+    const context: Context = { messages: [{ role: "user", content: "same task", timestamp: 1 }] };
+    try {
+      writeAdvisorCache(cfg, advisorCacheKey(cfg, context), "cached advice", usage, dir);
+      assert.equal(readAdvisorCache(cfg, context, dir).hit, true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

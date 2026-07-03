@@ -4,7 +4,7 @@ import { assistantText } from "./context.js";
 import type { TraceRecorder, TraceReferenceCall } from "./trace.js";
 import { referenceBudgetMs } from "./time.js";
 import type { GsdMoaConfig, TimeState, UpstreamRoute } from "./types.js";
-import { routeToModel, streamOptionsForRoute, type UpstreamClient } from "./upstream.js";
+import { resolveEffortForRoute, routeToModel, streamOptionsForRoute, type UpstreamClient } from "./upstream.js";
 
 export interface ReferenceCallMetadata {
   role: TraceReferenceCall["role"];
@@ -36,16 +36,16 @@ export async function runReferenceCall(
   trace?: TraceRecorder,
   timeState?: TimeState,
 ): Promise<ReferenceCallResult> {
-  const key = referenceCacheKey(config, context, route, metadata.cacheScope, metadata.promptVersion);
-  const cache = readCacheByKey(config, key, process.cwd());
   const startedAt = Date.now();
-  const callOptions = referenceStreamOptionsForRoute(config, route, metadata, options, timeState);
+  const cacheControls = referenceCacheControlsForRoute(config, route, metadata, options);
+  const key = referenceCacheKey(config, context, route, metadata.cacheScope, metadata.promptVersion, cacheControls);
+  const cache = readCacheByKey(config, key, process.cwd());
   const traceBase = {
     role: metadata.role,
     id: metadata.id,
     label: metadata.label,
     route,
-    effort: callOptions.reasoning,
+    effort: cacheControls.effort,
     context,
     cacheKey: key,
     startedAt,
@@ -67,11 +67,12 @@ export async function runReferenceCall(
       model: route.model,
       key,
       durationMs: endedAt - startedAt,
-      effort: callOptions.reasoning,
+      effort: cacheControls.effort,
     };
   }
 
   try {
+    const callOptions = referenceStreamOptionsForRoute(config, route, metadata, options, timeState);
     const model = routeToModel(route);
     const message = await upstream.complete(model, context, callOptions);
     const text = assistantText(message).trim();
@@ -104,9 +105,22 @@ export async function runReferenceCall(
   }
 }
 
+function referenceCacheControlsForRoute(config: GsdMoaConfig, route: UpstreamRoute, metadata: ReferenceCallMetadata, options?: SimpleStreamOptions) {
+  const effort = resolveEffortForRoute(route, options, config.defaultEffort);
+  const maxTokens = referenceMaxTokensForMetadata(config, metadata);
+  return {
+    ...(effort !== undefined ? { effort } : {}),
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+  };
+}
+
+function referenceMaxTokensForMetadata(config: GsdMoaConfig, metadata: ReferenceCallMetadata): number | undefined {
+  return metadata.role === "synthesizer" ? undefined : metadata.maxTokens ?? config.referenceMaxTokens;
+}
+
 function referenceStreamOptionsForRoute(config: GsdMoaConfig, route: UpstreamRoute, metadata: ReferenceCallMetadata, options?: SimpleStreamOptions, timeState?: TimeState): SimpleStreamOptions {
   const base = streamOptionsForRoute(route, options, config.defaultEffort);
-  const referenceMaxTokens = metadata.role === "synthesizer" ? undefined : metadata.maxTokens ?? config.referenceMaxTokens;
+  const referenceMaxTokens = referenceMaxTokensForMetadata(config, metadata);
   const timeBudgetMs = referenceBudgetMs(config.timeAware, timeState);
   const effectiveTimeoutMs = timeBudgetMs === undefined
     ? config.referenceTimeoutMs

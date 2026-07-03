@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import type * as OmpTypes from "@oh-my-pi/pi-ai/types";
 
 export type Api = OmpTypes.Api;
@@ -119,8 +120,8 @@ type PiCompatModule = {
 };
 
 let runtimeCache: Runtime | undefined;
-let bundledModels: Record<string, Record<string, unknown>> | undefined;
 let piCompatModule: PiCompatModule | undefined;
+let bundledModels: Record<string, Record<string, unknown>> | undefined;
 
 export function getRuntime(): Runtime {
   if (runtimeCache) return runtimeCache;
@@ -139,22 +140,8 @@ export function resetRuntimeCache(): void {
 }
 
 export function getModel(provider: string, id: string): Model<Api> | undefined {
-  if (getRuntime() === "pi") {
-    try {
-      return loadPiCompatModule().getModel?.(provider, id);
-    } catch {
-      return undefined;
-    }
-  }
   try {
-    const importMeta = import.meta as ImportMeta & { require?: (specifier: string) => unknown };
-    if (typeof importMeta.require === "function") {
-      const catalog = importMeta.require("@oh-my-pi/pi-catalog/models") as {
-        getBundledModel?: (provider: string, id: string) => Model<Api> | undefined;
-      };
-      const model = catalog.getBundledModel?.(provider, id);
-      if (model) return model;
-    }
+    if (getRuntime() === "pi") return loadPiCompatModule().getModel?.(provider, id);
     bundledModels ??= readBundledModels();
     return bundledModels[provider]?.[id] as Model<Api> | undefined;
   } catch {
@@ -223,12 +210,16 @@ export function normalizeContext(
 }
 
 function loadPiCompatModule(): PiCompatModule {
-  piCompatModule ??= createRequire(import.meta.url)("@earendil-works/pi-ai/compat") as PiCompatModule;
+  if (!piCompatModule) {
+    const resolved = import.meta.resolve("@earendil-works/pi-ai/compat");
+    const path = resolved.startsWith("file:") ? fileURLToPath(resolved) : resolved;
+    piCompatModule = createRequire(import.meta.url)(path) as PiCompatModule;
+  }
   return piCompatModule;
 }
 
 function readBundledModels(): Record<string, Record<string, unknown>> {
-  const require = createRequire(import.meta.url);
-  const path = require.resolve("@oh-my-pi/pi-catalog/models.json");
+  const resolved = import.meta.resolve("@oh-my-pi/pi-catalog/models.json");
+  const path = resolved.startsWith("file:") ? fileURLToPath(resolved) : resolved;
   return JSON.parse(readFileSync(path, "utf8")) as Record<string, Record<string, unknown>>;
 }

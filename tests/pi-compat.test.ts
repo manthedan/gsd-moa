@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { buildDefaultRoutePresets } from "../src/config.ts";
-import { getRuntime, normalizeContext, resetRuntimeCache, type Context } from "../src/pi-compat.ts";
+import { getModel, getRuntime, normalizeContext, resetRuntimeCache, type Context } from "../src/pi-compat.ts";
 import { routeToModel } from "../src/upstream.ts";
 
 const ORIGINAL_RUNTIME = process.env.GSD_MOA_RUNTIME;
@@ -53,6 +53,16 @@ describe("runtime compatibility adapter", () => {
     setRuntime("pi");
     const normalized = normalizeContext({ messages: [], systemPrompt: ["one", "two"] } as unknown as Context) as { systemPrompt?: string };
     assert.equal(normalized.systemPrompt, "one\n\ntwo");
+  });
+
+  it("reads model metadata from the active runtime catalog", () => {
+    setRuntime("pi");
+    assert.equal(getModel("openai", "gpt-4o")?.provider, "openai");
+    assert.equal(getModel("amazon-bedrock", "amazon.nova-2-lite-v1:0")?.api, "bedrock-converse-stream");
+
+    setRuntime("omp");
+    assert.equal(getModel("openai", "gpt-4o")?.provider, "openai");
+    assert.equal(getModel("amazon-bedrock", "amazon.nova-2-lite-v1:0"), undefined);
   });
 
   it("passes thinkingLevelMap through routeToModel", () => {

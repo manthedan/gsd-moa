@@ -53,6 +53,18 @@ describe("reasoning effort configuration", () => {
     assert.equal(withEffortEnv(undefined, () => streamOptionsForRoute({ provider: "p", model: "m" } as UpstreamRoute).reasoning), "high");
   });
 
+  it("honors host reasoning disable before env and default effort", () => {
+    withEffortEnv("xhigh", () => {
+      const options = streamOptionsForRoute(
+        { provider: "p", model: "m" } as UpstreamRoute,
+        { disableReasoning: true } as never,
+        "high",
+      );
+      assert.equal(options.reasoning, undefined);
+      assert.equal(options.disableReasoning, true);
+    });
+  });
+
   it("supports inherit passthrough for env and config defaults", () => {
     assert.equal(resolve({}, undefined, "inherit", "high"), undefined);
     assert.equal(resolve({}, "medium", "inherit", "high"), "medium");

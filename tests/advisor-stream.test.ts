@@ -234,8 +234,17 @@ describe("advisor orchestration", () => {
       };
 
       await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, undefined, { config: cfg, upstream }));
-      const events = await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, undefined, { config: cfg, upstream }));
-      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      const oldMissingKey = process.env.MISSING_REFERENCE_CACHE_KEY;
+      let events: AssistantMessageEvent[];
+      try {
+        delete process.env.MISSING_REFERENCE_CACHE_KEY;
+        cfg.reference.apiKey = "$MISSING_REFERENCE_CACHE_KEY";
+        events = await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, undefined, { config: cfg, upstream }));
+      } finally {
+        if (oldMissingKey === undefined) delete process.env.MISSING_REFERENCE_CACHE_KEY;
+        else process.env.MISSING_REFERENCE_CACHE_KEY = oldMissingKey;
+      }
+      const done = events!.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
       assert.equal(advisorCalls, 1);
       assert.equal(done.message.usage.totalTokens, 3);
       const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;

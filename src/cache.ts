@@ -28,8 +28,16 @@ export interface AdvisorCacheMiss {
 
 export type AdvisorCacheResult = AdvisorCacheHit | AdvisorCacheMiss;
 
-export function advisorCacheKey(config: GsdMoaConfig, context: Context): string {
-  return referenceCacheKey(config, context, config.reference, "advisor", config.prompts.advisorVersion);
+export interface ReferenceCacheControls {
+  effort?: unknown;
+  maxTokens?: unknown;
+}
+
+export function advisorCacheKey(config: GsdMoaConfig, context: Context, controls?: ReferenceCacheControls): string {
+  return referenceCacheKey(config, context, config.reference, "advisor", config.prompts.advisorVersion, {
+    ...defaultAdvisorCacheControls(config),
+    ...controls,
+  });
 }
 
 export function referenceCacheKey(
@@ -38,6 +46,7 @@ export function referenceCacheKey(
   route: Pick<GsdMoaConfig["reference"], "provider" | "model" | "api" | "baseUrl">,
   scope: string,
   promptVersion: string,
+  controls?: ReferenceCacheControls,
 ): string {
   const payload = {
     promptVersion,
@@ -49,13 +58,17 @@ export function referenceCacheKey(
       baseUrl: route.baseUrl,
     },
     taskDigest: normalizeContext(context),
+    controls: {
+      ...(controls && controls.effort !== undefined ? { effort: controls.effort } : {}),
+      ...(controls && controls.maxTokens !== undefined ? { maxTokens: controls.maxTokens } : {}),
+    },
     auto: config.auto,
   };
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
-export function readAdvisorCache(config: GsdMoaConfig, context: Context, cwd = process.cwd()): AdvisorCacheResult {
-  return readCacheByKey(config, advisorCacheKey(config, context), cwd);
+export function readAdvisorCache(config: GsdMoaConfig, context: Context, cwd = process.cwd(), controls?: ReferenceCacheControls): AdvisorCacheResult {
+  return readCacheByKey(config, advisorCacheKey(config, context, controls), cwd);
 }
 
 export function readReferenceCache(
@@ -103,6 +116,29 @@ export function writeAdvisorCache(
     usage,
   };
   writeFileSync(path, JSON.stringify(envelope, null, 2));
+}
+
+function defaultAdvisorCacheControls(config: GsdMoaConfig): ReferenceCacheControls {
+  const effort = resolveDefaultCacheEffort(config);
+  return {
+    ...(effort !== undefined ? { effort } : {}),
+    ...(config.referenceMaxTokens !== undefined ? { maxTokens: config.referenceMaxTokens } : {}),
+  };
+}
+
+function resolveDefaultCacheEffort(config: GsdMoaConfig): string | undefined {
+  if (config.reference.effort !== undefined) return config.reference.effort;
+  const envEffort = parseEnvEffort(process.env.GSD_MOA_EFFORT);
+  if (envEffort === "inherit") return undefined;
+  if (envEffort !== undefined) return envEffort;
+  if (config.defaultEffort === "inherit") return undefined;
+  return config.defaultEffort;
+}
+
+function parseEnvEffort(value: string | undefined): string | "inherit" | undefined {
+  if (value === undefined) return undefined;
+  if (["minimal", "low", "medium", "high", "xhigh", "inherit"].includes(value)) return value;
+  throw new Error("GSD_MOA_EFFORT must be one of: minimal, low, medium, high, xhigh, inherit");
 }
 
 function cachePath(config: GsdMoaConfig, key: string, cwd: string): string {

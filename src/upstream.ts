@@ -59,7 +59,7 @@ export function streamOptionsForRoute(route: UpstreamRoute, options?: SimpleStre
   const headers = Object.fromEntries(
     Object.entries(route.headers ?? {}).map(([key, value]) => [key, resolveConfigValue(value, `route header ${key}`) ?? ""]),
   );
-  const resolvedEffort = resolveEffort(route, options, defaultEffort);
+  const resolvedEffort = resolveEffortForRoute(route, options, defaultEffort);
   return {
     ...rest,
     ...(resolvedEffort !== undefined ? { reasoning: resolvedEffort } : {}),
@@ -69,8 +69,9 @@ export function streamOptionsForRoute(route: UpstreamRoute, options?: SimpleStre
   };
 }
 
-function resolveEffort(route: UpstreamRoute, options: SimpleStreamOptions | undefined, defaultEffort: DefaultReasoningEffort): SimpleStreamOptions["reasoning"] | undefined {
+export function resolveEffortForRoute(route: UpstreamRoute, options: SimpleStreamOptions | undefined, defaultEffort: DefaultReasoningEffort): SimpleStreamOptions["reasoning"] | undefined {
   if (route.effort !== undefined) return route.effort as SimpleStreamOptions["reasoning"];
+  if (options?.disableReasoning) return undefined;
   if (options?.reasoning !== undefined) return options.reasoning;
   const envEffort = parseEnvEffort(process.env.GSD_MOA_EFFORT);
   if (envEffort === "inherit") return undefined;
