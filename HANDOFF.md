@@ -10,11 +10,14 @@ Last updated: 2026-07-03 (day session). Previous: audit → omp port → yukon i
 
 ## RUNNING RIGHT NOW (check first!)
 
-**pi-vs-omp + effort probe on yukon**, started 2026-07-03 10:37 PT, ~5–9h, detached:
+**pi-vs-omp + effort probe on yukon**, RESTARTED 2026-07-03 12:20 PT on `7ab2ed8`, ~5–9h, detached:
 ```bash
-ssh yukon 'tail -3 ~/projects/gsd-moa/probe.log; pgrep -f run-probe.sh >/dev/null && echo RUNNING'
+ssh yukon 'tail -3 ~/projects/gsd-moa/probe.log; pgrep -f "[r]un-probe.sh" >/dev/null && echo RUNNING'
 ```
-Arms (single-mode, k=3, on `befaee4`): `p1-omp-high`, `p1-pi-high`, `p1-omp-inherit` × (mteb-leaderboard, dna-insert, raman-fitting, caffe-cifar-10). Ends with `PROBE DONE`. Reads: pi≈omp(high) → commit to omp, delete legacy path; omp(high)≫omp(inherit) → prior misses were the effort gap. Aggregate with the usual zero-bandwidth command; check the new `efforts` line per arm (should be `high`/`unset(=backend default)`).
+(note the `[r]` bracket — a plain pattern makes pkill/pgrep match your own ssh command.)
+Arms (single-mode, k=3): `p1-omp-high`, `p1-pi-high`, `p1-omp-inherit` × (mteb-leaderboard, dna-insert, raman-fitting, caffe-cifar-10). Ends with `PROBE DONE`. Reads: pi≈omp(high) → commit to omp, delete legacy path; omp(high)≫omp(inherit) → prior misses were the effort gap. Aggregate with the usual zero-bandwidth command; check the `efforts` line per arm (`high`/`unset`).
+
+**First attempt aborted**: the 10:37 run on `befaee4` was stopped at ~12:15 — its pi arm was DOA (`Error: Unknown options: --auto-approve, --approval-mode, --cwd`; upstream pi rejects the omp-era flags). Fixed by the user's autoreview commit `7ab2ed8` (also: effort/maxTokens in cache keys, pi getModel via upstream compat, env whitelist forwards `GSD_MOA_EFFORT`/`GSD_MOA_REFERENCE_MAX_TOKENS`, `--thinking off`/disableReasoning beats env/default; 102/102 both runtimes). Partial results quarantined in `jobs/stale-befaee4-probe/` — do NOT aggregate them with the live probe.
 
 ## THE EFFORT DISCOVERY (2026-07-03 — biggest confounder found so far)
 
