@@ -99,7 +99,7 @@ export function chooseAction(config: GsdMoaConfig, policy: PolicyDecision, input
     };
   }
 
-  if (summary && summary.latestFailureSignals.length > 0) {
+  if (summary && summary.latestFailureSignals.length > 0 && (policy.requestedMode !== "single" || explicitAdvisor || explicitFull)) {
     const requested = policy.requestedMode === "full_moa" || policy.mode === "full_moa";
     const repeatedOrSevere = summary.failedToolResultCount >= 2 || summary.latestFailureSignals.includes("timeout") || summary.latestFailureSignals.includes("process-crash");
     const mode = requested || repeatedOrSevere ? "full_moa" : "advisor";

@@ -60,6 +60,14 @@ describe("mode policy", () => {
       assert.ok(failedAction.observationSummary?.latestFailureSignals.includes("tool-result-error"));
     }
 
+    const explicitFullSingleAliasInput = { ...failedInput, alias: "gpt55-glm52-single" };
+    const explicitFullSingleAliasAction = chooseAction(DEFAULT_CONFIG, chooseMode(DEFAULT_CONFIG, explicitFullSingleAliasInput), explicitFullSingleAliasInput);
+    assert.equal(explicitFullSingleAliasAction.kind, "run");
+    if (explicitFullSingleAliasAction.kind === "run") {
+      assert.equal(explicitFullSingleAliasAction.scope, "failure");
+      assert.equal(explicitFullSingleAliasAction.mode, "full_moa");
+    }
+
     const successContext: Context = {
       messages: [
         failedContext.messages[0],
@@ -508,5 +516,27 @@ describe("reference context sanitization", () => {
     const assistant = sanitized.messages[1] as any;
     assert.equal(assistant.role, "assistant");
     assert.deepEqual(assistant.content, [{ type: "text", text: "I will call a tool" }]);
+  });
+});
+
+describe("single alias stays single on failure continuations", () => {
+  it("does not run failure checkpoints for requestedMode=single", () => {
+    const cfg = structuredClone(DEFAULT_CONFIG);
+    const summary = buildToolObservationSummary({
+      messages: [
+        { role: "user", content: "fix the build", timestamp: 1 },
+        { role: "toolResult", toolCallId: "t1", toolName: "bash", content: [{ type: "text", text: "error: build failed with exit code 1" }], isError: true, timestamp: 2 },
+      ],
+    } as never, cfg.checkpoint.maxToolResults);
+    const input = {
+      alias: "gpt55-glm52-single",
+      latestUserText: "fix the build",
+      hasToolResults: true,
+      hasFreshMoaMarker: false,
+      recentToolSummary: summary,
+    };
+    const policy = chooseMode(cfg, input);
+    const action = chooseAction(cfg, policy, input);
+    assert.equal(action.kind, "single");
   });
 });
