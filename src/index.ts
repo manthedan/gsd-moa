@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ProviderConfig, ProviderModelConfig } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import { loadConfig } from "./config.js";
+import { getRuntime } from "./pi-compat.js";
 import { GSD_MOA_MODELS } from "./models.js";
 import { ALIAS_PRESET_IDS, providerModelConfigForAliasConfig } from "./registry.js";
 import { streamGsdMoa } from "./stream.js";
@@ -22,13 +23,15 @@ function registeredModels(): ProviderModelConfig[] {
 }
 
 export default function gsdMoaExtension(pi: ExtensionAPI) {
-  pi.registerProvider(PROVIDER_ID, {
+  const providerConfig: ProviderConfig & { name?: string } = {
     api: "gsd-moa-api",
     baseUrl: "gsd-moa://local",
     apiKey: "gsd-moa-local",
     models: registeredModels(),
     streamSimple: ompStreamSimple,
-  });
+  };
+  if (getRuntime() === "pi") providerConfig.name = "GSD MoA";
+  pi.registerProvider(PROVIDER_ID, providerConfig);
 }
 
 export { runAdvisor, buildAdvisorContext } from "./advisor.js";
@@ -36,6 +39,7 @@ export { resetAsyncAdvisor } from "./async-advisor.js";
 export { advisorCacheKey, readAdvisorCache, writeAdvisorCache } from "./cache.js";
 export { loadConfig, mergeUpstreamRoute, parseModelRef, resetConfigCache, resolveProposerRoute, resolveSynthesisRoute, validateConfig } from "./config.js";
 export { sanitizeReferenceContext, withAdvisorGuidance, withFullMoaGuidance } from "./context.js";
+export { getRuntime, resetRuntimeCache } from "./pi-compat.js";
 export { buildProposerContext, buildSynthesisContext, runFullMoa, selectPortfolio } from "./moa.js";
 export { GSD_MOA_MODELS, GSD_MOA_MODEL_IDS } from "./models.js";
 export { chooseAction, chooseMode, stripMoaMarkers } from "./policy.js";

@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { getRuntime } from "./pi-compat.js";
 import { buildDefaultAliasMap } from "./registry.js";
 import type { AliasMode, FullMoaConfig, FullMoaProposerConfig, FullMoaSynthesisConfig, GsdMoaConfig, ModelRef, UpstreamRoute } from "./types.js";
 import { PROVIDER_ID } from "./types.js";
@@ -22,45 +23,54 @@ const GLM_METADATA = {
   maxTokens: 8192,
 };
 
-export const DEFAULT_ROUTE_PRESETS: GsdMoaConfig["routePresets"] = {
-  "factory-codex-local": {
-    api: "openai-completions",
-    baseUrl: "http://127.0.0.1:8317/v1",
-    apiKey: "$FACTORY_GPT_API_KEY",
-    compat: {
-      supportsDeveloperRole: false,
-      maxTokensField: "max_tokens",
+function zaiCompat(): Record<string, unknown> {
+  return {
+    thinkingFormat: "zai",
+    ...(getRuntime() === "pi" ? { zaiToolStream: true } : {}),
+    supportsDeveloperRole: false,
+    maxTokensField: "max_tokens",
+  };
+}
+
+export function buildDefaultRoutePresets(): GsdMoaConfig["routePresets"] {
+  return {
+    "factory-codex-local": {
+      api: "openai-completions",
+      baseUrl: "http://127.0.0.1:8317/v1",
+      apiKey: "$FACTORY_GPT_API_KEY",
+      compat: {
+        supportsDeveloperRole: false,
+        maxTokensField: "max_tokens",
+      },
     },
-  },
-  "zai-coding-plan": {
-    api: "openai-completions",
-    baseUrl: "https://api.z.ai/api/coding/paas/v4",
-    apiKey: "$ZAI_API_KEY",
-    compat: {
-      thinkingFormat: "zai",
-      supportsDeveloperRole: false,
-      maxTokensField: "max_tokens",
+    "zai-coding-plan": {
+      api: "openai-completions",
+      baseUrl: "https://api.z.ai/api/coding/paas/v4",
+      apiKey: "$ZAI_API_KEY",
+      compat: zaiCompat(),
     },
-  },
-  cliproxyapi: {
-    api: "openai-completions",
-    baseUrl: "http://127.0.0.1:8318/v1",
-    apiKey: "$CLIPROXY_API_KEY",
-    compat: {
-      supportsDeveloperRole: false,
-      maxTokensField: "max_tokens",
+    cliproxyapi: {
+      api: "openai-completions",
+      baseUrl: "http://127.0.0.1:8318/v1",
+      apiKey: "$CLIPROXY_API_KEY",
+      compat: {
+        supportsDeveloperRole: false,
+        maxTokensField: "max_tokens",
+      },
     },
-  },
-  "cliproxyapi-codex": {
-    api: "openai-completions",
-    baseUrl: "http://127.0.0.1:8318/v1",
-    apiKey: "$CLIPROXY_API_KEY",
-    compat: {
-      supportsDeveloperRole: false,
-      maxTokensField: "max_tokens",
+    "cliproxyapi-codex": {
+      api: "openai-completions",
+      baseUrl: "http://127.0.0.1:8318/v1",
+      apiKey: "$CLIPROXY_API_KEY",
+      compat: {
+        supportsDeveloperRole: false,
+        maxTokensField: "max_tokens",
+      },
     },
-  },
-};
+  };
+}
+
+export const DEFAULT_ROUTE_PRESETS: GsdMoaConfig["routePresets"] = buildDefaultRoutePresets();
 
 export const DEFAULT_CONFIG: GsdMoaConfig = {
   routePresets: structuredClone(DEFAULT_ROUTE_PRESETS),

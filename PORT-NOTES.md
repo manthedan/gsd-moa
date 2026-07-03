@@ -36,6 +36,34 @@ Installed from npm after the dependency swap:
 - OMP `Model.compat` is a resolved compat object, while this extension accepts sparse JSON compat overrides. `routeToModel` keeps the existing loose route compat and casts through the adapter type. For direct OMP stream calls, the configured routes include the sparse OpenAI-compatible flags this extension needs.
 - Published OMP packages ship `dist/types` but their runtime `exports.import` entries point at `src/*.ts` and assume Bun for some modules. `tsconfig.json` uses `moduleResolution: "bundler"`; `src/pi-compat.ts` avoids top-level OMP runtime imports so `node --import tsx --test` works.
 
+## Dual-runtime adapter
+
+Runtime selection lives in `src/pi-compat.ts`:
+
+- `GSD_MOA_RUNTIME=pi|omp` wins when set.
+- Otherwise Bun auto-detection chooses `omp` when `globalThis.Bun` exists, and `pi` under plain Node/jiti.
+- Tests can reset the cached selection with `resetRuntimeCache()`.
+
+Adapter behavior is intentionally narrow:
+
+- `streamSimple`, `completeSimple`, and `getModel` dispatch to `@oh-my-pi/*` for `omp` and `@earendil-works/pi-ai/compat` for `pi` without top-level runtime imports from either implementation family.
+- `Context.systemPrompt` normalizes to `string[]` for `omp` and to a single string for upstream `pi`.
+- `thinkingLevelMap` is restored on `UpstreamRoute` and is passed through in `routeToModel` as `route.thinkingLevelMap ?? builtin?.thinkingLevelMap`.
+- Z.ai route defaults include `compat.zaiToolStream: true` only when `getRuntime() === "pi"`; `omp` route/compat defaults stay unchanged.
+- Provider registration adds display `name: "GSD MoA"` only for upstream `pi`; `omp` keeps the OMP provider config shape without `name`.
+
+Upstream pi no-secrets extension-load smoke:
+
+```sh
+GSD_MOA_RUNTIME=pi ./node_modules/.bin/pi --no-extensions -e ./src/index.ts --list-models | rg "gsd-moa|GSD MoA"
+```
+
+OMP no-secrets extension-load smoke:
+
+```sh
+./node_modules/.bin/omp models -e ./src/index.ts | rg "gsd-moa|GSD MoA"
+```
+
 ## Verification
 
 Command run:
@@ -47,7 +75,7 @@ npm run check
 Result: passed.
 
 - TypeScript: `tsc --noEmit` passed.
-- Tests: `node --import tsx --test tests/**/*.test.ts` passed, 71/71 tests.
+- Tests: `node --import tsx --test tests/**/*.test.ts` passed under both `GSD_MOA_RUNTIME=omp` and `GSD_MOA_RUNTIME=pi`, 87/87 tests in each run.
 
 ## Smoke test
 
@@ -84,6 +112,18 @@ omp --no-session -e ./src/index.ts --model "gsd-moa/gpt55-cliproxycodex-glm52-no
 ```
 
 Both single and full-MoA modes work end-to-end under the omp runtime, including the local `AssistantMessageEventStream` compat class being consumed by omp's stream loop.
+
+### Dual-runtime load checks (no secrets)
+
+Verified after adding the dual-runtime adapter:
+
+```sh
+GSD_MOA_RUNTIME=pi ./node_modules/.bin/pi --no-extensions -e ./src/index.ts --list-models | rg "gsd-moa|GSD MoA"
+# → lists 18 gsd-moa models
+
+./node_modules/.bin/omp models -e ./src/index.ts | rg "gsd-moa|GSD MoA"
+# → gsd-moa (18)
+```
 
 ## Registry architecture
 

@@ -4,7 +4,7 @@ This adapter intentionally mirrors the plain-Pi Harbor adapter shape from
 `badlogic/pi-terminal-bench`, while keeping the extra pieces needed for this
 repo:
 
-- install Node 24 plus Bun for the local oh-my-pi CLI;
+- install Node 24 plus Bun for the local oh-my-pi CLI, or Node 24 only for upstream pi;
 - copy the mounted gsd-moa repo into the task container and load it with `-e`;
 - source secrets from PI_GSD_MOA_ENV_FILE instead of passing API keys in argv;
 - write Pi JSONL/session logs under /logs/agent so Harbor keeps them naturally;
@@ -20,7 +20,9 @@ Configure with environment variables passed to Harbor/the task container:
   PI_GSD_MOA_REPO=/workspace/gsd-moa              # mounted repo copied to /tmp/gsd-moa-ext
   PI_GSD_MOA_EXTENSION=/tmp/gsd-moa-ext/src/index.ts
   PI_GSD_MOA_ENV_FILE=/workspace/gsd-moa/.proof/gsd-moa.env  # preferred for secrets
+  PI_GSD_MOA_CLI=omp                     # omp (default) or pi
   PI_GSD_MOA_RUNTIME_TAR=/workspace/gsd-moa/.proof/omp-runtime.tar  # optional prebuilt OMP bundle
+  PI_GSD_MOA_PI_RUNTIME_TAR=/workspace/gsd-moa/.proof/pi-runtime.tar  # optional prebuilt pi bundle
   PI_GSD_MOA_THINKING_LEVEL=high
   GSD_MOA_PRIMARY_BASE_URL=http://host.docker.internal:8317/v1
   GSD_MOA_GEMINI_BASE_URL=http://host.docker.internal:8318/v1
@@ -78,7 +80,7 @@ NON_SECRET_ENV_KEYS = [
 LEGACY_SECRET_ENV_KEYS = ["FACTORY_GPT_API_KEY", "ZAI_API_KEY", "CLIPROXY_API_KEY"]
 
 
-def _runtime_prefix() -> str:
+def _node_runtime_prefix() -> str:
     return (
         'export NVM_DIR="$HOME/.nvm"; '
         '[ -s "$NVM_DIR/nvm.sh" ] || '
@@ -86,7 +88,13 @@ def _runtime_prefix() -> str:
         '. "$NVM_DIR/nvm.sh"; '
         'nvm install 24; '
         'nvm use 24; '
-        'export BUN_INSTALL="$HOME/.bun"; '
+    )
+
+
+def _runtime_prefix() -> str:
+    return (
+        _node_runtime_prefix()
+        + 'export BUN_INSTALL="$HOME/.bun"; '
         'export PATH="$BUN_INSTALL/bin:$PATH"; '
         '[ -x "$BUN_INSTALL/bin/bun" ] || curl -fsSL https://bun.sh/install | bash; '
     )
@@ -97,14 +105,52 @@ class PiGsdMoaAgent(BaseInstalledAgent):
     def name() -> str:
         return "pi-gsd-moa"
 
+    def _cli_mode(self) -> str:
+        mode = self._env_value("PI_GSD_MOA_CLI", "omp") or "omp"
+        if mode not in {"omp", "pi"}:
+            raise ValueError(f"invalid PI_GSD_MOA_CLI={mode!r}; expected 'omp' or 'pi'")
+        return mode
+
     async def install(self, environment: BaseEnvironment) -> None:
-        runtime_tar = self._env_value("PI_GSD_MOA_RUNTIME_TAR", "/workspace/gsd-moa/.proof/omp-runtime.tar")
+        cli_mode = self._cli_mode()
+        runtime_tar_key = "PI_GSD_MOA_PI_RUNTIME_TAR" if cli_mode == "pi" else "PI_GSD_MOA_RUNTIME_TAR"
+        runtime_tar_default = "/workspace/gsd-moa/.proof/pi-runtime.tar" if cli_mode == "pi" else "/workspace/gsd-moa/.proof/omp-runtime.tar"
+        runtime_tar = self._env_value(runtime_tar_key, runtime_tar_default)
+
+        if cli_mode == "pi":
+            await self.exec_as_root(
+                environment,
+                command=(
+                    "set -e; "
+                    "if command -v apt-get >/dev/null 2>&1; then "
+                    "  apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git python3 unzip; "
+                    "elif command -v apk >/dev/null 2>&1; then apk add --no-cache ca-certificates curl git python3 unzip; "
+                    "elif command -v dnf >/dev/null 2>&1; then dnf install -y ca-certificates curl git python3 unzip; "
+                    "elif command -v yum >/dev/null 2>&1; then yum install -y ca-certificates curl git python3 unzip; "
+                    "fi"
+                ),
+            )
+            runtime_prefix = _node_runtime_prefix()
+            await self.exec_as_agent(environment, command=runtime_prefix + "node --version")
+            if runtime_tar:
+                installed = await self._install_prebuilt_runtime(environment, runtime_tar, cli_mode)
+                if installed:
+                    await self._copy_extension_repo(environment, runtime_prefix="", install_deps=False, preserve_runtime=True)
+                    return
+            await self._copy_extension_repo(environment, runtime_prefix)
+            return
+
         if runtime_tar:
-            installed = await self._install_prebuilt_runtime(environment, runtime_tar)
+            installed = await self._install_prebuilt_runtime(environment, runtime_tar, cli_mode)
             if installed:
                 await self._copy_extension_repo(environment, runtime_prefix="", install_deps=False, preserve_runtime=True)
                 return
 
+        apk_branch = (
+            "  apk add --no-cache ca-certificates curl git python3 unzip; "
+            if cli_mode == "pi"
+            else "  echo 'ERROR: Alpine/musl base image; @oh-my-pi/pi-natives ships no musl prebuilt' >&2; exit 3; "
+        )
         await self.exec_as_root(
             environment,
             command=(
@@ -112,56 +158,76 @@ class PiGsdMoaAgent(BaseInstalledAgent):
                 "if command -v apt-get >/dev/null 2>&1; then "
                 "  apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git python3 unzip; "
                 "elif command -v apk >/dev/null 2>&1; then "
-                "  echo 'ERROR: Alpine/musl base image; @oh-my-pi/pi-natives ships no musl prebuilt' >&2; exit 3; "
+                + apk_branch +
                 "elif command -v dnf >/dev/null 2>&1; then dnf install -y ca-certificates curl git python3 unzip; "
                 "elif command -v yum >/dev/null 2>&1; then yum install -y ca-certificates curl git python3 unzip; "
                 "fi"
             ),
         )
-        runtime_prefix = _runtime_prefix()
+        runtime_prefix = _node_runtime_prefix() if cli_mode == "pi" else _runtime_prefix()
         await self.exec_as_agent(
             environment,
-            command=runtime_prefix + "node --version && bun --version",
+            command=runtime_prefix + ("node --version" if cli_mode == "pi" else "node --version && bun --version"),
         )
         await self._copy_extension_repo(environment, runtime_prefix)
 
-    async def _install_prebuilt_runtime(self, environment: BaseEnvironment, runtime_tar: str) -> bool:
+    async def _install_prebuilt_runtime(self, environment: BaseEnvironment, runtime_tar: str, cli_mode: str) -> bool:
         workdir = self._env_value("PI_GSD_MOA_WORKDIR", "/tmp/gsd-moa-ext")
         quoted_runtime_tar = shlex.quote(runtime_tar)
         quoted_workdir = shlex.quote(workdir or "/tmp/gsd-moa-ext")
+        if cli_mode == "pi":
+            command_parts = [
+                "if [ ! -f",
+                quoted_runtime_tar,
+                "]; then echo '__GSD_MOA_PREBUILT_MISSING__'; exit 0; fi;",
+                "(",
+                "rm -rf",
+                quoted_workdir,
+                "&& mkdir -p",
+                quoted_workdir,
+                "&& tar -xf",
+                quoted_runtime_tar,
+                "-C",
+                quoted_workdir,
+                "&& cd",
+                quoted_workdir,
+                "&& node --version && ./node_modules/.bin/pi --version",
+                "&& echo '__GSD_MOA_PREBUILT_READY__'",
+                ") || { echo '__GSD_MOA_PREBUILT_FAILED__'; exit 0; }",
+            ]
+        else:
+            command_parts = [
+                "if [ ! -f",
+                quoted_runtime_tar,
+                "]; then echo '__GSD_MOA_PREBUILT_MISSING__'; exit 0; fi;",
+                "if ls /lib/ld-musl-* >/dev/null 2>&1; then echo '__GSD_MOA_PREBUILT_MUSL_UNSUPPORTED__'; exit 0; fi;",
+                "(",
+                "rm -rf",
+                quoted_workdir,
+                "&& mkdir -p",
+                quoted_workdir,
+                "&& tar -xf",
+                quoted_runtime_tar,
+                "-C",
+                quoted_workdir,
+                "&& arch=$(uname -m) && case \"$arch\" in",
+                "aarch64|arm64) bun_src=.bun/bin/bun-linux-aarch64 ;;",
+                "x86_64|amd64) bun_src=.bun/bin/bun-linux-x64-baseline ;;",
+                "*) echo \"unsupported arch $arch\" >&2; exit 4 ;; esac &&",
+                "cd",
+                quoted_workdir,
+                "&& if [ -f \"$bun_src\" ]; then cp \"$bun_src\" .bun/bin/bun; fi &&",
+                "chmod +x .bun/bin/bun &&",
+                f"export BUN_INSTALL={quoted_workdir}/.bun;",
+                'export PATH="$BUN_INSTALL/bin:$PATH";',
+                "export PI_NATIVE_VARIANT=${PI_NATIVE_VARIANT:-baseline};",
+                "bun --version && ./node_modules/.bin/omp --version",
+                "&& echo '__GSD_MOA_PREBUILT_READY__'",
+                ") || { echo '__GSD_MOA_PREBUILT_FAILED__'; exit 0; }",
+            ]
         result = await self.exec_as_agent(
             environment,
-            command=" ".join(
-                [
-                    "if [ ! -f",
-                    quoted_runtime_tar,
-                    "]; then echo '__GSD_MOA_PREBUILT_MISSING__'; exit 0; fi;",
-                    "if ls /lib/ld-musl-* >/dev/null 2>&1; then echo '__GSD_MOA_PREBUILT_MUSL_UNSUPPORTED__'; exit 0; fi;",
-                    "(",
-                    "rm -rf",
-                    quoted_workdir,
-                    "&& mkdir -p",
-                    quoted_workdir,
-                    "&& tar -xf",
-                    quoted_runtime_tar,
-                    "-C",
-                    quoted_workdir,
-                    "&& arch=$(uname -m) && case \"$arch\" in",
-                    "aarch64|arm64) bun_src=.bun/bin/bun-linux-aarch64 ;;",
-                    "x86_64|amd64) bun_src=.bun/bin/bun-linux-x64-baseline ;;",
-                    "*) echo \"unsupported arch $arch\" >&2; exit 4 ;; esac &&",
-                    "cd",
-                    quoted_workdir,
-                    "&& if [ -f \"$bun_src\" ]; then cp \"$bun_src\" .bun/bin/bun; fi &&",
-                    "chmod +x .bun/bin/bun &&",
-                    f"export BUN_INSTALL={quoted_workdir}/.bun;",
-                    'export PATH="$BUN_INSTALL/bin:$PATH";',
-                    "export PI_NATIVE_VARIANT=${PI_NATIVE_VARIANT:-baseline};",
-                    "bun --version && ./node_modules/.bin/omp --version",
-                    "&& echo '__GSD_MOA_PREBUILT_READY__'",
-                    ") || { echo '__GSD_MOA_PREBUILT_FAILED__'; exit 0; }",
-                ]
-            ),
+            command=(_node_runtime_prefix() if cli_mode == "pi" else "") + " ".join(command_parts),
         )
         return "__GSD_MOA_PREBUILT_READY__" in (result.stdout or "")
 
@@ -195,15 +261,18 @@ class PiGsdMoaAgent(BaseInstalledAgent):
         )
         install_command = "true"
         if install_deps:
-            install_command = " ".join(
-                [
-                    runtime_prefix,
-                    "(npm ci || npm install) &&",
-                    'arch=$(uname -m) && case "$arch" in aarch64|arm64) na=arm64 ;; x86_64|amd64) na=x64 ;; *) echo "unsupported arch $arch" >&2; exit 4 ;; esac &&',
-                    "ver=$(node -p \"require('./node_modules/@oh-my-pi/pi-natives/package.json').version\") &&",
-                    'if [ ! -d "node_modules/@oh-my-pi/pi-natives-linux-$na" ]; then npm install --no-save "@oh-my-pi/pi-natives-linux-$na@$ver"; fi;',
-                ]
-            )
+            if self._cli_mode() == "pi":
+                install_command = " ".join([runtime_prefix, "(npm ci || npm install)"])
+            else:
+                install_command = " ".join(
+                    [
+                        runtime_prefix,
+                        "(npm ci || npm install) &&",
+                        'arch=$(uname -m) && case "$arch" in aarch64|arm64) na=arm64 ;; x86_64|amd64) na=x64 ;; *) echo "unsupported arch $arch" >&2; exit 4 ;; esac &&',
+                        "ver=$(node -p \"require('./node_modules/@oh-my-pi/pi-natives/package.json').version\") &&",
+                        'if [ ! -d "node_modules/@oh-my-pi/pi-natives-linux-$na" ]; then npm install --no-save "@oh-my-pi/pi-natives-linux-$na@$ver"; fi;',
+                    ]
+                )
         await self.exec_as_agent(
             environment,
             command=" ".join(
@@ -246,10 +315,17 @@ class PiGsdMoaAgent(BaseInstalledAgent):
         env.setdefault("GSD_MOA_PRIMARY_BASE_URL", "http://host.docker.internal:8317/v1")
         env.setdefault("GSD_MOA_GEMINI_BASE_URL", "http://host.docker.internal:8318/v1")
         env.setdefault("GSD_MOA_CODEX_BASE_URL", "http://host.docker.internal:8318/v1")
-        env.setdefault("PI_NATIVE_VARIANT", "baseline")
-        runtime_tar = self._env_value("PI_GSD_MOA_RUNTIME_TAR")
-        if runtime_tar:
-            env["PI_GSD_MOA_RUNTIME_TAR"] = runtime_tar
+        cli_mode = self._cli_mode()
+        if cli_mode == "pi":
+            env["GSD_MOA_RUNTIME"] = "pi"
+            pi_runtime_tar = self._env_value("PI_GSD_MOA_PI_RUNTIME_TAR")
+            if pi_runtime_tar:
+                env["PI_GSD_MOA_PI_RUNTIME_TAR"] = pi_runtime_tar
+        else:
+            env.setdefault("PI_NATIVE_VARIANT", "baseline")
+            runtime_tar = self._env_value("PI_GSD_MOA_RUNTIME_TAR")
+            if runtime_tar:
+                env["PI_GSD_MOA_RUNTIME_TAR"] = runtime_tar
         return env
 
     async def _prepare_secret_env(self, environment: BaseEnvironment, secret_env_file: str) -> str:
@@ -321,6 +397,75 @@ class PiGsdMoaAgent(BaseInstalledAgent):
         session_file = f"{out_dir}/{SESSION_NAME}"
         stderr_file = f"{out_dir}/{STDERR_NAME}"
         thinking_args = self._thinking_args()
+        if self._cli_mode() == "pi":
+            return " ".join(
+                [
+                    "set -e;",
+                    "mkdir -p",
+                    shlex.quote(out_dir),
+                    "&&",
+                    source_env,
+                    'task_cwd="$PWD";',
+                    'export NVM_DIR="$HOME/.nvm"; if [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh"; nvm use 24 >/dev/null || true; fi;',
+                    'export GSD_MOA_RUNTIME=pi;',
+                    'case "$GSD_MOA_BUDGET_MS" in ""|*[!0-9]*) export GSD_MOA_BUDGET_MS=900000 ;; esac;',
+                    'now_ms=$(( $(date +%s) * 1000 ));',
+                    'case "$GSD_MOA_DEADLINE_EPOCH_MS" in ""|*[!0-9]*) export GSD_MOA_DEADLINE_EPOCH_MS=$((now_ms + GSD_MOA_BUDGET_MS)) ;; esac;',
+                    "cd",
+                    shlex.quote(workdir),
+                    "&&",
+                    "set +e;",
+                    "./node_modules/.bin/pi",
+                    "--auto-approve --approval-mode yolo --no-session --cwd \"$task_cwd\"",
+                    "-e",
+                    shlex.quote(extension),
+                    "--model",
+                    shlex.quote(model),
+                    "--mode json",
+                    *[shlex.quote(arg) for arg in thinking_args],
+                    "-p",
+                    shlex.quote(instruction),
+                    ">",
+                    shlex.quote(output_file),
+                    "2>",
+                    shlex.quote(stderr_file),
+                    "; status=$?; set -e;",
+                    "cp",
+                    shlex.quote(output_file),
+                    shlex.quote(events_file),
+                    "2>/dev/null || true;",
+                    "if [ -f",
+                    shlex.quote(converter),
+                    "]; then python3",
+                    shlex.quote(converter),
+                    "--input",
+                    shlex.quote(output_file),
+                    "--output",
+                    shlex.quote(trajectory_file),
+                    "--agent-name pi-gsd-moa --agent-version",
+                    shlex.quote(self._agent_version()),
+                    "--model-name",
+                    shlex.quote(model),
+                    "--session",
+                    shlex.quote(session_file),
+                    "--trace-dir",
+                    shlex.quote(f"{out_dir}/traces"),
+                    ">>/dev/null 2>>",
+                    shlex.quote(stderr_file),
+                    "|| echo 'warning: failed to write ATIF trajectory' >>",
+                    shlex.quote(stderr_file),
+                    "; else echo 'warning: ATIF converter not found:'",
+                    shlex.quote(converter),
+                    ">>",
+                    shlex.quote(stderr_file),
+                    "; fi;",
+                    "echo 'pi exit status:' $status >>",
+                    shlex.quote(stderr_file),
+                    "; if [ \"$status\" -ne 0 ]; then if [ \"$status\" -eq 137 ] && grep -q '\"type\":\"turn_end\"'",
+                    shlex.quote(output_file),
+                    "; then exit 0; fi; exit $status; fi; exit 0",
+                ]
+            )
         return " ".join(
             [
                 "set -e;",

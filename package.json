@@ -12,8 +12,10 @@
   ],
   "scripts": {
     "test": "node --import tsx --test tests/**/*.test.ts",
+    "test:omp": "GSD_MOA_RUNTIME=omp npm test",
+    "test:pi": "GSD_MOA_RUNTIME=pi npm test",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test",
+    "check": "npm run typecheck && npm run test:omp && npm run test:pi",
     "proof:pi": "tsx scripts/run-pi-proof.ts",
     "tb:report": "tsx scripts/aggregate-tb-results.ts"
   },
@@ -25,11 +27,22 @@
   ],
   "license": "MIT",
   "peerDependencies": {
+    "@earendil-works/pi-ai": "^0.80.1",
+    "@earendil-works/pi-coding-agent": "^0.80.1",
     "@oh-my-pi/pi-ai": "^16.3.2",
     "@oh-my-pi/pi-catalog": "^16.3.2",
     "@oh-my-pi/pi-coding-agent": "^16.3.2"
   },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": { "optional": true },
+    "@earendil-works/pi-coding-agent": { "optional": true },
+    "@oh-my-pi/pi-ai": { "optional": true },
+    "@oh-my-pi/pi-catalog": { "optional": true },
+    "@oh-my-pi/pi-coding-agent": { "optional": true }
+  },
   "devDependencies": {
+    "@earendil-works/pi-ai": "^0.80.1",
+    "@earendil-works/pi-coding-agent": "^0.80.1",
     "@oh-my-pi/pi-ai": "^16.3.2",
     "@oh-my-pi/pi-catalog": "^16.3.2",
     "@oh-my-pi/pi-coding-agent": "^16.3.2",

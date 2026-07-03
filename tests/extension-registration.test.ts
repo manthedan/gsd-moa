@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
-import extension, { resetConfigCache } from "../src/index.ts";
+import { afterEach, describe, it } from "node:test";
+import extension, { resetConfigCache, resetRuntimeCache } from "../src/index.ts";
 import { GSD_MOA_MODEL_IDS } from "../src/models.ts";
 
 function register() {
@@ -29,6 +29,14 @@ function inTempCwd(fn: (dir: string) => void) {
 }
 
 describe("Pi extension registration", () => {
+  const originalRuntime = process.env.GSD_MOA_RUNTIME;
+
+  afterEach(() => {
+    if (originalRuntime === undefined) delete process.env.GSD_MOA_RUNTIME;
+    else process.env.GSD_MOA_RUNTIME = originalRuntime;
+    resetRuntimeCache();
+  });
+
   it("registers provider gsd-moa with all public aliases", () => {
     const registrations = register();
 
@@ -39,6 +47,16 @@ describe("Pi extension registration", () => {
       registrations[0]?.config.models.map((m: any) => m.id).sort(),
       [...GSD_MOA_MODEL_IDS].sort(),
     );
+  });
+
+  it("adds the upstream pi display name only in pi runtime", () => {
+    process.env.GSD_MOA_RUNTIME = "pi";
+    resetRuntimeCache();
+    assert.equal(register()[0]?.config.name, "GSD MoA");
+
+    process.env.GSD_MOA_RUNTIME = "omp";
+    resetRuntimeCache();
+    assert.equal("name" in (register()[0]?.config ?? {}), false);
   });
 
   it("registers user-defined aliases from the loaded config as real models", () => inTempCwd((dir) => {
