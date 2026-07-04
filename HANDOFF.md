@@ -56,11 +56,9 @@ omp runtime · effort `high` (trace-verified; aggregator prints `efforts` per ro
 
 ## After the droid arm (queue)
 
-1. **Async advisor arm** (`asyncAdvisor.enabled`, default off) — cancellations still dominate caffe-class tasks at high effort.
-2. **Study Codex CLI trajectories** on dna-insert/raman (public passes) vs ours to localize the residual gap; if Droid-bare beats us there, mine its stream-jsonl the same way.
-3. If Droid-bare is strong: inverse experiment prebuilt — `gsd-moa-factory-droid-proxy` worktree exposes gsd-moa as Droid's model (Droid outer harness + our MoA inner).
-4. mac-mini CLIProxy migration (user OAuth) → Gemini/Claude reference arms + multimodal slice (LemonHarness-style perception tool).
-5. Backlog: delete legacy pi path + dual-runtime scaffolding (s2-pi-single read confirms omp — capability parity shown); Z.ai key rotation (still unrotated); `xhigh` arm on tasks with time headroom; leaderboard submission needs ATIF for passing trials + the open-source judge pre-check.
+**Plan of record: `docs/MOA-VALUE-ROADMAP.md`** (2026-07-04, user-approved) — F0 trace forensics (in progress) → F1 async advisor → F2 rescue-triggered advice → F3 model-mix ablations (self-advice, inverted GLM-actor/GPT-advisor) → F4 review-before-done (offline replay first). **mac-mini CLIProxy host REJECTED by user 07-04** — routes are yukon CLIProxy + Z.ai direct; cross-family advisors deferred until a route the user likes exists.
+
+Also live: study Codex CLI trajectories on dna-insert/raman vs ours; if Droid-bare is strong, the inverse experiment is prebuilt (`gsd-moa-factory-droid-proxy` worktree). Backlog: delete legacy pi path + dual-runtime scaffolding (s2-pi-single confirms omp); Z.ai key rotation (still unrotated); `xhigh` arm on tasks with time headroom; leaderboard submission needs ATIF for passing trials + the open-source judge pre-check.
 
 ## Workflow conventions
 
