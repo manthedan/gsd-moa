@@ -1,16 +1,18 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench experiments
 
-Last updated: 2026-07-04 ~12:45 PT.
+Last updated: 2026-07-04 ~13:10 PT.
 
 ## RUNNING RIGHT NOW (check first!)
 
-**Droid bare-harness control arm on yukon** (started 2026-07-04 12:20 PT; 8 tasks × k=3, expect several hours):
+**1. Droid bare-harness control arm on yukon** (started 12:20 PT; on gcode [task 2/8] at 12:59; 8 tasks × k=3):
 ```bash
 ssh yukon 'tail -3 ~/projects/gsd-moa/s2-droid.log; pgrep -f "[r]un-droid-arm.sh" >/dev/null && echo RUNNING'
 ```
-Script: yukon `~/projects/gsd-moa/run-droid-arm.sh` (untracked scratch, mirrors run-slice2.sh). Output `jobs/s2-droid/`. Agent `harbor_agents.droid_agent:DroidAgent` at checkout `a197744`. Droid runs at **backend-default effort** (custom models can't set reasoning effort) — bracket against s2-single (high) and the probe's none arm. Harbor task ceilings bound runtime; droid has no self-pacing budget knob.
+Script: yukon `~/projects/gsd-moa/run-droid-arm.sh` (untracked scratch). Output `jobs/s2-droid/`. Checkout `a197744`. Droid runs at **backend-default effort** (custom models can't set it); harbor task ceilings bound runtime.
 
-**The yukon checkout is at `a197744` and MUST NOT be pulled until the droid arm finishes** (trials mount it read-only). Bare repo is at `2bd9fc9` (aggregator droid-log integrity scan) — pull after.
+**2. AUTO-QUEUE ARMED: `queue-after-droid.sh`** (yukon, log `queue.log`): when the droid arm exits it will `git pull --ff-only` the checkout (expects the `3f721e7` fixes), rebuild `.proof/omp-runtime.tar` via `docker buildx build --target bundle --output type=tar,dest=... -f .proof/omp-runtime.Dockerfile .` (build command validated this session against the current bundle), then run **`run-s3-fixedmoa.sh`** → `jobs/s3-glmonly-fixed`, marker `S3 DONE` in `s3.log`: alias `gpt55-cliproxycodex-glm52only-nosynth-full` + `GSD_MOA_CHECKPOINT_SCOPES=initial,failure`, 8 tasks, k=3, standard config. Kill the queue with `pkill -f "[q]ueue-after-droid.sh"` if plans change.
+
+**The yukon checkout is at `a197744` and MUST NOT be pulled until the droid arm finishes** (trials mount it read-only; the queue script handles the pull safely afterward). Bare repo is at `3f721e7`.
 
 ## S2 matrix — DONE 2026-07-04 10:49 PT (all integrity-clean)
 
@@ -27,12 +29,13 @@ Script: yukon `~/projects/gsd-moa/run-droid-arm.sh` (untracked scratch, mirrors 
 
 extract-elf k=1: reward **1.0**, droid exit 0, integrity clean (scanned by new aggregator), wall 9.8m. Auth + `custom:GSD-MOA-Droid-Control-0` selector accepted; CLIProxy verified serving gpt-5.5 `/v1/responses` during the window (`~/.cli-proxy-api/logs/main.log`). Artifacts: `jobs/droid-smoke/2026-07-04__12-08-55/`.
 
-## When the droid arm finishes (in order)
+## When the droid arm finishes
 
-1. Aggregate: `ssh yukon '/tmp/omp-bun/bun /tmp/aggregate-integrity.ts --dir ~/projects/gsd-moa/jobs/s2-droid'` — droid transcripts ARE integrity-scanned now (`2bd9fc9`: `agent/droid/output.stream-jsonl`, fallback `output.txt`).
-2. `git pull --ff-only` the yukon checkout to `2bd9fc9`.
-3. Update `docs/TERMINAL-BENCH-RESULTS.md` with the S2 + droid four-way read (our harness vs pi vs Droid vs public Codex CLI, model held constant via CLIProxy). S2 aggregate tables were snapshotted this session; re-run step 1 commands per arm if needed.
-4. Then the post-S2 queue below.
+The auto-queue handles pull + bundle rebuild + s3 launch. Manually (can run while s3 executes):
+
+1. Aggregate droid: `ssh yukon '/tmp/omp-bun/bun /tmp/aggregate-integrity.ts --dir ~/projects/gsd-moa/jobs/s2-droid'` — droid transcripts ARE integrity-scanned (`2bd9fc9`).
+2. Update `docs/TERMINAL-BENCH-RESULTS.md` with the S2 + droid four-way read (our harness vs pi vs Droid vs public Codex CLI). S2 tables: re-run aggregator per `jobs/s2-<arm>`.
+3. When `S3 DONE`: aggregate `jobs/s3-glmonly-fixed` — the F0-fix validation read is s3 vs s2-single (6/24) vs s2-ckpt-full (4/24): did removing the advisor tax (glm-only ~35s/injection, truncated advice dropped, drift off) stop MoA from losing? Also count `referenceFailures` in diagnostics (new field, `3f721e7`).
 
 ## Where you are (state + decisions)
 
