@@ -164,7 +164,7 @@ export ZAI_API_KEY=...
 export CLIPROXY_API_KEY=...          # for CLIProxyAPI presets
 export GSD_MOA_CODEX_MODEL=gpt-5.5   # optional Codex preset override
 export GSD_MOA_GEMINI_MODEL=gemini-3-flash
-export GSD_MOA_EFFORT=high           # minimal|low|medium|high|xhigh|inherit
+export GSD_MOA_EFFORT=high           # minimal|low|medium|high|xhigh|none|inherit
 export GSD_MOA_REFERENCE_MAX_TOKENS=600 # optional advisory-output cap only
 export GSD_MOA_CHECKPOINTS=true
 export GSD_MOA_CHECKPOINT_DRIFT_TOOL_RESULTS=3
@@ -172,7 +172,7 @@ export GSD_MOA_CHECKPOINT_DRIFT_TOOL_RESULTS=3
 
 The default GPT-5.5 route expects a local OpenAI-compatible Codex/Factory-style proxy. The default GLM-5.2 route expects a Z.ai-compatible endpoint. CLIProxyAPI route presets default to `http://127.0.0.1:8318/v1`. Override route presets in `.pi/gsd-moa.json` when using a different provider, proxy, port, model ID, or subscription path.
 
-Reasoning effort defaults to `high` for every upstream call: primary, advisor/reference, full-MoA proposers, and synthesis. Configure globally with top-level `defaultEffort` (`minimal`, `low`, `medium`, `high`, `xhigh`, or `inherit`) or per route with `effort` (`minimal` through `xhigh`). Resolution order is: route `effort`, host CLI/options `reasoning`, `GSD_MOA_EFFORT`, then `defaultEffort`. Set `GSD_MOA_EFFORT=inherit` or `defaultEffort: "inherit"` to restore passthrough behavior when the host did not set a thinking level.
+Reasoning effort defaults to `high` for every upstream call: primary, advisor/reference, full-MoA proposers, and synthesis. Configure globally with top-level `defaultEffort` (`minimal`, `low`, `medium`, `high`, `xhigh`, `none`, or `inherit`) or per route with `effort` (`minimal` through `xhigh`, or `none`). Concrete efforts send that value on the wire. `none` explicitly sends no reasoning-effort field (backend default) without setting `disableReasoning`. `inherit` defers to the host CLI/options; note that the host may still synthesize its own default such as `high`. General resolution order is: route `effort`, host CLI/options `reasoning`, `GSD_MOA_EFFORT`, then `defaultEffort`; `none` is a real override for ablations where host defaults would otherwise put an effort on the wire.
 
 Advisory latency can be bounded with top-level `referenceMaxTokens` or `GSD_MOA_REFERENCE_MAX_TOKENS`; individual full-MoA proposers can override with `maxTokens`. These caps apply only to advisor/reference/proposer calls. They are never applied to the synthesis call or final acting call.
 

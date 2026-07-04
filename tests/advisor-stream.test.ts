@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -80,6 +80,36 @@ function tempConfig(): { cfg: GsdMoaConfig; dir: string } {
 }
 
 describe("advisor orchestration", () => {
+  it("records explicit none effort while omitting reasoning from upstream options", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    cfg.defaultEffort = "none";
+    cfg.trace = { enabled: true, dir: join(dir, "traces"), includeContexts: false, includeOutputs: false };
+    try {
+      const context: Context = { messages: [{ role: "user", content: "hello", timestamp: 1 }] };
+      const upstream: UpstreamClient = {
+        async complete() {
+          throw new Error("unexpected reference call");
+        },
+        stream(seenModel, _seenContext, seenOptions) {
+          assert.equal(seenModel.provider, "factory-codex");
+          assert.equal(seenOptions?.reasoning, undefined);
+          assert.equal((seenOptions as any)?.omitReasoningEffort, true);
+          return streamText(seenModel, "final", usage(1, 2));
+        },
+      };
+
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-single"), context, { reasoning: "high" as never }, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.deepEqual(details.innerCalls.map((call: any) => [call.role, call.effort]), [["primary", "none"]]);
+      const trace = JSON.parse(readFileSync(details.tracePath, "utf8"));
+      assert.equal(trace.primaryCall.effort, "none");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("runs GLM advisor without tools, then final GPT with tools and combined usage", async () => {
     const { cfg, dir } = tempConfig();
     try {

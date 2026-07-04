@@ -17,7 +17,7 @@ import { applyModelPreset } from "./presets.js";
 import { timeEnvFromProcess, computeTimeState } from "./time.js";
 import { createTraceRecorder } from "./trace.js";
 import type { AdvisorResult, FullMoaResult, GsdMoaConfig, MoaAction, MoaRunDetails, TimeState } from "./types.js";
-import { routeToModel, streamOptionsForRoute, type UpstreamClient, compatUpstreamClient } from "./upstream.js";
+import { effortForTrace, routeToModel, streamOptionsForRoute, type UpstreamClient, compatUpstreamClient } from "./upstream.js";
 import { addUsage } from "./usage.js";
 
 export interface StreamDependencies {
@@ -114,7 +114,8 @@ export function streamGsdMoa(
       trace?.recordFinalContext(finalContext);
       const primaryModel = routeToModel(config.primary);
       const primaryOptions = streamOptionsForRoute(config.primary, options, config.defaultEffort);
-      trace?.recordPrimaryCall({ route: config.primary, effort: primaryOptions.reasoning, startedAt: Date.now() });
+      const primaryEffort = effortForTrace(primaryOptions);
+      trace?.recordPrimaryCall({ route: config.primary, effort: primaryEffort, startedAt: Date.now() });
       const inner = upstream.stream(primaryModel, finalContext, primaryOptions);
       for await (const event of inner) {
         trace?.recordPrimaryEvent(event);
@@ -122,7 +123,7 @@ export function streamGsdMoa(
           const primaryUsage = event.message.usage;
           const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
           event.message.usage = combinedUsage;
-          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryOptions.reasoning, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor);
+          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor);
           event.message.diagnostics = [
             ...(event.message.diagnostics ?? []),
             diagnostic,
@@ -132,7 +133,7 @@ export function streamGsdMoa(
           const primaryUsage = event.error.usage;
           const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
           event.error.usage = combinedUsage;
-          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryOptions.reasoning, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor);
+          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor);
           event.error.diagnostics = [
             ...(event.error.diagnostics ?? []),
             diagnostic,

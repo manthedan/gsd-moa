@@ -166,7 +166,7 @@ export function streamSimple<TApi extends Api>(
       if (getRuntime() === "pi") {
         const { streamSimple: rawStreamSimple } = await import("@earendil-works/pi-ai/compat") as unknown as PiCompatModule;
         if (!rawStreamSimple) throw new Error("@earendil-works/pi-ai/compat did not export streamSimple");
-        inner = rawStreamSimple(model, normalized, options);
+        inner = rawStreamSimple(model, normalized, stripOmpOnlyOptions(options));
       } else {
         const { streamSimple: rawStreamSimple } = await import("@oh-my-pi/pi-ai/stream");
         inner = rawStreamSimple(model as OmpTypes.Model<TApi>, normalized as OmpTypes.Context, options) as typeof inner;
@@ -188,7 +188,7 @@ export async function completeSimple<TApi extends Api>(
   if (getRuntime() === "pi") {
     const { completeSimple: rawCompleteSimple } = await import("@earendil-works/pi-ai/compat") as unknown as PiCompatModule;
     if (!rawCompleteSimple) throw new Error("@earendil-works/pi-ai/compat did not export completeSimple");
-    return rawCompleteSimple(model, normalizeContext(context), options);
+    return rawCompleteSimple(model, normalizeContext(context), stripOmpOnlyOptions(options));
   }
   const { completeSimple: rawCompleteSimple } = await import("@oh-my-pi/pi-ai/stream");
   return rawCompleteSimple(model as OmpTypes.Model<TApi>, normalizeContext(context) as OmpTypes.Context, options);
@@ -207,6 +207,12 @@ export function normalizeContext(
     ...context,
     systemPrompt: typeof context.systemPrompt === "string" ? [context.systemPrompt] : context.systemPrompt,
   } as OmpTypes.Context;
+}
+
+function stripOmpOnlyOptions(options: SimpleStreamOptions | undefined): SimpleStreamOptions | undefined {
+  if (!options || !("omitReasoningEffort" in options)) return options;
+  const { omitReasoningEffort: _omitReasoningEffort, ...rest } = options as SimpleStreamOptions & { omitReasoningEffort?: boolean };
+  return rest as SimpleStreamOptions;
 }
 
 function loadPiCompatModule(): PiCompatModule {

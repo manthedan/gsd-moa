@@ -4,7 +4,7 @@ import { assistantText } from "./context.js";
 import type { TraceRecorder, TraceReferenceCall } from "./trace.js";
 import { referenceBudgetMs } from "./time.js";
 import type { GsdMoaConfig, TimeState, UpstreamRoute } from "./types.js";
-import { resolveEffortForRoute, routeToModel, streamOptionsForRoute, type UpstreamClient } from "./upstream.js";
+import { effortForTrace, resolveEffortForRoute, routeToModel, streamOptionsForRoute, type UpstreamClient } from "./upstream.js";
 
 export interface ReferenceCallMetadata {
   role: TraceReferenceCall["role"];
@@ -92,7 +92,7 @@ export async function runReferenceCall(
       model: route.model,
       key,
       durationMs: endedAt - startedAt,
-      effort: callOptions.reasoning,
+      effort: effortForTrace(callOptions),
     };
   } catch (error) {
     trace?.recordReferenceFailure({

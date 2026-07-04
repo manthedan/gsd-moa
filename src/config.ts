@@ -173,7 +173,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const EFFORT_VALUES = ["minimal", "low", "medium", "high", "xhigh"] as const;
+const EFFORT_VALUES = ["minimal", "low", "medium", "high", "xhigh", "none"] as const;
 const DEFAULT_EFFORT_VALUES = [...EFFORT_VALUES, "inherit"] as const;
 
 function isReasoningEffort(value: unknown): value is ReasoningEffort {

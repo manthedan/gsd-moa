@@ -6,7 +6,8 @@ export type MoaMode = "single" | "advisor" | "full_moa";
 export type AliasMode = MoaMode | "auto";
 export type ModelRef = string | { provider: string; model: string };
 export type InputCapability = "text" | "image" | "video" | "audio";
-export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ConcreteReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ReasoningEffort = ConcreteReasoningEffort | "none";
 export type DefaultReasoningEffort = ReasoningEffort | "inherit";
 
 export interface UpstreamRoute {

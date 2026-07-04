@@ -137,8 +137,8 @@ function resolveDefaultCacheEffort(config: GsdMoaConfig): string | undefined {
 
 function parseEnvEffort(value: string | undefined): string | "inherit" | undefined {
   if (value === undefined) return undefined;
-  if (["minimal", "low", "medium", "high", "xhigh", "inherit"].includes(value)) return value;
-  throw new Error("GSD_MOA_EFFORT must be one of: minimal, low, medium, high, xhigh, inherit");
+  if (["minimal", "low", "medium", "high", "xhigh", "none", "inherit"].includes(value)) return value;
+  throw new Error("GSD_MOA_EFFORT must be one of: minimal, low, medium, high, xhigh, none, inherit");
 }
 
 function cachePath(config: GsdMoaConfig, key: string, cwd: string): string {

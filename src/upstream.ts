@@ -9,7 +9,7 @@ import {
   type Model,
   type SimpleStreamOptions,
 } from "./pi-compat.js";
-import type { DefaultReasoningEffort, ReasoningEffort, UpstreamRoute } from "./types.js";
+import type { ConcreteReasoningEffort, DefaultReasoningEffort, ReasoningEffort, UpstreamRoute } from "./types.js";
 
 export interface UpstreamClient {
   stream(model: Model<Api>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream;
@@ -55,33 +55,46 @@ export function resolveConfigValue(value: string | undefined, label = "config va
 
 export function streamOptionsForRoute(route: UpstreamRoute, options?: SimpleStreamOptions, defaultEffort: DefaultReasoningEffort = "high"): SimpleStreamOptions {
   const apiKey = resolveConfigValue(route.apiKey, "route apiKey");
-  const { apiKey: _providerApiKey, ...rest } = options ?? {};
+  const { apiKey: _providerApiKey, reasoning: _hostReasoning, ...rest } = options ?? {};
   const headers = Object.fromEntries(
     Object.entries(route.headers ?? {}).map(([key, value]) => [key, resolveConfigValue(value, `route header ${key}`) ?? ""]),
   );
   const resolvedEffort = resolveEffortForRoute(route, options, defaultEffort);
   return {
     ...rest,
-    ...(resolvedEffort !== undefined ? { reasoning: resolvedEffort } : {}),
+    ...(resolvedEffort === "none" ? { omitReasoningEffort: true } : {}),
+    ...(resolvedEffort !== undefined && resolvedEffort !== "none" ? { reasoning: resolvedEffort as SimpleStreamOptions["reasoning"] } : {}),
     ...(route.temperature !== undefined ? { temperature: route.temperature } : {}),
     ...(apiKey ? { apiKey } : {}),
     headers: { ...(options?.headers ?? {}), ...headers },
   };
 }
 
-export function resolveEffortForRoute(route: UpstreamRoute, options: SimpleStreamOptions | undefined, defaultEffort: DefaultReasoningEffort): SimpleStreamOptions["reasoning"] | undefined {
-  if (route.effort !== undefined) return route.effort as SimpleStreamOptions["reasoning"];
-  if (options?.disableReasoning) return undefined;
-  if (options?.reasoning !== undefined) return options.reasoning;
+export function resolveEffortForRoute(route: UpstreamRoute, options: SimpleStreamOptions | undefined, defaultEffort: DefaultReasoningEffort): ReasoningEffort | undefined {
+  if (route.effort !== undefined) return route.effort;
   const envEffort = parseEnvEffort(process.env.GSD_MOA_EFFORT);
+  if (envEffort === "none") return "none";
+  if (options?.disableReasoning) return undefined;
+  if (options?.reasoning !== undefined) {
+    return defaultEffort === "none" && envEffort === undefined
+      ? "none"
+      : options.reasoning as ConcreteReasoningEffort;
+  }
   if (envEffort === "inherit") return undefined;
-  if (envEffort !== undefined) return envEffort as SimpleStreamOptions["reasoning"];
+  if (envEffort !== undefined) return envEffort;
   if (defaultEffort === "inherit") return undefined;
-  return defaultEffort as SimpleStreamOptions["reasoning"];
+  return defaultEffort;
+}
+
+export function effortForTrace(options: SimpleStreamOptions | undefined): string | undefined {
+  if (!options) return undefined;
+  const maybeOmit = options as SimpleStreamOptions & { omitReasoningEffort?: boolean };
+  if (maybeOmit.omitReasoningEffort === true && options.reasoning === undefined) return "none";
+  return options.reasoning;
 }
 
 function parseEnvEffort(value: string | undefined): ReasoningEffort | "inherit" | undefined {
   if (value === undefined) return undefined;
-  if (["minimal", "low", "medium", "high", "xhigh", "inherit"].includes(value)) return value as ReasoningEffort | "inherit";
-  throw new Error("GSD_MOA_EFFORT must be one of: minimal, low, medium, high, xhigh, inherit");
+  if (["minimal", "low", "medium", "high", "xhigh", "none", "inherit"].includes(value)) return value as ReasoningEffort | "inherit";
+  throw new Error("GSD_MOA_EFFORT must be one of: minimal, low, medium, high, xhigh, none, inherit");
 }
