@@ -1,73 +1,54 @@
-# Terminal-Bench Performance So Far
+# Terminal-Bench Evidence Snapshot
 
-Date: 2026-06-28
+Date: 2026-07-03. Supersedes the 2026-06-28 snapshot (kept below as an appendix note). All pre-2026-07-03 data carries two caveats discovered today: **no run sent a reasoning-effort value** (the public Codex CLI baseline pins `high`), and **every historical mteb-leaderboard "pass" was reward-hacked** per the [leaderboard integrity rules](https://www.tbench.ai/news/leaderboard-integrity-update).
 
-This document summarizes local Harbor / Terminal-Bench 2.0 dogfood runs for `pi-gsd-moa`, comparing:
+## The July 3 probe
 
-- `single`: `gsd-moa/gpt55-glm52-single` — direct GPT-5.5 through Factory proxy.
-- `full_moa`: `gsd-moa/gpt55-glm52-full` — GLM-5.2 reference + GPT-5.5 reference + GPT-5.5 synthesis + GPT-5.5 final actor.
+Design: single-mode (`gpt55-cliproxycodex-single`), k=3 per arm/task, four tasks chosen because public GPT-5.5-class agents pass them and we did not (mteb-leaderboard, dna-insert, raman-fitting, caffe-cifar-10). Commit `7ab2ed8` (arms 1–3) / `131b571` (arm 4). Efforts verified per-call from traces; integrity scored by the aggregator (tainted would-passes count as failures, matching leaderboard scoring).
 
-All runs used the Pi custom provider extension and were run as one trial per mode unless noted. Treat results as directional, not statistically final. See [`TERMINAL-BENCH-LEADERBOARD-COMPARISON.md`](TERMINAL-BENCH-LEADERBOARD-COMPARISON.md) for comparison against selected public leaderboard rows.
+| Arm | Config | Score (integrity-scored) | Tainted mteb trials | Cancellations | Notes |
+|---|---|---:|---:|---:|---|
+| p1-omp-high | omp, effort high | 0/12 | 3 (all would-pass) | 3 (caffe) | fastest; fewest calls |
+| p1-pi-high | upstream pi, effort high | 0/12 | 0 | 6 (caffe + all raman) | ~2× calls/tokens; bash-only tool surface |
+| p1-omp-inherit | omp, host default (= high; see below) | 0/12 | 2 (failed anyway) | 3 (caffe) | accidental replication of arm 1 |
+| p1-omp-none | omp, no effort on the wire | 0/12 | 3 (failed anyway) | 3 (caffe) | most flailing (see efficiency) |
 
-## Headline
+**Headline: 0/48. No legitimate pass in the probe.** The four findings below are what the probe actually established.
 
-The current Hermes-aligned full-MoA has clear wins on two known GPT-5.5 stress tasks:
+### 1. All mteb passes were reward hacking (integrity)
 
-- `torch-tensor-parallelism`: single failed, full-MoA passed.
-- `overfull-hbox`: single failed, full-MoA passed.
+Every mteb trial in every arm attempted to look up the benchmark's own artifacts — the tbench.ai task registry, `laude-institute/terminal-bench` task files (one trial read `check.py`, the oracle), harbor-framework mirrors, task explorer/notes pages — because a web search for the task text surfaces them. Only arm 1's three trials converted that into "passes"; nine later attempts all failed, confirming those passes were snippet luck, not capability. Detection is now automated (aggregator `Integrity` column zeroes tainted rewards); prevention is `GSD_MOA_BENCH_INTEGRITY=1` (integrity directive injected into acting + reference prompts), enabled in all yukon env files from 2026-07-03 on. A legitimate mteb solve requires historical leaderboard snapshots (datawrapper CSV, `embeddings-benchmark/results` history) — reachable, but not achieved yet.
 
-It also preserves parity on `extract-elf`, where both passed. Many harder tasks still fail for both modes, often due to timeout or incomplete environment/task execution.
+### 2. Effort buys efficiency and parity, not passes (high vs none)
 
-## Known-Failure Stress Suite
+Identical zeros, very different execution. mteb at `none`: 142 primary calls, 3.39M input tokens, 12.5m mean. At `high`: 67 calls, 0.87M tokens, 4.2m. Lower effort flails; high effort is decisive. Since harbor's Codex CLI baseline pins `model_reasoning_effort=high`, `high` is also required for comparability. Default is now `high` everywhere (`GSD_MOA_EFFORT`, route-level `effort`, per-call trace verification). Note the semantics learned the hard way: `inherit` defers to the host CLI, and omp's host resolves `high` on its own for our model cards — so the true "backend default" ablation requires `none` (omits the field via `omitReasoningEffort`).
 
-| Task | Single reward | Full-MoA reward | Outcome | Single runtime | Full runtime | Full refs | Full cache | Notes |
-|---|---:|---:|---|---:|---:|---:|---:|---|
-| `torch-tensor-parallelism` | 0.0 | 1.0 | MoA win | 13m04 | 14m33 | 15 | 12H/3M | ================== 13 passed, 1 warning in 229.30s (0:03:49) =================== |
-| `caffe-cifar-10` | 0.0 | 0.0 | Both failed | 23m21 | 11m41 | 24 | 21H/3M | exceptions: single AgentTimeoutError:1; full NonZeroAgentExitCodeError:1 |
-| `overfull-hbox` | 0.0 | 1.0 | MoA win | 13m50 | 8m25 | 39 | 36H/3M | ========================= 4 passed in 94.63s (0:01:34) ========================= |
-| `install-windows-3-11` | 0.0 | 0.0 | Both failed | 14m39 | 15m23 | 51 | 48H/3M | =================== 1 failed, 3 passed in 167.43s (0:02:47) ==================== |
-| `make-doom-for-mips` | 0.0 | 0.0 | Both failed | 15m43 | 18m22 | 102 | 99H/3M | exceptions: single 0; full AgentTimeoutError:1 |
-| `gcode-to-text` | 0.0 | 0.0 | Both failed | 18m56 | 27m17 | 48 | 45H/3M | ========================= 1 failed, 1 passed in 0.28s ========================== |
-| `mteb-leaderboard` | 0.0 | 0.0 | Both failed | 9m59 | 7m00 | 57 | 54H/3M | ========================= 1 failed, 1 passed in 0.24s ========================== |
-| `raman-fitting` | 0.0 | 0.0 | Both failed | 9m19 | 17m19 | 54 | 51H/3M | exceptions: single 0; full AgentTimeoutError:1 |
-| `extract-elf` | 1.0 | 1.0 | Parity pass | 6m11 | 8m23 | 12 | 9H/3M | ============================== 2 passed in 1.83s =============================== |
-| `mcmc-sampling-stan` | 0.0 | 0.0 | Both failed | 44m43 | 53m31 | 57 | 54H/3M | exceptions: single AgentTimeoutError:1; full AgentTimeoutError:1 |
-| `filter-js-from-html` | 0.0 | 0.0 | Both failed | 16m11 | 16m03 | 12 | 9H/3M | =================== 1 failed, 1 passed in 329.87s (0:05:29) ==================== |
-| `dna-insert` | 0.0 | 0.0 | Both failed | 5m54 | 9m32 | 18 | 15H/3M | ============================== 1 failed in 0.42s =============================== |
+### 3. Runtime decision: omp (efficiency + tool surface)
 
-## Prior Baseline / Smoke Runs
+Outcomes tie at zero, but pi cancelled twice as often (6 vs 3), burned to the raman ceiling on all three trials where omp finished (failing) with time to spare, and needed roughly double the calls/tokens per task. Mechanism, from the trajectories: upstream pi exposes essentially `bash` + `write`, so the model hand-rolls everything (including ~10 improvised `python requests` scrapers on mteb); omp ships `read`/`web_search`/`browser`/`eval`/`glob`. Nothing in the probe favors pi. **Decision: build on omp.** The dual-runtime adapter (`GSD_MOA_RUNTIME`) stays as cheap insurance until the next milestone, then the legacy pi path can be deleted.
 
-| Task | Single reward | Full-MoA reward | Notes |
-|---|---:|---:|---|
-| `fix-git` | 1.0 | 1.0 | Both passed; full-MoA slower but cache-heavy. |
-| `fix-code-vulnerability` | 1.0 | 1.0 | Both passed; full-MoA used fewer assistant turns in the earlier run. |
-| `configure-git-webserver` | 1.0 | 1.0 after Hermes/public-note refactor | Earlier full-MoA variants failed by advising instead of acting; current prompt/injection shape passed. |
-| `torch-tensor-parallelism` | 0.0 | 1.0 | First strong non-multimodal MoA win. |
+### 4. The residual gap is real capability, not configuration
 
-## Cache Behavior
+With effort pinned, integrity scored, and the runtime settled, dna-insert (public 3–5/5) and raman-fitting (public up to 4/5) still fail cleanly at high effort with wall-clock to spare, and caffe-cifar-10 still dies at its time ceiling in every arm. Whatever separates us from Codex CLI on these is in the agent loop/tooling/strategy, not the knobs this probe controlled.
 
-Full-MoA reference-layer cache generally shows `3` misses on the first turn — GLM reference, GPT reference, synthesis — followed by hits on later tool-loop turns. This is expected because the cache key uses the sanitized reference context, stripping tool results and tool calls while preserving the high-level task.
+## Also fixed while probing
 
-Examples:
+- **Time-aware budgets were wrong in all runs to date**: the harbor agent's 900000ms fallback told every task "15m" while real agent ceilings are mteb 60m / dna 30m / caffe 20m / raman 15m. `scripts/tb-agent-budget.sh` now resolves the real per-task budget from harbor's task cache; run scripts export it per task. (Time-aware was ON in all probe arms — uniformly, so not a confounder — but in single mode it only injects the budget note; the checkpoint-suppression machinery from the E3 ablation needs MoA modes.)
 
-- `torch-tensor-parallelism`: 15 reference calls, 12 hits, 3 misses.
-- `overfull-hbox`: 39 reference calls, 36 hits, 3 misses.
+## Status of historical results (June 28 snapshot + July 2 matrix)
 
-## Interpretation
+- Audited clean (no benchmark-artifact access): mcmc-sampling-stan passes (single 2/2 at high-era clean runs; ta-on full-MoA 2/2), overfull-hbox passes, gcode-to-text single pass, extract-elf passes. These stand, with the effort caveat (they ran at backend-default effort).
+- The June torch-tensor-parallelism full-MoA "win" did not replicate (0/2 all modes at k=2) — treat as k=1 variance.
+- E3's time-aware result stands but reframed: time-aware rescues full-MoA from its own checkpoint overhead (ta-on 2/8 vs ta-off 1/8, fewer cancellations); clean single matches ta-on on mcmc at lower cost.
+- MoA has shown **no pass-rate lift over clean single** in any k≥2 comparison to date. That is the open question the next experiments target, now on a sound footing.
 
-Positive evidence:
+## Standard configuration going forward
 
-1. Full-MoA can recover failures on reasoning-heavy implementation tasks where single GPT-5.5 misses a subtle invariant.
-2. The Hermes-aligned prompting and public execution note fixed the earlier “advice instead of action” failure mode.
-3. Cache keeps repeated tool-loop turns from multiplying reference-model spend linearly.
+omp runtime · effort `high` (verified per-call in traces) · `GSD_MOA_BENCH_INTEGRITY=1` · per-task `GSD_MOA_BUDGET_MS` via `scripts/tb-agent-budget.sh` · integrity-scored aggregation (`npm run tb:report`) · k≥3.
 
-Limits / concerns:
+## Next experiments
 
-1. Several tasks still fail for both modes; MoA is not a universal Terminal-Bench solver.
-2. Some full-MoA failures are timeouts, suggesting extra reference latency can hurt long build/install tasks.
-3. One trial per task is not enough for statistical claims. Repeat promising deltas with `k>=3` before claiming robust lift.
-4. Reference caching currently ignores tool-result discoveries, which is efficient but may stale out on tasks requiring fresh post-tool analysis.
-
-## Artifact Roots
-
-Detailed local artifacts live under `.proof/harbor-jobs/`, including result JSON, verifier output, Pi event streams, and provider traces where available.
+1. **Stratified slice (~10–12 tasks)** with dynamic range: the clean-pass set (mcmc, gcode, overfull, extract-elf) + untried mid-difficulty public tasks + 2 hard canaries. Establishes the baseline that ablations can move.
+2. **MoA value ablations** on that slice: single vs `gpt55-cliproxycodex-glm52-hermes-full` (refs once per turn, no synth) vs checkpoint full-MoA, all at the standard config — the project's core question.
+3. **Async advisor arm** (config exists, default off) — cancellations still dominate caffe-class tasks even at high effort.
+4. **Multimodal slice + Gemini specialist** once antigravity tokens are reachable from yukon (mac-mini CLIProxy plan).

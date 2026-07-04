@@ -1,6 +1,6 @@
 # Terminal-Bench Results vs Public Leaderboards
 
-Date: 2026-06-29
+Date: 2026-06-29. **SUPERSEDED 2026-07-03** — see `TERMINAL-BENCH-RESULTS.md`. Two systemic caveats invalidate direct comparison in this table: our runs sent no reasoning effort while the Codex CLI baseline pins high, and all local mteb-leaderboard passes were later found reward-hacked (integrity-scored to 0). Public numbers referenced here remain useful as task-difficulty priors only.
 
 This compares our local one-trial `pi-gsd-moa` A/B runs against three public Terminal-Bench 2.0 task-level leaderboard pages:
 
