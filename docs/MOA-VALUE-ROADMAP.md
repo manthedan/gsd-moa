@@ -28,6 +28,8 @@ Every S2 MoA inner call left a trace with the advisor text, the injected guidanc
 
 Deliverable: `docs/S2-FORENSICS.md` — diagnosis distribution, advisor latency budget share, adoption rate, and 2–3 quoted exemplars per bucket. **Gates F1–F3 emphasis.**
 
+**DONE 2026-07-04 — read:** bucket (c) dominates — the GPT-5.5 self-proposer aborts at the 120s reference timeout in ~60% of injections (mean 101s vs GLM's 31s), truncated advice is injected anyway, and drift re-advice multiplies the cost (mcmc: ~1500s of a 1600s window advisor-blocked). Advice content is plausible but contradictory at decisive junctures and never rescued a trial. hermes-full ≈ initial-only (small tax, still 4/24, within noise of single). Fixes queued before F1's arm: glm-only proposer pool, drop truncated advice, calm drift cadence. F4 got direct evidence (0%-coverage confident completions).
+
 ## F1 — Async advisor arm
 
 `asyncAdvisor` exists (`src/async-advisor.ts`, config `asyncAdvisor.enabled`, default off, `maxPendingMs` 600s). Advice streams in while the actor keeps working → latency tax → ~0.
