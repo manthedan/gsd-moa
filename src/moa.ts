@@ -71,7 +71,8 @@ export async function runFullMoa(
   }
 
   const guidance = formatReferenceBundle(proposals, failures, synthesis?.text);
-  const usage = addUsage(...proposals.map((proposal) => proposal.usage), synthesis?.usage);
+  const failedCalls = failures.filter((failure) => failure.provider && failure.model);
+  const usage = addUsage(...proposals.map((proposal) => proposal.usage), ...failedCalls.map((failure) => failure.usage), synthesis?.usage);
   const innerCalls: InnerCallDetails[] = [
     ...proposals.map((proposal) => ({
       role: "proposer" as const,
@@ -84,6 +85,19 @@ export async function runFullMoa(
       durationMs: proposal.durationMs,
       selectionReason: proposal.selectionReason,
       effort: proposal.effort,
+    })),
+    ...failedCalls.map((failure) => ({
+      role: "proposer" as const,
+      id: failure.id,
+      label: failure.label,
+      provider: failure.provider!,
+      model: failure.model!,
+      usage: failure.usage,
+      cacheHit: failure.cacheHit,
+      durationMs: failure.durationMs,
+      selectionReason: failure.selectionReason,
+      effort: failure.effort,
+      error: failure.message,
     })),
     ...(synthesis
       ? [{

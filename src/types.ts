@@ -205,6 +205,7 @@ export interface InnerCallDetails {
   durationMs?: number;
   selectionReason?: string;
   effort?: string;
+  error?: string;
 }
 
 export interface PortfolioDecision {

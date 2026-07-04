@@ -257,7 +257,10 @@ describe("full MoA orchestration", () => {
       const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
       assert.equal(details.guidanceInjected, true);
       assert.match(details.portfolio.find((p: any) => p.id === "glm52")?.reason, /failed: glm unavailable Authorization: \[REDACTED_AUTH\]/);
-      assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 1);
+      assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 2);
+      const failedCall = details.innerCalls.find((call: any) => call.role === "proposer" && call.provider === "zai");
+      assert.equal(failedCall.usage, undefined);
+      assert.match(failedCall.error, /glm unavailable Authorization: \[REDACTED_AUTH\]/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -290,8 +293,12 @@ describe("full MoA orchestration", () => {
       const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
       const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
       const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(done.message.usage.totalTokens, 8);
       assert.equal(details.referenceFailures[0].provider, "zai");
       assert.equal(typeof details.referenceFailures[0].durationMs, "number");
+      const failedCall = details.innerCalls.find((call: any) => call.role === "proposer" && call.provider === "zai");
+      assert.equal(failedCall.usage.totalTokens, 2);
+      assert.match(failedCall.error, /timed out after 120s/);
       assert.match(details.portfolio.find((p: any) => p.id === "glm52")?.reason, /failed: timed out after 120s/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -323,8 +330,10 @@ describe("full MoA orchestration", () => {
       const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
       const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
       const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
-      assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 1);
+      assert.equal(done.message.usage.totalTokens, 6);
+      assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 2);
       assert.equal(details.referenceFailures[0].message, "hit token limit");
+      assert.equal(details.referenceFailures[0].usage.totalTokens, 2);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
