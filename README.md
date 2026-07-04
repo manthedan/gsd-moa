@@ -255,6 +255,10 @@ The Terminal-Bench aggregator (`npm run tb:report -- --dir <jobs>`) scans trial 
 
 OMP/pi currently expose web-search provider selection/exclusion settings, but no settings-file domain deny-list for web tools was found in `@oh-my-pi/pi-coding-agent` (`settings-schema.ts` / `src/web`). Therefore the Harbor adapter only passes `GSD_MOA_BENCH_INTEGRITY` through to the provider; it cannot enforce a domain blocklist at the tool layer. The directive plus post-hoc aggregator audit cover web-search/read usage. Shell commands such as `bash`/`curl` are not blockable by this mechanism.
 
+## Droid control arm
+
+`harbor_agents/droid_agent.py` runs Factory `droid exec` as a Harbor bare-harness control against the same CLIProxy endpoint, bypassing the gsd-moa provider. Current Droid BYOK docs do not support reasoning effort for custom models, so `DROID_REASONING_EFFORT` is logged but not passed; this arm measures Droid at backend/default effort. See [`docs/DROID-CONTROL.md`](docs/DROID-CONTROL.md).
+
 ## Observability
 
 Final assistant messages include `gsd-moa.details`, which records:
