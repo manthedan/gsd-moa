@@ -60,10 +60,17 @@ export interface PromptConfig {
   fullMoaVersion: string;
 }
 
+export interface CheckpointScopesConfig {
+  initial: boolean;
+  drift: boolean;
+  failure: boolean;
+}
+
 export interface CheckpointPolicyConfig {
   enabled: boolean;
   maxToolResults: number;
   driftToolResultThreshold: number;
+  scopes: CheckpointScopesConfig;
 }
 
 export type TimePhase = "explore" | "implement" | "validate" | "reserve";
@@ -225,6 +232,14 @@ export interface FullMoaFailure {
   id: string;
   label: string;
   message: string;
+  provider?: string;
+  model?: string;
+  usage?: Usage;
+  cacheHit?: boolean;
+  key?: string;
+  durationMs?: number;
+  selectionReason?: string;
+  effort?: string;
 }
 
 export interface FullMoaResult {
@@ -261,6 +276,7 @@ export interface MoaRunDetails {
   guidanceInjected?: boolean;
   guidanceSkippedReason?: string;
   synthesisFailedReason?: string;
+  referenceFailures?: FullMoaFailure[];
   timeAware?: {
     remainingMs: number;
     elapsedMs?: number;

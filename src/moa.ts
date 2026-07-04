@@ -1,7 +1,7 @@
 import type { Context, SimpleStreamOptions, UserMessage } from "./pi-compat.js";
 import { resolveProposerRoute, resolveSynthesisRoute } from "./config.js";
 import { benchmarkIntegrityReferenceLine, latestUserText, redactSensitiveText, sanitizeReferenceContext } from "./context.js";
-import { runReferenceCall } from "./reference-call.js";
+import { ReferenceCallError, runReferenceCall } from "./reference-call.js";
 import { formatReferenceTimeLine } from "./time.js";
 import type { TraceRecorder } from "./trace.js";
 import type {
@@ -49,7 +49,7 @@ export async function runFullMoa(
   settled.forEach((result, index) => {
     if (result.status === "rejected") {
       const decision = selected[index]!;
-      failures.push({ id: decision.id, label: decision.label, message: safeErrorMessage(result.reason) });
+      failures.push(formatProposerFailure(decision.id, decision.label, decision.reason, result.reason));
     }
   });
   const failedById = new Map(failures.map((failure) => [failure.id, failure.message]));
@@ -306,6 +306,26 @@ function explicitIncludeIds(text: string): Set<string> {
   const ids = new Set<string>();
   for (const match of text.matchAll(/(?:gsd-moa:include|moa:include)\s*=\s*([a-z0-9_.-]+)/gi)) ids.add(match[1]);
   return ids;
+}
+
+function formatProposerFailure(id: string, label: string, selectionReason: string, error: unknown): FullMoaFailure {
+  const message = safeErrorMessage(error);
+  if (error instanceof ReferenceCallError) {
+    return {
+      id,
+      label,
+      message,
+      provider: error.details.provider,
+      model: error.details.model,
+      usage: error.details.usage,
+      cacheHit: error.details.cacheHit,
+      key: error.details.key,
+      durationMs: error.details.durationMs,
+      selectionReason,
+      effort: error.details.effort,
+    };
+  }
+  return { id, label, message, selectionReason };
 }
 
 function safeErrorMessage(error: unknown): string {

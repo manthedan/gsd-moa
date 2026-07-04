@@ -169,6 +169,47 @@ describe("mode policy", () => {
     }
   });
 
+  it("honors checkpoint scope config and env overrides", () => {
+    const cfg = { ...structuredClone(DEFAULT_CONFIG), checkpoint: { ...structuredClone(DEFAULT_CONFIG.checkpoint), scopes: { initial: true, drift: false, failure: true }, driftToolResultThreshold: 3 } };
+    const initialInput = { alias: "gpt55-glm52-full", latestUserText: "deep review", hasToolResults: false };
+    assert.equal(chooseAction(cfg, chooseMode(cfg, initialInput), initialInput).kind, "run");
+
+    const failureContext: Context = {
+      messages: [
+        { role: "user", content: "deep review", timestamp: 1 },
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "Error: failed" }], isError: true, timestamp: 2 } as any,
+      ],
+    };
+    const failureInput = { alias: "gpt55-glm52-full", latestUserText: latestUserText(failureContext, true), hasToolResults: true, recentToolSummary: buildToolObservationSummary(failureContext) };
+    const failureAction = chooseAction(cfg, chooseMode(cfg, failureInput), failureInput);
+    assert.equal(failureAction.kind, "run");
+    if (failureAction.kind === "run") assert.equal(failureAction.scope, "failure");
+
+    const driftContext: Context = {
+      messages: [
+        { role: "user", content: "<!-- gsd-moa:advisor --> continue", timestamp: 1 },
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "done 1" }], timestamp: 2 } as any,
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-2", content: [{ type: "text", text: "done 2" }], timestamp: 3 } as any,
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-3", content: [{ type: "text", text: "done 3" }], timestamp: 4 } as any,
+      ],
+    };
+    const driftInput = { alias: "gpt55-glm52-advisor", latestUserText: latestUserText(driftContext, true), hasToolResults: true, recentToolSummary: buildToolObservationSummary(driftContext) };
+    assert.deepEqual(chooseAction(cfg, chooseMode(cfg, driftInput), driftInput), { kind: "single", reason: "scope drift disabled" });
+
+    const dir = mkdtempSync(join(tmpdir(), "gsd-moa-scope-env-test-"));
+    const oldScopes = process.env.GSD_MOA_CHECKPOINT_SCOPES;
+    try {
+      process.env.GSD_MOA_CHECKPOINT_SCOPES = "initial,failure";
+      assert.deepEqual(loadConfig("missing.json", dir).checkpoint.scopes, { initial: true, drift: false, failure: true });
+      process.env.GSD_MOA_CHECKPOINT_SCOPES = "initial,unknown";
+      assert.throws(() => loadConfig("missing.json", dir), /unsupported scope: unknown/);
+    } finally {
+      if (oldScopes === undefined) delete process.env.GSD_MOA_CHECKPOINT_SCOPES;
+      else process.env.GSD_MOA_CHECKPOINT_SCOPES = oldScopes;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("redacts credentials from compact tool observation summaries", () => {
     const context: Context = {
       messages: [

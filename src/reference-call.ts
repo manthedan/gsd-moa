@@ -1,4 +1,4 @@
-import type { Context, SimpleStreamOptions, Usage } from "./pi-compat.js";
+import type { AssistantMessage, Context, SimpleStreamOptions, Usage } from "./pi-compat.js";
 import { readCacheByKey, referenceCacheKey, writeAdvisorCache } from "./cache.js";
 import { assistantText } from "./context.js";
 import type { TraceRecorder, TraceReferenceCall } from "./trace.js";
@@ -24,6 +24,15 @@ export interface ReferenceCallResult {
   model: string;
   durationMs: number;
   effort?: string;
+}
+
+export type ReferenceCallFailureDetails = Omit<ReferenceCallResult, "text">;
+
+export class ReferenceCallError extends Error {
+  constructor(message: string, readonly details: ReferenceCallFailureDetails) {
+    super(message);
+    this.name = "ReferenceCallError";
+  }
 }
 
 export async function runReferenceCall(
@@ -71,38 +80,62 @@ export async function runReferenceCall(
     };
   }
 
+  const { options: callOptions, effectiveTimeoutMs, timeoutSignal } = referenceStreamOptionsForRoute(config, route, metadata, options, timeState);
+  const model = routeToModel(route);
+  let message: AssistantMessage;
   try {
-    const callOptions = referenceStreamOptionsForRoute(config, route, metadata, options, timeState);
-    const model = routeToModel(route);
-    const message = await upstream.complete(model, context, callOptions);
-    const text = assistantText(message).trim();
-    if (text) writeAdvisorCache(config, key, text, message.usage);
-    const endedAt = Date.now();
-    trace?.recordReferenceCall({
-      ...traceBase,
-      message,
-      cacheHit: false,
-      endedAt,
-    });
-    return {
-      text,
-      usage: message.usage,
-      cacheHit: false,
-      provider: route.provider,
-      model: route.model,
-      key,
-      durationMs: endedAt - startedAt,
-      effort: effortForTrace(callOptions),
-    };
+    message = await upstream.complete(model, context, callOptions);
   } catch (error) {
+    if (options?.signal?.aborted && !timeoutSignal.aborted) throw error;
+    const endedAt = Date.now();
+    const messageText = timeoutSignal.aborted
+      ? timeoutFailureMessage(effectiveTimeoutMs)
+      : errorMessage(error);
+    const details = referenceFailureDetails(route, key, false, endedAt - startedAt, undefined, effortForTrace(callOptions));
     trace?.recordReferenceFailure({
       ...traceBase,
       cacheHit: false,
-      error: errorMessage(error),
-      endedAt: Date.now(),
+      error: messageText,
+      endedAt,
     });
-    throw error;
+    throw new ReferenceCallError(messageText, details);
   }
+
+  const rawText = assistantText(message).trim();
+  const endedAt = Date.now();
+  const durationMs = endedAt - startedAt;
+  const effort = effortForTrace(callOptions);
+  const details = referenceFailureDetails(route, key, false, durationMs, message.usage, effort);
+  const classification = classifyReferenceMessage(metadata, message, rawText, effectiveTimeoutMs);
+  if (!classification.ok) {
+    trace?.recordReferenceFailure({
+      ...traceBase,
+      message,
+      cacheHit: false,
+      error: classification.message,
+      endedAt,
+    });
+    throw new ReferenceCallError(classification.message, details);
+  }
+
+  const text = classification.text;
+  if (text) writeAdvisorCache(config, key, text, message.usage);
+  trace?.recordReferenceCall({
+    ...traceBase,
+    message,
+    cacheHit: false,
+    endedAt,
+  });
+  return {
+    text,
+    usage: message.usage,
+    cacheHit: false,
+    provider: route.provider,
+    model: route.model,
+    key,
+    durationMs,
+    effort,
+  };
 }
 
 function referenceCacheControlsForRoute(config: GsdMoaConfig, route: UpstreamRoute, metadata: ReferenceCallMetadata, options?: SimpleStreamOptions) {
@@ -118,7 +151,7 @@ function referenceMaxTokensForMetadata(config: GsdMoaConfig, metadata: Reference
   return metadata.role === "synthesizer" ? undefined : metadata.maxTokens ?? config.referenceMaxTokens;
 }
 
-function referenceStreamOptionsForRoute(config: GsdMoaConfig, route: UpstreamRoute, metadata: ReferenceCallMetadata, options?: SimpleStreamOptions, timeState?: TimeState): SimpleStreamOptions {
+function referenceStreamOptionsForRoute(config: GsdMoaConfig, route: UpstreamRoute, metadata: ReferenceCallMetadata, options?: SimpleStreamOptions, timeState?: TimeState): { options: SimpleStreamOptions; effectiveTimeoutMs: number; timeoutSignal: AbortSignal } {
   const base = streamOptionsForRoute(route, options, config.defaultEffort);
   const referenceMaxTokens = referenceMaxTokensForMetadata(config, metadata);
   const timeBudgetMs = referenceBudgetMs(config.timeAware, timeState);
@@ -128,10 +161,36 @@ function referenceStreamOptionsForRoute(config: GsdMoaConfig, route: UpstreamRou
   const timeoutSignal = AbortSignal.timeout(effectiveTimeoutMs);
   const signals = [options?.signal, timeoutSignal].filter((signal): signal is AbortSignal => Boolean(signal));
   return {
-    ...base,
-    ...(referenceMaxTokens !== undefined ? { maxTokens: referenceMaxTokens } : {}),
-    signal: signals.length === 1 ? signals[0] : AbortSignal.any(signals),
+    options: {
+      ...base,
+      ...(referenceMaxTokens !== undefined ? { maxTokens: referenceMaxTokens } : {}),
+      signal: signals.length === 1 ? signals[0] : AbortSignal.any(signals),
+    },
+    effectiveTimeoutMs,
+    timeoutSignal,
   };
+}
+
+function classifyReferenceMessage(metadata: ReferenceCallMetadata, message: AssistantMessage, text: string, effectiveTimeoutMs: number): { ok: true; text: string } | { ok: false; message: string } {
+  if (message.stopReason === "aborted") return { ok: false, message: timeoutFailureMessage(effectiveTimeoutMs) };
+  if (message.stopReason === "length" && metadata.role !== "synthesizer") {
+    if (text.length < 500) return { ok: false, message: "hit token limit" };
+    return { ok: true, text: `${text}\n\n[advisory truncated at token limit]` };
+  }
+  return { ok: true, text };
+}
+
+function timeoutFailureMessage(effectiveTimeoutMs: number): string {
+  return `timed out after ${formatSeconds(effectiveTimeoutMs)}s (partial output discarded)`;
+}
+
+function formatSeconds(ms: number): string {
+  const seconds = ms / 1000;
+  return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(1).replace(/\.0$/, "");
+}
+
+function referenceFailureDetails(route: UpstreamRoute, key: string, cacheHit: boolean, durationMs: number, usage: Usage | undefined, effort: string | undefined): ReferenceCallFailureDetails {
+  return { usage, cacheHit, key, provider: route.provider, model: route.model, durationMs, effort };
 }
 
 function errorMessage(error: unknown): string {

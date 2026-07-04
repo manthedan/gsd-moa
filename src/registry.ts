@@ -189,6 +189,12 @@ export function applyNoSynthesisPreset(config: GsdMoaConfig): GsdMoaConfig {
   return cfg;
 }
 
+export function applyGlmOnlyReferencePreset(config: GsdMoaConfig): GsdMoaConfig {
+  const cfg = structuredClone(config);
+  cfg.fullMoa.proposers = cfg.fullMoa.proposers.filter((proposer) => proposer.id === "glm52");
+  return cfg;
+}
+
 export function applyInitialOnlyCheckpointPreset(config: GsdMoaConfig): GsdMoaConfig {
   const cfg = structuredClone(config);
   cfg.checkpoint.enabled = false;
@@ -349,6 +355,7 @@ function mergePresetSpecialist(defaults: FullMoaProposerConfig, override: FullMo
 const CLIPROXY_CODEX_THEN_GEMINI = composeAliasPreset(applyCliproxyCodexPreset, applyUnconditionalGeminiPreset);
 const CLIPROXY_CODEX_THEN_CLAUDE_OPUS = composeAliasPreset(applyCliproxyCodexPreset, applyUnconditionalClaudeOpusPreset);
 const CLIPROXY_CODEX_THEN_NO_SYNTHESIS = composeAliasPreset(applyCliproxyCodexPreset, applyNoSynthesisPreset);
+const CLIPROXY_CODEX_THEN_GLM_ONLY_NO_SYNTHESIS = composeAliasPreset(applyCliproxyCodexPreset, applyNoSynthesisPreset, applyGlmOnlyReferencePreset);
 const CLIPROXY_CODEX_HERMES_FULL = composeAliasPreset(applyCliproxyCodexPreset, applyNoSynthesisPreset, applyInitialOnlyCheckpointPreset);
 
 export const ALIAS_PRESETS = [
@@ -366,6 +373,7 @@ export const ALIAS_PRESETS = [
   { id: "gpt55-cliproxycodex-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (Full MoA)", mode: "full_moa", apply: applyCliproxyCodexPreset },
   { id: "gpt55-cliproxycodex-auto", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (Auto)", mode: "auto", apply: applyCliproxyCodexPreset },
   { id: "gpt55-cliproxycodex-glm52-nosynth-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 refs (No Synth)", mode: "full_moa", apply: CLIPROXY_CODEX_THEN_NO_SYNTHESIS },
+  { id: "gpt55-cliproxycodex-glm52only-nosynth-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2-only refs (No Synth)", mode: "full_moa", apply: CLIPROXY_CODEX_THEN_GLM_ONLY_NO_SYNTHESIS },
   { id: "gpt55-cliproxycodex-glm52-hermes-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 refs (Hermes-style Full MoA)", mode: "full_moa", apply: CLIPROXY_CODEX_HERMES_FULL },
   { id: "gpt55-cliproxycodex-glm52-gemini35flash-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 + Gemini Flash (Full MoA)", mode: "full_moa", apply: CLIPROXY_CODEX_THEN_GEMINI },
   { id: "gpt55-cliproxycodex-glm52-claudeopus48-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 + Claude Opus 4.8 (Full MoA)", mode: "full_moa", apply: CLIPROXY_CODEX_THEN_CLAUDE_OPUS },

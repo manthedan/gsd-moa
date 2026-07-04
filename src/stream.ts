@@ -103,7 +103,7 @@ export function streamGsdMoa(
           guidanceSkippedReason = `full_moa failed: ${safeErrorMessage(error)}`;
           diagnosticPolicy = { ...policy, mode: "single", reason: guidanceSkippedReason };
         }
-      } else if (requestedPolicy.mode !== "single" && contextIsToolLoopContinuation) {
+      } else if (requestedPolicy.mode !== "single" || (contextIsToolLoopContinuation && requestedPolicy.requestedMode !== "single")) {
         guidanceInjected = false;
         guidanceSkippedReason = action.reason;
       }
@@ -191,6 +191,7 @@ function moaDiagnostic(
     guidanceInjected,
     ...(guidanceSkippedReason ? { guidanceSkippedReason } : {}),
     ...(fullMoa?.synthesisError ? { synthesisFailedReason: fullMoa.synthesisError } : {}),
+    ...(fullMoa?.failures.length ? { referenceFailures: fullMoa.failures } : {}),
     ...(config.benchmarkIntegrity ? { benchmarkIntegrity: true } : {}),
     ...(timeState ? {
       timeAware: {

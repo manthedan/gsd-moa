@@ -136,6 +136,7 @@ export const DEFAULT_CONFIG: GsdMoaConfig = {
     enabled: true,
     maxToolResults: 4,
     driftToolResultThreshold: 3,
+    scopes: { initial: true, drift: true, failure: true },
   },
   timeAware: {
     enabled: true,
@@ -311,7 +312,7 @@ function parseConfigFile(fullPath: string, displayPath: string): GsdMoaConfig {
     cache: isRecord(parsed.cache) ? { ...DEFAULT_CONFIG.cache, ...parsed.cache } as GsdMoaConfig["cache"] : structuredClone(DEFAULT_CONFIG.cache),
     trace: isRecord(parsed.trace) ? { ...DEFAULT_CONFIG.trace, ...parsed.trace } as GsdMoaConfig["trace"] : structuredClone(DEFAULT_CONFIG.trace),
     prompts: isRecord(parsed.prompts) ? { ...DEFAULT_CONFIG.prompts, ...parsed.prompts } as GsdMoaConfig["prompts"] : structuredClone(DEFAULT_CONFIG.prompts),
-    checkpoint: isRecord(parsed.checkpoint) ? { ...DEFAULT_CONFIG.checkpoint, ...parsed.checkpoint } as GsdMoaConfig["checkpoint"] : structuredClone(DEFAULT_CONFIG.checkpoint),
+    checkpoint: mergeCheckpoint(parsed.checkpoint),
     timeAware: isRecord(parsed.timeAware) ? { ...DEFAULT_CONFIG.timeAware, ...parsed.timeAware } as GsdMoaConfig["timeAware"] : structuredClone(DEFAULT_CONFIG.timeAware),
     asyncAdvisor: isRecord(parsed.asyncAdvisor) ? { ...DEFAULT_CONFIG.asyncAdvisor, ...parsed.asyncAdvisor } as GsdMoaConfig["asyncAdvisor"] : structuredClone(DEFAULT_CONFIG.asyncAdvisor),
     referenceTimeoutMs: typeof parsed.referenceTimeoutMs === "number" ? parsed.referenceTimeoutMs : DEFAULT_CONFIG.referenceTimeoutMs,
@@ -350,6 +351,9 @@ function applyEnvOverrides(cfg: GsdMoaConfig): void {
   }
   if (process.env.GSD_MOA_CHECKPOINT_DRIFT_TOOL_RESULTS !== undefined) {
     cfg.checkpoint.driftToolResultThreshold = Number(process.env.GSD_MOA_CHECKPOINT_DRIFT_TOOL_RESULTS);
+  }
+  if (process.env.GSD_MOA_CHECKPOINT_SCOPES !== undefined) {
+    cfg.checkpoint.scopes = parseCheckpointScopes(process.env.GSD_MOA_CHECKPOINT_SCOPES);
   }
   if (process.env.GSD_MOA_TIME_AWARE !== undefined) {
     cfg.timeAware.enabled = /^(1|true|yes|on)$/i.test(process.env.GSD_MOA_TIME_AWARE);
@@ -421,6 +425,7 @@ export function validateConfig(cfg: GsdMoaConfig): void {
   if (!Number.isInteger(cfg.checkpoint.driftToolResultThreshold) || cfg.checkpoint.driftToolResultThreshold < 1) {
     throw new Error("checkpoint.driftToolResultThreshold must be a positive integer");
   }
+  validateCheckpointScopes(cfg.checkpoint.scopes);
   validateTimeAware(cfg.timeAware);
   if (typeof cfg.asyncAdvisor.enabled !== "boolean") throw new Error("asyncAdvisor.enabled must be boolean");
   if (!Number.isInteger(cfg.asyncAdvisor.maxPendingMs) || cfg.asyncAdvisor.maxPendingMs < 1) {
@@ -495,6 +500,40 @@ function mergeRoutePresets(defaults: GsdMoaConfig["routePresets"], overrides: Re
     merged[name] = mergeRoute(existing as UpstreamRoute, override);
   }
   return merged;
+}
+
+function mergeCheckpoint(override: unknown): GsdMoaConfig["checkpoint"] {
+  if (!isRecord(override)) return structuredClone(DEFAULT_CONFIG.checkpoint);
+  return {
+    ...structuredClone(DEFAULT_CONFIG.checkpoint),
+    ...override,
+    scopes: isRecord(override.scopes)
+      ? { ...DEFAULT_CONFIG.checkpoint.scopes, ...override.scopes } as GsdMoaConfig["checkpoint"]["scopes"]
+      : structuredClone(DEFAULT_CONFIG.checkpoint.scopes),
+  } as GsdMoaConfig["checkpoint"];
+}
+
+function parseCheckpointScopes(raw: string): GsdMoaConfig["checkpoint"]["scopes"] {
+  const allowed = new Set(["initial", "drift", "failure"]);
+  const scopes = { initial: false, drift: false, failure: false };
+  for (const piece of raw.split(",")) {
+    const scope = piece.trim();
+    if (!scope) continue;
+    if (!allowed.has(scope)) throw new Error(`checkpoint.scopes contains unsupported scope: ${scope}`);
+    scopes[scope as keyof typeof scopes] = true;
+  }
+  return scopes;
+}
+
+function validateCheckpointScopes(scopes: GsdMoaConfig["checkpoint"]["scopes"]): void {
+  if (!isRecord(scopes)) throw new Error("checkpoint.scopes must be an object");
+  const allowed = new Set(["initial", "drift", "failure"]);
+  for (const scope of Object.keys(scopes)) {
+    if (!allowed.has(scope)) throw new Error(`checkpoint.scopes contains unsupported scope: ${scope}`);
+  }
+  for (const scope of ["initial", "drift", "failure"] as const) {
+    if (typeof scopes[scope] !== "boolean") throw new Error(`checkpoint.scopes.${scope} must be boolean`);
+  }
 }
 
 function mergeFullMoa(defaults: FullMoaConfig, override: unknown): FullMoaConfig {
@@ -583,8 +622,8 @@ function validateOptionalPositiveInteger(label: string, value: unknown): void {
 
 function validateFullMoa(fullMoa: FullMoaConfig, reference: UpstreamRoute, routePresets: GsdMoaConfig["routePresets"]): void {
   if (typeof fullMoa.enabled !== "boolean") throw new Error("fullMoa.enabled must be boolean");
-  if (!Array.isArray(fullMoa.proposers) || fullMoa.proposers.length < 2) {
-    throw new Error("fullMoa.proposers must contain at least two proposers");
+  if (!Array.isArray(fullMoa.proposers) || fullMoa.proposers.length < 1) {
+    throw new Error("fullMoa.proposers must contain at least one proposer");
   }
   const ids = new Set<string>();
   for (const proposer of fullMoa.proposers) {

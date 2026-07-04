@@ -79,12 +79,12 @@ export function chooseAction(config: GsdMoaConfig, policy: PolicyDecision, input
 
   if (!input.hasToolResults) {
     if (policy.mode === "advisor" || policy.mode === "full_moa") {
-      return {
+      return scopedRun(config, {
         kind: "run",
         mode: policy.mode,
         scope: explicitAdvisor || explicitFull ? "explicit" : "initial",
         reason: policy.reason,
-      };
+      });
     }
     return { kind: "single", reason: policy.reason };
   }
@@ -103,20 +103,20 @@ export function chooseAction(config: GsdMoaConfig, policy: PolicyDecision, input
     const requested = policy.requestedMode === "full_moa" || policy.mode === "full_moa";
     const repeatedOrSevere = summary.failedToolResultCount >= 2 || summary.latestFailureSignals.includes("timeout") || summary.latestFailureSignals.includes("process-crash");
     const mode = requested || repeatedOrSevere ? "full_moa" : "advisor";
-    return {
+    return scopedRun(config, {
       kind: "run",
       mode: mode === "full_moa" && config.fullMoa.enabled ? "full_moa" : "advisor",
       scope: "failure",
       reason: `MoA checkpoint after latest tool failure: ${summary.latestFailureSignals.join(", ")}`,
       observationSummary: summary,
-    };
+    });
   }
 
   const driftEligible = policy.mode === "advisor" || policy.mode === "full_moa" || policy.requestedMode === "auto";
   if (summary && summary.totalToolResultCount > 0 && summary.totalToolResultCount % config.checkpoint.driftToolResultThreshold === 0 && driftEligible) {
     const baseMode = policy.mode === "full_moa" && config.fullMoa.enabled ? "full_moa" : "advisor";
     const mode = config.timeAware.downgradeInValidate && input.timeState?.phase === "validate" && baseMode === "full_moa" ? "advisor" : baseMode;
-    return {
+    return scopedRun(config, {
       kind: "run",
       mode,
       scope: "drift",
@@ -124,10 +124,15 @@ export function chooseAction(config: GsdMoaConfig, policy: PolicyDecision, input
         ? `MoA drift checkpoint after ${summary.totalToolResultCount} total tool results; downgraded to advisor during validate phase`
         : `MoA drift checkpoint after ${summary.totalToolResultCount} total tool results`,
       observationSummary: summary,
-    };
+    });
   }
 
   return { kind: "single", reason: "tool-loop continuation without checkpoint signal" };
+}
+
+function scopedRun(config: GsdMoaConfig, action: Extract<MoaAction, { kind: "run" }>): MoaAction {
+  if (action.scope === "explicit") return action;
+  return config.checkpoint.scopes[action.scope] ? action : { kind: "single", reason: `scope ${action.scope} disabled` };
 }
 
 function shouldSuppressForReserve(config: GsdMoaConfig, input: PolicyInput): boolean {

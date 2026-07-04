@@ -137,6 +137,24 @@ describe("alias registry", () => {
     }
   });
 
+  it("registers the GLM-only no-synthesis alias with a single GLM proposer", () => {
+    const id = "gpt55-cliproxycodex-glm52only-nosynth-full";
+    const registered = ALIAS_PRESETS.find((entry) => entry.id === id);
+    assert.ok(registered);
+    assert.equal(registered.name, "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2-only refs (No Synth)");
+    const fp = fingerprint(id);
+    assert.deepEqual(fp, {
+      ...CODEX_FP,
+      synthesis: { ...CODEX_FP.synthesis, enabled: false },
+      proposers: [CODEX_FP.proposers[0]],
+    });
+    const cfg = applyModelPreset(structuredClone(DEFAULT_CONFIG), id);
+    assert.equal(cfg.fullMoa.proposers.length, 1);
+    assert.equal(resolveProposerRoute(cfg.reference, cfg.fullMoa.proposers[0]!, cfg.routePresets).provider, "zai");
+    assert.equal(buildDefaultAliasMap()[id]?.mode, "full_moa");
+    assert.ok(GSD_MOA_MODELS.find((model) => model.id === id));
+  });
+
   it("registers the Hermes-style no-synthesis alias with initial-only checkpoints", () => {
     const id = "gpt55-cliproxycodex-glm52-hermes-full";
     const registered = ALIAS_PRESETS.find((entry) => entry.id === id);

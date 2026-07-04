@@ -263,6 +263,105 @@ describe("full MoA orchestration", () => {
     }
   });
 
+  it("drops aborted proposer output and retains failure latency in diagnostics", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    try {
+      const context: Context = { messages: [{ role: "user", content: "<!-- gsd-moa:full --> deep review", timestamp: 1 }] };
+      const upstream: UpstreamClient = {
+        async complete(seenModel, seenContext) {
+          if (seenModel.provider === "zai") return { ...message(seenModel, "partial aborted advice", usage(1, 1)), stopReason: "aborted" as any };
+          if ((seenContext.systemPrompt ?? "").includes("private synthesizer layer")) {
+            assert.doesNotMatch(JSON.stringify(seenContext.messages), /partial aborted advice/);
+            assert.match(JSON.stringify(seenContext.messages), /\[failed: timed out after 120s \(partial output discarded\)\]/);
+            return message(seenModel, "synthesis", usage(1, 1));
+          }
+          return message(seenModel, "complete advice", usage(1, 1));
+        },
+        stream(seenModel, seenContext) {
+          const finalMessages = JSON.stringify(seenContext.messages);
+          assert.match(finalMessages, /complete advice/);
+          assert.match(finalMessages, /\[failed: timed out after 120s \(partial output discarded\)\]/);
+          assert.doesNotMatch(finalMessages, /partial aborted advice/);
+          return streamText(seenModel, "final", usage(1, 1));
+        },
+      };
+
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.referenceFailures[0].provider, "zai");
+      assert.equal(typeof details.referenceFailures[0].durationMs, "number");
+      assert.match(details.portfolio.find((p: any) => p.id === "glm52")?.reason, /failed: timed out after 120s/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps substantial length-stopped advice with a marker and drops tiny token-limit fragments", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    cfg.fullMoa.synthesis.enabled = false;
+    try {
+      const longAdvice = "a".repeat(500);
+      const context: Context = { messages: [{ role: "user", content: "<!-- gsd-moa:full --> deep review", timestamp: 1 }] };
+      const upstream: UpstreamClient = {
+        async complete(seenModel) {
+          if (seenModel.provider === "zai") return { ...message(seenModel, longAdvice, usage(1, 1)), stopReason: "length" as any };
+          return { ...message(seenModel, "tiny fragment", usage(1, 1)), stopReason: "length" as any };
+        },
+        stream(seenModel, seenContext) {
+          const finalMessages = JSON.stringify(seenContext.messages);
+          assert.match(finalMessages, /advisory truncated at token limit/);
+          assert.match(finalMessages, new RegExp(longAdvice));
+          assert.match(finalMessages, /\[failed: hit token limit\]/);
+          assert.doesNotMatch(finalMessages, /tiny fragment/);
+          return streamText(seenModel, "final", usage(1, 1));
+        },
+      };
+
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 1);
+      assert.equal(details.referenceFailures[0].message, "hit token limit");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("validates and runs a single-proposer full MoA pool", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    cfg.fullMoa.proposers = [cfg.fullMoa.proposers[0]!];
+    try {
+      const context: Context = { messages: [{ role: "user", content: "<!-- gsd-moa:full --> deep review", timestamp: 1 }] };
+      let completeCalls = 0;
+      const upstream: UpstreamClient = {
+        async complete(seenModel, seenContext) {
+          completeCalls++;
+          if ((seenContext.systemPrompt ?? "").includes("private synthesizer layer")) return message(seenModel, "synthesis", usage(1, 1));
+          return message(seenModel, "only glm advice", usage(1, 1));
+        },
+        stream(seenModel, seenContext) {
+          assert.match(JSON.stringify(seenContext.messages), /only glm advice/);
+          assert.match(JSON.stringify(seenContext.messages), /Synthesis \/ execution memo/);
+          return streamText(seenModel, "final", usage(1, 1));
+        },
+      };
+
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      assert.equal(done.type, "done");
+      assert.equal(completeCalls, 2);
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 1);
+      assert.equal(details.innerCalls.some((call: any) => call.role === "synthesizer"), true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("caps proposer output with global and per-proposer referenceMaxTokens but leaves synthesis and final uncapped", async () => {
     const { cfg, dir } = tempConfig();
     cfg.cache.enabled = false;
