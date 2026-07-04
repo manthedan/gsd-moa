@@ -1,6 +1,10 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench experiments
 
-Last updated: 2026-07-03 ~20:00 PT, session closeout. Nothing is running.
+Last updated: 2026-07-03 ~19:55 PT. **S2 matrix RUNNING on yukon** (started 19:53 PT, ~8–9h, detached):
+```bash
+ssh yukon 'tail -3 ~/projects/gsd-moa/s2.log; pgrep -f "[r]un-slice2.sh" >/dev/null && echo RUNNING'
+```
+Arms on `eefef56`, k=3, standard config (effort high, integrity on, real per-task budgets): `s2-single` / `s2-ckpt-full` (nosynth) / `s2-hermes-full` × 8 tasks (mcmc, gcode, overfull, extract-elf, dna, raman, torch, caffe) + `s2-pi-single` × the 4 passable tasks (capability check backing the omp decision — the probe's 0-0 tie had no discriminating power; this arm runs where passes actually happen). Ends with `S2 DONE`. Aggregate with the integrity-scored aggregator; the ckpt-vs-hermes pair differs ONLY in checkpoint re-advice (both no-synthesis) — this is the MoA core-question ablation.
 
 ## Where you are
 
