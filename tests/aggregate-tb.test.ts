@@ -1,9 +1,22 @@
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { TBENCH_INTEGRITY_PATTERNS, aggregateTbResults, renderMarkdown } from "../scripts/aggregate-tb-results.ts";
+import { TBENCH_INTEGRITY_PATTERNS, aggregateTbResults, renderMarkdown, scanTrialIntegrity } from "../scripts/aggregate-tb-results.ts";
 
 const fixtureDir = join(process.cwd(), "tests", "fixtures", "tb-jobs");
+
+function makeTempTrial(): string {
+  return mkdtempSync(join(tmpdir(), "gsd-moa-droid-integrity-"));
+}
+
+function writeAgentFile(trialDir: string, path: string, text: string): string {
+  const file = join(trialDir, "agent", ...path.split("/"));
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, text);
+  return file;
+}
 
 describe("Terminal-Bench results aggregation", () => {
   it("groups trials and summarizes pass rate, exceptions, and MoA telemetry", () => {
@@ -57,5 +70,66 @@ describe("Terminal-Bench results aggregation", () => {
     assert.match(markdown, /integrity: 1 unknown/);
     assert.match(markdown, /efforts \{primary: unset, proposer: unset\}/);
     assert.match(markdown, /Voids/);
+  });
+
+  it("scans clean Droid stream-jsonl logs when Pi logs are absent", () => {
+    const trialDir = makeTempTrial();
+    try {
+      const droidStream = writeAgentFile(trialDir, "droid/output.stream-jsonl", "{\"type\":\"message\",\"content\":\"all good\"}\n");
+
+      const integrity = scanTrialIntegrity(trialDir);
+
+      assert.equal(integrity.status, "clean");
+      assert.deepEqual(integrity.scannedFiles, [droidStream]);
+    } finally {
+      rmSync(trialDir, { recursive: true, force: true });
+    }
+  });
+
+  it("marks Droid stream-jsonl logs tainted and would-pass zeroed", () => {
+    const trialDir = makeTempTrial();
+    try {
+      const droidStream = writeAgentFile(trialDir, "droid/output.stream-jsonl", "Droid mentioned tbench.ai in output\n");
+
+      const integrity = scanTrialIntegrity(trialDir, 1);
+
+      assert.equal(integrity.status, "tainted");
+      assert.equal(integrity.wouldPassZeroed, true);
+      assert.deepEqual(integrity.matchedPatterns, ["tbench.ai"]);
+      assert.deepEqual(integrity.scannedFiles, [droidStream]);
+    } finally {
+      rmSync(trialDir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to Droid output.txt when stream-jsonl is missing", () => {
+    const trialDir = makeTempTrial();
+    try {
+      const droidText = writeAgentFile(trialDir, "droid/output.txt", "plain stdout without benchmark leakage\n");
+
+      const integrity = scanTrialIntegrity(trialDir);
+
+      assert.equal(integrity.status, "clean");
+      assert.deepEqual(integrity.scannedFiles, [droidText]);
+    } finally {
+      rmSync(trialDir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves Pi log priority over Droid logs", () => {
+    const trialDir = makeTempTrial();
+    try {
+      const piLog = writeAgentFile(trialDir, "pi-gsd-moa/pi-output.jsonl", "clean Pi transcript\n");
+      writeAgentFile(trialDir, "droid/output.stream-jsonl", "Droid mentioned tbench.ai in output\n");
+      writeAgentFile(trialDir, "droid/output.txt", "Droid mentioned tbench.ai in output\n");
+
+      const integrity = scanTrialIntegrity(trialDir, 1);
+
+      assert.equal(integrity.status, "clean");
+      assert.equal(integrity.wouldPassZeroed, false);
+      assert.deepEqual(integrity.scannedFiles, [piLog]);
+    } finally {
+      rmSync(trialDir, { recursive: true, force: true });
+    }
   });
 });

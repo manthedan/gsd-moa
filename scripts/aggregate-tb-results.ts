@@ -288,6 +288,10 @@ function integrityLogFiles(trialDir: string): string[] {
   if (!existsSync(agentDir)) return [];
   const jsonl = findFilesByBasename(agentDir, "pi-output.jsonl");
   if (jsonl.length) return jsonl;
+  const droidStream = join(agentDir, "droid", "output.stream-jsonl");
+  if (existsSync(droidStream)) return [droidStream];
+  const droidText = join(agentDir, "droid", "output.txt");
+  if (existsSync(droidText)) return [droidText];
   const trajectory = join(agentDir, "trajectory.json");
   return existsSync(trajectory) ? [trajectory] : [];
 }

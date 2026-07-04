@@ -73,7 +73,7 @@ harbor run \
 
 ## Follow-up
 
-Integrity sweeps/aggregation do not scan Droid logs yet. Add `/logs/agent/droid/output.stream-jsonl` and/or `/logs/agent/droid/output.txt` to the aggregator's scan list before relying on this arm for contamination checks.
+Integrity sweeps/aggregation now scan Droid transcripts when Pi logs are absent: `agent/droid/output.stream-jsonl` is preferred, falling back to `agent/droid/output.txt` if the stream-jsonl copy is missing.
 
 ## Known risk pending live verification
 
