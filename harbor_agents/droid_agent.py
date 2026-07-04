@@ -166,6 +166,13 @@ class DroidAgent(BaseInstalledAgent):
                 "&&",
                 source_env,
                 'task_cwd="$PWD";',
+                # Session auth: copy the auth.v2 pair from the mounted proof dir
+                # (a working droid login copied from the dev machine). Preferred
+                # over FACTORY_API_KEY, which stays supported via the env file.
+                'auth_dir="${DROID_AUTH_DIR:-/workspace/gsd-moa/.proof/droid-auth}";',
+                'if [ -f "$auth_dir/auth.v2.file" ] && [ -f "$auth_dir/auth.v2.key" ]; then',
+                'mkdir -p "$HOME/.factory" && cp "$auth_dir"/auth.v2.file "$auth_dir"/auth.v2.key "$HOME/.factory/" && chmod 600 "$HOME/.factory"/auth.v2.*;',
+                'fi;',
                 "python3 - <<'PY'\n"
                 "import base64, pathlib\n"
                 f"path = pathlib.Path({prompt_file!r})\n"
@@ -236,10 +243,16 @@ class DroidAgent(BaseInstalledAgent):
             "        data = {}\n"
             f"entry = {{'model': os.environ.get('DROID_MODEL', {DEFAULT_MODEL!r}), "
             f"'displayName': {CUSTOM_DISPLAY_NAME!r}, "
+            f"'id': {CUSTOM_MODEL_SELECTOR!r}, "
+            "'index': 0, "
             "'baseUrl': os.environ.get('GSD_MOA_CODEX_BASE_URL', "
             f"{DEFAULT_BASE_URL!r}), "
             "'apiKey': '${CLIPROXY_API_KEY}', "
-            "'provider': 'generic-chat-completion-api', "
+            # provider 'openai' matches the dev machine's proven CLIProxy custom
+            # model config (droid 0.147.0); the generic provider also works but
+            # the openai path is the one verified against this endpoint.
+            "'provider': 'openai', "
+            "'noImageSupport': False, "
             "'maxOutputTokens': 65536}\n"
             f"custom = [m for m in data.get('customModels', []) if m.get('displayName') != {CUSTOM_DISPLAY_NAME!r}]\n"
             "data['customModels'] = [entry] + custom\n"

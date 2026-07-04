@@ -78,3 +78,9 @@ Integrity sweeps/aggregation do not scan Droid logs yet. Add `/logs/agent/droid/
 ## Known risk pending live verification
 
 `droid exec -m` with custom-model selectors has a reported rejection bug ([Factory-AI/factory#787](https://github.com/Factory-AI/factory/issues/787) — "only the current session default custom model works via --model"). The adapter passes `-m custom:GSD-MOA-Droid-Control-0`; if the runner smoke test hits the rejection, fall back to establishing the custom model as the session default (check `droid exec --help` / current settings schema on the installed version) and drop `-m`.
+
+## Verified locally (droid 0.147.0, 2026-07-04)
+
+- `droid exec -m custom:<id>` **accepts** custom-model selectors on 0.147.0 — issue #787 does not reproduce (an invalid selector is rejected with `Invalid model`, the real one proceeds to execution).
+- The proven working custom-model shape against CLIProxy (from the dev machine's live config) is `provider: "openai"` with explicit `id`/`index` fields; the adapter now writes exactly that shape.
+- Auth: the dev machine's droid session pair (`auth.v2.file` + `auth.v2.key`) is copied to the runner at `.proof/droid-auth/` and installed into the container's `~/.factory/` by the run command (`DROID_AUTH_DIR` overrides the location). `FACTORY_API_KEY` via the env file remains a supported alternative. Session tokens can expire — re-copy from the dev machine if auth failures appear.
