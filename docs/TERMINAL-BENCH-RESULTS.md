@@ -1,5 +1,36 @@
 # Terminal-Bench Evidence Snapshot
 
+Date: 2026-07-04 (S2 matrix + Droid control added). The 2026-07-03 probe section below stands unchanged.
+
+## S2 matrix + Droid bare-harness control (2026-07-04)
+
+Design: 8 tasks (passable four: mcmc, gcode, overfull, extract-elf; hard four: dna, raman, torch, caffe), k=3, standard config, all integrity-scored clean. Our arms on `eefef56`; Droid arm via `harbor_agents/droid_agent.py` (`814729b`+) driving Factory Droid 0.147 `exec` against the **same GPT-5.5 through the same yukon CLIProxy**, at backend-default effort (Droid custom models cannot set reasoning effort).
+
+| Task | omp single (high) | pi single (high) | ckpt-full MoA | hermes-full MoA | **Droid bare (default effort)** |
+|---|---:|---:|---:|---:|---:|
+| mcmc-sampling-stan | 2/3 | 2/3 | 1/3 | 2/3 | **3/3** |
+| gcode-to-text | 1/3 | 0/3 | 0/3 | 0/3† | 1/3 |
+| overfull-hbox | 1/3 | 3/3 | 1/3 | 1/3 | 1/3 |
+| extract-elf | 2/3 | 2/3 | 2/3 | 1/3 | 2/3 |
+| dna-insert | 0/3 | — | 0/3 | 0/3 | **1/3** |
+| raman-fitting | 0/3 | — | 0/3 | 0/3 | 0/3 |
+| torch-tensor-parallelism | 0/3 | — | 0/3 | 0/3 | **2/3** |
+| caffe-cifar-10 | 0/3 | — | 0/3 | 0/3 | 0/3 |
+| **Total** | **6/24** | **7/12** | **4/24** | **4/24** | **10/24 (41.7%)** |
+
+† one hermes gcode trial crashed (NonZeroAgentExitCode); scored 0.
+
+### Reads
+
+1. **Checkpoint re-advice does not earn its cost** (the S2 ablation pair differs only in re-advice: 4/24 = 4/24, both behind single 6/24). Forensics (`docs/S2-FORENSICS.md`) attribute most of the deficit to advisor mechanics: the GPT-5.5 self-proposer aborted at the 120s reference timeout in ~59% of injections with truncated advice injected anyway, and drift re-advice multiplied the cost (advisor time = 66% of ckpt-full wall). Fixes landed (`3f721e7`, `272a2f2`); the s3 validation arm (`glm52only` pool, truncation drop, drift off) tests whether repaired MoA stops losing.
+2. **pi vs omp on the passable four: 7/12 vs 6/12-equivalent — within noise at one job each.** The omp runtime decision stands on the efficiency evidence from the probe.
+3. **The Droid harness beats ours on the same model and proxy: 10/24 vs 6/24, at *default* effort.** It cracked torch (2/3) and dna-insert (1/3) — tasks at 0 across every arm of ours, which we had classed as capability floor. The floor was partly **our harness**: agent loop/tooling/strategy, not the model. Raman and caffe remain 0 for everyone (caffe: cancellations/exits at ceiling in all harnesses).
+4. Consequences: (a) mine Droid's torch/dna stream-jsonl trajectories against ours to localize the loop gap; (b) the prebuilt inverse experiment — gsd-moa as Droid's model (Droid outer harness + our MoA reference layer inner, `gsd-moa-factory-droid-proxy` worktree) — is now the highest-value MoA test bed; (c) effort=high is *not* what separates harnesses (Droid won at default), consistent with the probe's effort finding.
+
+Artifacts: `jobs/s2-*`, `jobs/s2-droid`, `jobs/droid-smoke` on yukon; aggregation via the droid-aware integrity aggregator (`2bd9fc9`).
+
+---
+
 Date: 2026-07-03. Supersedes the 2026-06-28 snapshot (kept below as an appendix note). All pre-2026-07-03 data carries two caveats discovered today: **no run sent a reasoning-effort value** (the public Codex CLI baseline pins `high`), and **every historical mteb-leaderboard "pass" was reward-hacked** per the [leaderboard integrity rules](https://www.tbench.ai/news/leaderboard-integrity-update).
 
 ## The July 3 probe
