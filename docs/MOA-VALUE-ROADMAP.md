@@ -67,12 +67,21 @@ The one place a tool-less second model has a structural edge: catching confident
 1. **Offline replay first ($ small, runs from the laptop against Z.ai; no yukon slot needed):** take s2-single failed trials where the actor finished cleanly (reward 0, no cancellation), feed final workspace state + task statement to a GLM-5.2 reviewer prompt, count real-defect catches vs noise flags. This estimates the effect size before any implementation.
 2. If catch-rate is material: implement a done-gate in the provider (intercept completion, one advisor review, at most one revision round), alias it, arm it.
 
+## H — Harness-gap track (parallel to the MoA F-track; opened 2026-07-04)
+
+The Droid control (10/24 vs our 6/24, same model) proved some of our "capability floor" is really harness quality. Trajectory mining (`docs/TRAJECTORY-MINING.md`) localized the first concrete defect:
+
+- **H1 — Fix Python execution in the omp harness (highest-leverage item found).** In the TB containers our `eval` tool has no Python kernel and our `bash` tool's PATH lacks `python3`, though the image ships Python 3.12 (Droid runs it fine). On `torch-tensor-parallelism` this alone costs the whole task — the agent writes a correct-shaped solution, cannot execute/verify it, and ships blind (0/3 vs Droid 2/3). Fix both breaks (bundle/fallback a py kernel for `eval`; repair the `bash` PATH), then live-smoke `python3 -c 'import torch'` through the tools on the torch image. Likely explains part of the gap beyond these two tasks.
+- **H2 — "install a CLI tool, drive it from Python" recipe** (Droid used apt-get + subprocess for oligotm on `dna-insert`; ours flailed from a JS fallback).
+- **H3 — verification-subagent pattern** (Droid spawned an independent checker worker — the role our MoA reference layer is meant to play; ties into the droid-proxy inverse experiment).
+
 ## Sequencing
 
 ```
-now            F0 forensics (yukon reads) + F1 local smoke + F4 offline replay
-droid done     four-way read → TERMINAL-BENCH-RESULTS.md; pull yukon checkout
-then, serial   F1 arm → F2 impl+arm → F3 arms → F4 arm (if replay says go)
+now            F0 forensics DONE; H1 (python-exec fix) is highest-leverage, do next; F1 local smoke + F4 offline replay
+droid done     four-way read → TERMINAL-BENCH-RESULTS.md DONE; trajectory mining DONE
+s3 done        s3-vs-single F0-fix validation read
+then, serial   H1 fix+verify → F1 arm → F2 impl+arm → F3 arms → F4 arm (if replay says go)
 re-gate        after each arm: kill or continue per criteria above
 ```
 

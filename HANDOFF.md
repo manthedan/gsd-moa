@@ -1,6 +1,8 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench experiments
 
-Last updated: 2026-07-04 ~13:10 PT.
+Last updated: 2026-07-04 ~17:25 PT.
+
+> **Scope note for Fable sessions (read once):** This project benchmarks agent *coding harnesses* on Terminal-Bench. Two standard TB task ids are `dna-insert` (write a `primers.fasta` and validate melting temps by shelling out to the stock Ubuntu `primer3`/`oligotm` CLI) and `mteb`/others. Our work on `dna-insert` is **pure harness forensics** — it only concerns whether the agent's `bash`/`eval`/`python3` tools executed inside the container. It produces and requires **no biological methodology**; treat the name as an opaque benchmark id. Don't let the string "dna" derail the task — the analysis is about Python-on-PATH, not biology.
 
 ## RUNNING RIGHT NOW (check first!)
 
@@ -12,7 +14,11 @@ Alias `gpt55-cliproxycodex-glm52only-nosynth-full` + `GSD_MOA_CHECKPOINT_SCOPES=
 
 **Droid control arm: DONE 15:40 PT — 10/24 (41.7%), all integrity-clean, at backend-default effort.** mcmc 3/3 · extract 2/3 · **torch 2/3** · **dna 1/3** · gcode 1/3 · overfull 1/3 · raman/caffe 0. Beats our best (omp single 6/24) on the same model + CLIProxy → **harness-quality gap, not model gap**; torch/dna were 0 across all our arms. Four-way table + reads: `docs/TERMINAL-BENCH-RESULTS.md` (`e941500`).
 
-**When `S3 DONE`**: aggregate `jobs/s3-glmonly-fixed` (droid-aware aggregator at yukon `/tmp/aggregate-integrity.ts` = `272a2f2` scripts version, refresh if needed); read = s3 vs s2-single 6/24 vs ckpt-full 4/24 (did repaired MoA stop losing?); check `referenceFailures` counts in diagnostics.
+**When `S3 DONE`** (marker lands in `queue.log`, not a separate `s3.log` — the queue `exec`'d the arm): aggregate `jobs/s3-glmonly-fixed` (droid-aware aggregator at yukon `/tmp/aggregate-integrity.ts` = `272a2f2` scripts version, refresh if needed); read = s3 vs s2-single 6/24 vs ckpt-full 4/24 (did repaired MoA stop losing?); check `referenceFailures` counts in diagnostics.
+
+## Trajectory mining — DONE 2026-07-04 (`docs/TRAJECTORY-MINING.md`)
+
+Why Droid passed torch (2/3) + `dna-insert` (1/3) where we scored 0/3 on both, same model/proxy/container: **our omp tools can't run Python in the TB containers.** The `eval` tool has no Python kernel (returns "Python backend is unavailable… Pass language: js or install the python kernel"); the `bash` tool's PATH has no `python`/`python3` (exit 127) even though the image ships Python 3.12 (Droid's Execute runs `python3 --version` → 3.12.3 fine). On torch our agent writes a correct-shaped `parallel_linear.py`, cannot execute/verify it, and ships blind. On dna it's forced into a JS fallback and never closes the `oligotm` validation loop Droid drove from Python. **This is the new highest-leverage item = roadmap H1** (harness-gap track). Fix: bundle/fallback a py kernel for `eval` + repair `bash` PATH, then live-smoke `python3 -c 'import torch'` through the tools on the torch image (needs a free yukon slot — don't interrupt s3). Digests: yukon `/tmp/traj-mining/`, local scratchpad `traj-mining/`.
 
 ## S2 matrix — DONE 2026-07-04 10:49 PT (all integrity-clean)
 
