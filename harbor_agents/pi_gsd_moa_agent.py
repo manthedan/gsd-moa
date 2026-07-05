@@ -121,19 +121,9 @@ class PiGsdMoaAgent(BaseInstalledAgent):
         runtime_tar_default = "/workspace/gsd-moa/.proof/pi-runtime.tar" if cli_mode == "pi" else "/workspace/gsd-moa/.proof/omp-runtime.tar"
         runtime_tar = self._env_value(runtime_tar_key, runtime_tar_default)
 
+        await self._install_system_dependencies(environment, cli_mode)
+
         if cli_mode == "pi":
-            await self.exec_as_root(
-                environment,
-                command=(
-                    "set -e; "
-                    "if command -v apt-get >/dev/null 2>&1; then "
-                    "  apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git python3 unzip; "
-                    "elif command -v apk >/dev/null 2>&1; then apk add --no-cache ca-certificates curl git python3 unzip; "
-                    "elif command -v dnf >/dev/null 2>&1; then dnf install -y ca-certificates curl git python3 unzip; "
-                    "elif command -v yum >/dev/null 2>&1; then yum install -y ca-certificates curl git python3 unzip; "
-                    "fi"
-                ),
-            )
             runtime_prefix = _node_runtime_prefix()
             await self.exec_as_agent(environment, command=runtime_prefix + "node --version")
             if runtime_tar:
@@ -150,30 +140,59 @@ class PiGsdMoaAgent(BaseInstalledAgent):
                 await self._copy_extension_repo(environment, runtime_prefix="", install_deps=False, preserve_runtime=True)
                 return
 
+        runtime_prefix = _runtime_prefix()
+        await self.exec_as_agent(
+            environment,
+            command=runtime_prefix + "node --version && bun --version",
+        )
+        await self._copy_extension_repo(environment, runtime_prefix)
+
+    async def _install_system_dependencies(self, environment: BaseEnvironment, cli_mode: str) -> None:
+        """Install lightweight OS tools needed by Pi/OMP and task-facing tools.
+
+        The prebuilt OMP runtime skips npm/Bun setup, but it must not skip the
+        task container's system toolchain. Terminal-Bench tasks commonly expect
+        the agent's bash/eval tools to find ``python3`` (and many models try
+        ``python`` first), while the ATIF converter also uses ``python3`` after
+        the run. Keep the install narrow and create a ``python`` shim when the
+        distro only ships ``python3``.
+        """
         apk_branch = (
-            "  apk add --no-cache ca-certificates curl git python3 unzip; "
+            "  apk add --no-cache ca-certificates curl git python3 unzip bash; "
             if cli_mode == "pi"
             else "  echo 'ERROR: Alpine/musl base image; @oh-my-pi/pi-natives ships no musl prebuilt' >&2; exit 3; "
+        )
+        musl_guard = (
+            "if ls /lib/ld-musl-* >/dev/null 2>&1; then "
+            "echo 'ERROR: Alpine/musl base image; @oh-my-pi/pi-natives ships no musl prebuilt' >&2; exit 3; "
+            "fi; "
+            if cli_mode == "omp"
+            else ""
         )
         await self.exec_as_root(
             environment,
             command=(
                 "set -e; "
-                "if command -v apt-get >/dev/null 2>&1; then "
-                "  apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git python3 unzip; "
-                "elif command -v apk >/dev/null 2>&1; then "
+                + musl_guard +
+                "need_pkgs=0; "
+                "for bin in bash curl git python3 unzip; do command -v \"$bin\" >/dev/null 2>&1 || need_pkgs=1; done; "
+                "if [ ! -s /etc/ssl/certs/ca-certificates.crt ] && [ ! -s /etc/pki/tls/certs/ca-bundle.crt ] && [ ! -s /etc/ssl/cert.pem ]; then need_pkgs=1; fi; "
+                "if [ \"$need_pkgs\" -ne 0 ]; then "
+                "  if command -v apt-get >/dev/null 2>&1; then "
+                "    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git python3 unzip bash; "
+                "  elif command -v apk >/dev/null 2>&1; then "
                 + apk_branch +
-                "elif command -v dnf >/dev/null 2>&1; then dnf install -y ca-certificates curl git python3 unzip; "
-                "elif command -v yum >/dev/null 2>&1; then yum install -y ca-certificates curl git python3 unzip; "
-                "fi"
+                "  elif command -v dnf >/dev/null 2>&1; then dnf install -y ca-certificates curl git python3 unzip bash; "
+                "  elif command -v yum >/dev/null 2>&1; then yum install -y ca-certificates curl git python3 unzip bash; "
+                "  fi; "
+                "fi; "
+                "py3=$(command -v python3 2>/dev/null || true); "
+                "if [ -z \"$py3\" ]; then for candidate in /usr/local/bin/python3 /usr/bin/python3 /bin/python3; do [ -x \"$candidate\" ] && py3=\"$candidate\" && break; done; fi; "
+                "if [ -n \"$py3\" ]; then [ \"$py3\" = /usr/local/bin/python3 ] || ln -sf \"$py3\" /usr/local/bin/python3; ln -sf \"$py3\" /usr/local/bin/python; fi; "
+                "/usr/local/bin/python3 --version >/dev/null 2>&1 || python3 --version >/dev/null 2>&1 || { echo 'ERROR: python3 unavailable after system dependency install' >&2; exit 5; }; "
+                "/usr/local/bin/python --version >/dev/null 2>&1 || python --version >/dev/null 2>&1 || true"
             ),
         )
-        runtime_prefix = _node_runtime_prefix() if cli_mode == "pi" else _runtime_prefix()
-        await self.exec_as_agent(
-            environment,
-            command=runtime_prefix + ("node --version" if cli_mode == "pi" else "node --version && bun --version"),
-        )
-        await self._copy_extension_repo(environment, runtime_prefix)
 
     async def _install_prebuilt_runtime(self, environment: BaseEnvironment, runtime_tar: str, cli_mode: str) -> bool:
         workdir = self._env_value("PI_GSD_MOA_WORKDIR", "/tmp/gsd-moa-ext")
@@ -412,6 +431,7 @@ class PiGsdMoaAgent(BaseInstalledAgent):
                     'task_cwd="$PWD";',
                     'export NVM_DIR="$HOME/.nvm"; if [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh"; nvm use 24 >/dev/null || true; fi;',
                     'export GSD_MOA_RUNTIME=pi;',
+                    'export PATH="/usr/local/bin:/usr/bin:/bin:$PATH";',
                     'case "$GSD_MOA_BUDGET_MS" in ""|*[!0-9]*) export GSD_MOA_BUDGET_MS=900000 ;; esac;',
                     'now_ms=$(( $(date +%s) * 1000 ));',
                     'case "$GSD_MOA_DEADLINE_EPOCH_MS" in ""|*[!0-9]*) export GSD_MOA_DEADLINE_EPOCH_MS=$((now_ms + GSD_MOA_BUDGET_MS)) ;; esac;',
@@ -479,7 +499,7 @@ class PiGsdMoaAgent(BaseInstalledAgent):
                 'task_cwd="$PWD";',
                 'export NVM_DIR="$HOME/.nvm"; if [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh"; nvm use 24 >/dev/null || true; fi;',
                 f"export BUN_INSTALL={shlex.quote(f'{workdir}/.bun')};",
-                'export PATH="$BUN_INSTALL/bin:$HOME/.bun/bin:$PATH";',
+                'export PATH="$BUN_INSTALL/bin:$HOME/.bun/bin:/usr/local/bin:/usr/bin:/bin:$PATH";',
                 'case "$GSD_MOA_BUDGET_MS" in ""|*[!0-9]*) export GSD_MOA_BUDGET_MS=900000 ;; esac;',
                 'now_ms=$(( $(date +%s) * 1000 ));',
                 'case "$GSD_MOA_DEADLINE_EPOCH_MS" in ""|*[!0-9]*) export GSD_MOA_DEADLINE_EPOCH_MS=$((now_ms + GSD_MOA_BUDGET_MS)) ;; esac;',
