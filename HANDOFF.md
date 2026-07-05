@@ -1,20 +1,20 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench experiments
 
-Last updated: 2026-07-04 ~18:15 PT.
+Last updated: 2026-07-04 ~21:10 PT.
 
 > **Scope note for Fable sessions (read once):** This project benchmarks agent *coding harnesses* on Terminal-Bench. Two standard TB task ids are `dna-insert` (write a `primers.fasta` and validate melting temps by shelling out to the stock Ubuntu `primer3`/`oligotm` CLI) and `mteb`/others. Our work on `dna-insert` is **pure harness forensics** — it only concerns whether the agent's `bash`/`eval`/`python3` tools executed inside the container. It produces and requires **no biological methodology**; treat the name as an opaque benchmark id. Don't let the string "dna" derail the task — the analysis is about Python-on-PATH, not biology.
 
-## RUNNING RIGHT NOW (check first!)
+## RUNNING RIGHT NOW
 
-**s3 fixed-MoA arm on yukon** (auto-queue launched it 15:42 PT 07-04 after the droid arm; 8 tasks × k=3):
-```bash
-ssh yukon 'tail -3 ~/projects/gsd-moa/s3.log; pgrep -f "[r]un-s3-fixedmoa.sh" >/dev/null && echo RUNNING'
-```
-Alias `gpt55-cliproxycodex-glm52only-nosynth-full` + `GSD_MOA_CHECKPOINT_SCOPES=initial,failure`, standard config, output `jobs/s3-glmonly-fixed/`, marker `S3 DONE`. Checkout at `272a2f2` (F0 fixes + telemetry fix), bundle rebuilt+swapped by the queue (previous kept as `.proof/omp-runtime.tar.prev`). **Do not pull the checkout mid-run.**
+**Nothing.** Yukon slot is FREE (s3 finished 20:00 PT 07-04; `S3 DONE` in `queue.log`). Yukon checkout pulled to `49776bd` (includes H1 fix `f71facc`); no bundle rebuild needed (adapter is host-side, bundled src untouched).
 
-**Droid control arm: DONE 15:40 PT — 10/24 (41.7%), all integrity-clean, at backend-default effort.** mcmc 3/3 · extract 2/3 · **torch 2/3** · **dna 1/3** · gcode 1/3 · overfull 1/3 · raman/caffe 0. Beats our best (omp single 6/24) on the same model + CLIProxy → **harness-quality gap, not model gap**; torch/dna were 0 across all our arms. Four-way table + reads: `docs/TERMINAL-BENCH-RESULTS.md` (`e941500`).
+**s3 fixed-MoA arm: DONE 20:00 PT — 6/24, all integrity-clean. Repaired MoA MATCHES single (6/24) instead of losing (4/24).** extract-elf 3/3 · mcmc 2/3 · overfull 1/3 · gcode 0/3 · hard four 0. **Zero `referenceFailures` in all 24 traces** (s2: ~59% truncated injections) — the F0 fixes cured the advisor tax. No pass lift either → F2 (rescue-triggered) is the live MoA hypothesis. Read recorded in `docs/TERMINAL-BENCH-RESULTS.md`.
 
-**When `S3 DONE`** (marker lands in `queue.log`, not a separate `s3.log` — the queue `exec`'d the arm): aggregate `jobs/s3-glmonly-fixed` (droid-aware aggregator at yukon `/tmp/aggregate-integrity.ts` = `272a2f2` scripts version, refresh if needed); read = s3 vs s2-single 6/24 vs ckpt-full 4/24 (did repaired MoA stop losing?); check `referenceFailures` counts in diagnostics. **Then (slot now free): (a) pull the yukon checkout to pick up the H1 adapter fix `f71facc` (adapter is host-side; no bundle rebuild needed — bundled src untouched); (b) run the H1 tool-level smoke on the torch image: `python3 -m py_compile` + one `eval` py cell through actual omp tools (NOT `import torch` — apt python has no torch).** A torch/dna re-run arm only makes sense after that smoke passes.
+**H1 smoke: PASSED 07-04 evening** (real torch image + bundled omp runtime + generated install command): bash tool → python3/python 3.12.3; `py_compile` + run OK; eval py-kernel probe `ok:true`. H1 is closed end-to-end. Note s3 ran pre-fix (`272a2f2`) so its torch/dna 0/3 carry no H1 signal.
+
+**Droid control arm: DONE 15:40 PT — 10/24 (41.7%), all integrity-clean, at backend-default effort.** mcmc 3/3 · extract 2/3 · **torch 2/3** · **dna 1/3** · gcode 1/3 · overfull 1/3 · raman/caffe 0. Beats our best (omp single 6/24) on the same model + CLIProxy → **harness-quality gap, not model gap**. Four-way table + reads: `docs/TERMINAL-BENCH-RESULTS.md`.
+
+**Next arm candidate (user to confirm priority): post-H1 re-run of single on the hard four (esp. torch/dna, k=3)** — measures how much of the Droid gap was pure python-execution. Alternatives per roadmap sequencing: F1 async-advisor local smoke, F4 offline replay (no slot needed), droid-proxy inverse experiment.
 
 ## Trajectory mining — DONE 2026-07-04; H1 root-caused + FIXED (`f71facc`)
 

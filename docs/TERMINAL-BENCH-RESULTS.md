@@ -1,5 +1,15 @@
 # Terminal-Bench Evidence Snapshot
 
+## s3 fixed-MoA validation + H1 harness fix (2026-07-04 evening)
+
+**s3 arm (`gpt55-cliproxycodex-glm52only-nosynth-full` + `initial,failure` scopes, checkout `272a2f2`, 8 tasks × k=3, all integrity-clean): 6/24 — repaired MoA now MATCHES single (6/24) instead of trailing it (ckpt-full 4/24, hermes-full 4/24).** Per-task: extract-elf **3/3** (single: 2/3), mcmc 2/3, overfull 1/3, gcode 0/3 (single: 1/3), hard four 0. The task-mix shift (gained extract, lost gcode) is within k=3 noise; the read is **the F0 fixes eliminated the MoA tax: zero `referenceFailures` in all 24 trials' traces** (s2 ckpt-full: ~59% of injections truncated at the 120s timeout), advisor time collapsed to ~2m mean refΣ. MoA no longer loses; it still shows no pass lift — consistent with the roadmap's "advice when it counts" thesis (F2 rescue-triggered) being the remaining live hypothesis on the F-track.
+
+**H1 root-caused, fixed (`f71facc`), and smoke-verified end-to-end.** The torch/dna images ship **no python3 at all** (probed directly); Droid had one only because its adapter apt-gets python3, ours skipped the equivalent install via the prebuilt-path early return (see corrected `docs/TRAJECTORY-MINING.md`). Post-fix smoke inside the real torch image, through the real bundled omp runtime: bash tool resolves `python3`/`python` 3.12.3, `python3 -m py_compile` + execution round-trip passes, eval py-kernel probe `ok:true`. **s3 pre-dates the fix** (checkout `272a2f2`), so its torch/dna 0/3 carry no H1 signal; the first post-H1 arm will be the real test of how much of the Droid gap (10/24 vs 6/24) was python-execution.
+
+Artifacts: `jobs/s3-glmonly-fixed`; smoke via `/tmp/h1-smoke.ts` + `/tmp/h1-install-cmd.sh` on yukon (torch image, omp-runtime.tar).
+
+---
+
 Date: 2026-07-04 (S2 matrix + Droid control added). The 2026-07-03 probe section below stands unchanged.
 
 ## S2 matrix + Droid bare-harness control (2026-07-04)
