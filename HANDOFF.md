@@ -1,12 +1,14 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench experiments
 
-Last updated: 2026-07-04 ~21:10 PT.
+Last updated: 2026-07-04 ~23:40 PT.
 
 > **Scope note for Fable sessions (read once):** This project benchmarks agent *coding harnesses* on Terminal-Bench. Two standard TB task ids are `dna-insert` (write a `primers.fasta` and validate melting temps by shelling out to the stock Ubuntu `primer3`/`oligotm` CLI) and `mteb`/others. Our work on `dna-insert` is **pure harness forensics** — it only concerns whether the agent's `bash`/`eval`/`python3` tools executed inside the container. It produces and requires **no biological methodology**; treat the name as an opaque benchmark id. Don't let the string "dna" derail the task — the analysis is about Python-on-PATH, not biology.
 
 ## RUNNING RIGHT NOW
 
-**Nothing.** Yukon slot is FREE (s3 finished 20:00 PT 07-04; `S3 DONE` in `queue.log`). Yukon checkout pulled to `49776bd` (includes H1 fix `f71facc`); no bundle rebuild needed (adapter is host-side, bundled src untouched).
+**Nothing.** Yukon slot is FREE (s4 finished 23:25 PT 07-04). Yukon checkout at `ad3e36a` (has H1 fix `f71facc`).
+
+**s4 post-H1 single, hard four, k=3, integrity-clean: 1/12 — the Droid gap decomposed (full read in `docs/TERMINAL-BENCH-RESULTS.md`, top section).** dna-insert **0/3 → 1/3** (matches Droid — H1 paid off, python now drives the oligotm loop). torch **still 0/3** but RECLASSIFIED: H1 confirmed working live (`python -c 'import torch'` now executes → `ModuleNotFoundError`, not `command not found`; all 3 trials used `py_compile` cleanly = Droid's exact toolchain), so torch's loss is now **solution correctness** (tensor-parallel gradient semantics), not tooling. raman/caffe 0/3 (floor). Takeaway: Droid's 10/24-vs-6/24 edge = python-exec (dna, CLOSED) + solution quality on execute-unverifiable tasks (torch) → torch is now an F-track motivator (advisor/review headroom), NOT more python plumbing.
 
 **s3 fixed-MoA arm: DONE 20:00 PT — 6/24, all integrity-clean. Repaired MoA MATCHES single (6/24) instead of losing (4/24).** extract-elf 3/3 · mcmc 2/3 · overfull 1/3 · gcode 0/3 · hard four 0. **Zero `referenceFailures` in all 24 traces** (s2: ~59% truncated injections) — the F0 fixes cured the advisor tax. No pass lift either → F2 (rescue-triggered) is the live MoA hypothesis. Read recorded in `docs/TERMINAL-BENCH-RESULTS.md`.
 
@@ -14,7 +16,7 @@ Last updated: 2026-07-04 ~21:10 PT.
 
 **Droid control arm: DONE 15:40 PT — 10/24 (41.7%), all integrity-clean, at backend-default effort.** mcmc 3/3 · extract 2/3 · **torch 2/3** · **dna 1/3** · gcode 1/3 · overfull 1/3 · raman/caffe 0. Beats our best (omp single 6/24) on the same model + CLIProxy → **harness-quality gap, not model gap**. Four-way table + reads: `docs/TERMINAL-BENCH-RESULTS.md`.
 
-**Next arm candidate (user to confirm priority): post-H1 re-run of single on the hard four (esp. torch/dna, k=3)** — measures how much of the Droid gap was pure python-execution. Alternatives per roadmap sequencing: F1 async-advisor local smoke, F4 offline replay (no slot needed), droid-proxy inverse experiment.
+**Next arm candidate (user to confirm priority) — s4 answered "how much of the Droid gap was python": dna yes, torch no.** Now the live options are: (a) **F4 offline replay** — feed s2/s4 confidently-wrong torch trials + task statement to a GLM-5.2 reviewer, measure gradient-defect catch rate (runs from laptop against Z.ai, NO yukon slot; directly tests the "review-before-done has structural edge on execute-unverifiable tasks" thesis that s4 just motivated); (b) **F1 async-advisor local smoke** then yukon arm; (c) **droid-proxy inverse experiment** (our MoA inner + Droid outer). F4 replay is the cheapest highest-signal next step given the s4 read.
 
 ## Trajectory mining — DONE 2026-07-04; H1 root-caused + FIXED (`f71facc`)
 

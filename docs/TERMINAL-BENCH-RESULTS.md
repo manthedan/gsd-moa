@@ -1,5 +1,28 @@
 # Terminal-Bench Evidence Snapshot
 
+## s4 post-H1 single on the hard four — the Droid gap decomposed (2026-07-04 night)
+
+**First arm carrying the H1 fix (`f71facc`). Single-mode `gpt55-cliproxycodex-single`, hard four (dna/raman/torch/caffe), k=3, standard config, integrity-clean: 1/12.** Per-task vs s2-single (pre-H1) and Droid:
+
+| Task | s2-single (pre-H1) | **s4 single (post-H1)** | Droid bare |
+|---|---:|---:|---:|
+| dna-insert | 0/3 | **1/3** | 1/3 |
+| torch-tensor-parallelism | 0/3 | 0/3 | 2/3 |
+| raman-fitting | 0/3 | 0/3 | 0/3 |
+| caffe-cifar-10 | 0/3 | 0/3 | 0/3 |
+
+**The read — H1 was necessary and it flipped exactly the task it should have, but the Droid gap was never one thing:**
+
+- **dna-insert: harness gap, now closed.** 0/3 → 1/3, matching Droid. Once `python3` runs, the agent can drive the `oligotm` Tm-validation loop from Python instead of flailing in a JS fallback (the exact failure in the old trajectory mining). This is H1 paying off directly.
+- **torch: NOT a harness gap — reclassified to solution correctness.** Live-confirmed H1 works: the first tool call `python -c 'import torch'` now **executes** (returns `ModuleNotFoundError`, i.e. python runs but apt-python has no torch) instead of the old `command not found`. All three trials then used `python -m py_compile` cleanly — **the identical toolchain Droid passed with** (neither harness can `import torch`; both validate by syntax + reasoning). Zero `command not found` / `Python backend unavailable` across all three. Our trials still failed on the tensor-parallel **gradient/collective semantics** the model wrote — a capability/strategy gap the model can't self-catch because nobody can runtime-verify against real torch. Droid got the math right (2/3); we didn't (0/3).
+- **raman/caffe: still 0/3 for everyone** — genuine capability floor (caffe cancels at ceiling in every harness).
+
+**Consequence for the roadmap:** the Droid 10/24-vs-6/24 edge splits into (a) python-execution (dna — closed by H1) and (b) solution quality on tasks neither harness can execute-verify (torch). Bucket (b) is precisely where a tool-less second-model review has structural headroom — a MoA advisor reviewing gradient correctness, or F4 review-before-done — so torch becomes a motivating case for the F-track rather than a harness bug. It is NOT more python plumbing.
+
+Artifacts: `jobs/s4-posth1-single` (yukon). Torch trial forensics: `torch-tensor-parallelism__{h4q4xxn,3LG7mvd,paHnJue}` under `2026-07-04__22-11-26`.
+
+---
+
 ## s3 fixed-MoA validation + H1 harness fix (2026-07-04 evening)
 
 **s3 arm (`gpt55-cliproxycodex-glm52only-nosynth-full` + `initial,failure` scopes, checkout `272a2f2`, 8 tasks × k=3, all integrity-clean): 6/24 — repaired MoA now MATCHES single (6/24) instead of trailing it (ckpt-full 4/24, hermes-full 4/24).** Per-task: extract-elf **3/3** (single: 2/3), mcmc 2/3, overfull 1/3, gcode 0/3 (single: 1/3), hard four 0. The task-mix shift (gained extract, lost gcode) is within k=3 noise; the read is **the F0 fixes eliminated the MoA tax: zero `referenceFailures` in all 24 trials' traces** (s2 ckpt-full: ~59% of injections truncated at the 120s timeout), advisor time collapsed to ~2m mean refΣ. MoA no longer loses; it still shows no pass lift — consistent with the roadmap's "advice when it counts" thesis (F2 rescue-triggered) being the remaining live hypothesis on the F-track.
