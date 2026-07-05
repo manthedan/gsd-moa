@@ -9,11 +9,16 @@
 Across all three of our torch failures and all three dna failures, the same defect appears:
 
 - The omp **`eval` tool has no Python backend** in these containers — every `eval` with `language: py` returns literally `Python backend is unavailable in this session. Pass language: "js" or install the python kernel.`
-- The omp **`bash` tool cannot find a Python interpreter** — `python` and `python3` both return `command not found` (exit 127), and `which python3` / `which python` come back empty, **even though the container ships Python 3.12** (Droid's shell runs `python3 --version` → `Python 3.12.3` in the same image).
+- The omp **`bash` tool cannot find a Python interpreter** — `python` and `python3` both return `command not found` (exit 127), and `which python3` / `which python` come back empty.
 
 So our agent has no way to run or test the code it writes. Droid's `Execute` tool runs `python3 - <<'PY' … PY` heredocs natively and successfully (it invoked python3 2–3× per torch trial, 10× on the dna trial).
 
-This is a PATH/environment defect in how our tools spawn processes, not a missing dependency in the image. The interpreter is present; our tools just don't reach it.
+**Root cause (corrected 2026-07-04, verified empirically): the images ship no Python at all — the gap is in our adapter's install phase, not in the omp tools.** Direct probes of `alexgshaw/torch-tensor-parallelism:20251031` and `alexgshaw/dna-insert:20251031` on yukon found **no python3 binary anywhere in either image** (no `/usr/bin/python3`, empty `/usr/local/bin`, no conda/venv, nothing on a full filesystem search). The earlier read of this data — "PATH/environment defect in how our tools spawn processes; the interpreter is present" — was wrong on both counts:
+
+- **Droid had python3 because our own droid adapter installed it.** `droid_agent.py`'s install phase runs `apt-get install -y … python3 …` unconditionally (its installer script itself needs a `python3` heredoc). Ubuntu noble's apt python3 is 3.12.3 — exactly the version Droid's Execute reported. The image never shipped it.
+- **Our omp arms never got it because of an early return.** `pi_gsd_moa_agent.py`'s omp-mode `install()` took the prebuilt-runtime fast path and returned before its own apt block ran (the pi-mode path and the no-tar fallback both install python3; only the path every yukon benchmark run actually takes skipped it). brush, the shell snapshot, the eval kernel probe, and PATH handling all behaved correctly in a container that genuinely had no interpreter — a local repro on macOS confirmed the bash tool finds an interpreter in a non-default PATH dir just fine when one exists.
+
+Fix landed as `f71facc`: system deps (incl. python3 + a `python` shim at `/usr/local/bin`) now install on every adapter path before the prebuilt early-return, with a 0-second skip path when the image already has them. Verified on yukon against both images. Note the corollary: even Droid could not `import torch` (its first probe errored — apt python has no torch); it validated with `python3 -m py_compile` only, so that is the right tool-level smoke target, not `import torch`.
 
 ## torch-tensor-parallelism — fatal, and cleanly isolated
 
@@ -36,7 +41,7 @@ Verdict: the Python-execution defect again does most of the damage (forces a wea
 
 ## Actionable — feeds the harness-gap track, not the MoA track
 
-1. **Fix Python execution in the omp harness (highest leverage found to date).** Two independent breaks: (a) the `eval` tool ships no Python kernel — either bundle one or make `eval` fall back to the container interpreter; (b) the `bash` tool's PATH doesn't include the container's `python3`. Either fix alone would have flipped torch; both are needed for parity. **Verify live** on the torch image (once a runner slot is free): confirm `python3` is on `$PATH` inside an omp `bash` tool call, and add a smoke that runs `python3 -c 'import torch'` through the tool. This is a strong candidate to explain part of the Droid 10/24 vs our 6/24 gap beyond these two tasks.
+1. **Fix Python execution in the omp harness (highest leverage found to date) — DONE (`f71facc`), pending tool-level smoke.** Root cause was a single adapter defect: the omp prebuilt-runtime fast path in `pi_gsd_moa_agent.py` returned before the system-dependency install, so python3 (which the TB images do not ship) never got installed — see the corrected headline section above. The fix hoists the install onto every path and shims `python`/`python3`. **Remaining verification** (needs a free yukon slot; queued behind S3 DONE): run `python3 -m py_compile` and an `eval` py cell through the actual omp tools inside the torch image (`import torch` is not a valid smoke — apt python has no torch; even Droid's import probe failed and it passed on `py_compile` alone). This is a strong candidate to explain part of the Droid 10/24 vs our 6/24 gap beyond these two tasks.
 2. **Give the agent a reliable "install a CLI tool then drive it" recipe** (apt-get + subprocess) — Droid leaned on it for oligotm; ours didn't.
 3. **Consider a verification-subagent pattern** — Droid's independent checker worker mirrors what our MoA reference layer is *supposed* to provide; that our reference advice didn't fill this role is itself a signal for the droid-proxy inverse experiment (our MoA inside Droid's harness).
 
