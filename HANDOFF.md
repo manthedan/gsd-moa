@@ -4,15 +4,15 @@ Last updated: 2026-07-04 ~13:10 PT.
 
 ## RUNNING RIGHT NOW (check first!)
 
-**1. Droid bare-harness control arm on yukon** (started 12:20 PT; on gcode [task 2/8] at 12:59; 8 tasks × k=3):
+**s3 fixed-MoA arm on yukon** (auto-queue launched it 15:42 PT 07-04 after the droid arm; 8 tasks × k=3):
 ```bash
-ssh yukon 'tail -3 ~/projects/gsd-moa/s2-droid.log; pgrep -f "[r]un-droid-arm.sh" >/dev/null && echo RUNNING'
+ssh yukon 'tail -3 ~/projects/gsd-moa/s3.log; pgrep -f "[r]un-s3-fixedmoa.sh" >/dev/null && echo RUNNING'
 ```
-Script: yukon `~/projects/gsd-moa/run-droid-arm.sh` (untracked scratch). Output `jobs/s2-droid/`. Checkout `a197744`. Droid runs at **backend-default effort** (custom models can't set it); harbor task ceilings bound runtime.
+Alias `gpt55-cliproxycodex-glm52only-nosynth-full` + `GSD_MOA_CHECKPOINT_SCOPES=initial,failure`, standard config, output `jobs/s3-glmonly-fixed/`, marker `S3 DONE`. Checkout at `272a2f2` (F0 fixes + telemetry fix), bundle rebuilt+swapped by the queue (previous kept as `.proof/omp-runtime.tar.prev`). **Do not pull the checkout mid-run.**
 
-**2. AUTO-QUEUE ARMED: `queue-after-droid.sh`** (yukon, log `queue.log`): when the droid arm exits it will `git pull --ff-only` the checkout (expects the `3f721e7` fixes), rebuild `.proof/omp-runtime.tar` via `docker buildx build --target bundle --output type=tar,dest=... -f .proof/omp-runtime.Dockerfile .` (build command validated this session against the current bundle), then run **`run-s3-fixedmoa.sh`** → `jobs/s3-glmonly-fixed`, marker `S3 DONE` in `s3.log`: alias `gpt55-cliproxycodex-glm52only-nosynth-full` + `GSD_MOA_CHECKPOINT_SCOPES=initial,failure`, 8 tasks, k=3, standard config. Kill the queue with `pkill -f "[q]ueue-after-droid.sh"` if plans change.
+**Droid control arm: DONE 15:40 PT — 10/24 (41.7%), all integrity-clean, at backend-default effort.** mcmc 3/3 · extract 2/3 · **torch 2/3** · **dna 1/3** · gcode 1/3 · overfull 1/3 · raman/caffe 0. Beats our best (omp single 6/24) on the same model + CLIProxy → **harness-quality gap, not model gap**; torch/dna were 0 across all our arms. Four-way table + reads: `docs/TERMINAL-BENCH-RESULTS.md` (`e941500`).
 
-**The yukon checkout is at `a197744` and MUST NOT be pulled until the droid arm finishes** (trials mount it read-only; the queue script handles the pull safely afterward). Bare repo is at `3f721e7`.
+**When `S3 DONE`**: aggregate `jobs/s3-glmonly-fixed` (droid-aware aggregator at yukon `/tmp/aggregate-integrity.ts` = `272a2f2` scripts version, refresh if needed); read = s3 vs s2-single 6/24 vs ckpt-full 4/24 (did repaired MoA stop losing?); check `referenceFailures` counts in diagnostics.
 
 ## S2 matrix — DONE 2026-07-04 10:49 PT (all integrity-clean)
 
