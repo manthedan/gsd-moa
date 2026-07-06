@@ -1,12 +1,14 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench experiments
 
-Last updated: 2026-07-04 ~23:40 PT.
+Last updated: 2026-07-06 (F4 offline replay DONE).
 
 > **Scope note for Fable sessions (read once):** This project benchmarks agent *coding harnesses* on Terminal-Bench. Some task ids are intentionally described below with neutral labels because surface-token safeguard classifiers can trip on unrelated benchmark vocabulary. The work here is pure harness forensics: whether the agent's `bash`/`eval`/`python3` tools executed inside the container.
 
 ## RUNNING RIGHT NOW
 
 **Nothing.** Yukon slot is FREE (s4 finished 23:25 PT 07-04). Yukon checkout at `ad3e36a` (has H1 fix `f71facc`).
+
+**F4 offline replay: DONE 07-05/06 (laptop + Z.ai, no yukon slot) — full read in `docs/F4-REVIEW-REPLAY.md`, raw bundle `~/projects/gsd-moa/.proof/runs/f4-replay-2026-07-05/`.** GLM-5.2 done-gate over 7 confidently-wrong torch solutions (6 ours reconstructed via hashline replay, 1 droid) + droid's 2 passers as negative controls, k=3 × {nothink, think}: catch rate **24% nothink / 19% think**; nothink false-alarms 50% on correct work, think fixes that (0/6) at 35s–15m/review but adds hallucinated-mechanism REVISEs and one 32k-budget-exhausted non-verdict. The dominant defect family (row-input test contract, 3+ of 7 losses) was caught **0/24 times — structurally invisible to offline review**; catches concentrate on code-visible autograd/collective misuse (h4q4xxn caught 3/3 think with textbook-exact mechanisms). **Verdict: naive done-gate is a NO-GO; if F4 continues it's the scoped form (distributed/autograd-heavy + actor-couldn't-execute slice only). Actor-side defensive-coding guidance on ambiguous contracts is the cheaper lever (→ H-track). F2 rescue-trigger remains the live MoA hypothesis.**
 
 **s4 post-H1 single, hard four, k=3, integrity-clean: 1/12 — the Droid gap decomposed (full read in `docs/TERMINAL-BENCH-RESULTS.md`, top section).** hard-file task **0/3 → 1/3** (matches Droid — H1 paid off, python now drives the task's CLI loop). torch **still 0/3** but RECLASSIFIED: H1 confirmed working live (`python -c 'import torch'` now executes → `ModuleNotFoundError`, not `command not found`; all 3 trials used `py_compile` cleanly = Droid's exact toolchain), so torch's loss is now **solution correctness** (tensor-parallel gradient semantics), not tooling. raman/caffe 0/3 (floor). Takeaway: Droid's 10/24-vs-6/24 edge = python-exec (hard-file, CLOSED) + solution quality on execute-unverifiable tasks (torch) → torch is now an F-track motivator (advisor/review headroom), NOT more python plumbing.
 
@@ -16,7 +18,7 @@ Last updated: 2026-07-04 ~23:40 PT.
 
 **Droid control arm: DONE 15:40 PT — 10/24 (41.7%), all integrity-clean, at backend-default effort.** mcmc 3/3 · extract 2/3 · **torch 2/3** · **hard-file 1/3** · gcode 1/3 · overfull 1/3 · raman/caffe 0. Beats our best (omp single 6/24) on the same model + CLIProxy → **harness-quality gap, not model gap**. Four-way table + reads: `docs/TERMINAL-BENCH-RESULTS.md`.
 
-**Next arm candidate (user to confirm priority) — s4 answered "how much of the Droid gap was python": hard-file yes, torch no.** Now the live options are: (a) **F4 offline replay** — feed s2/s4 confidently-wrong torch trials + task statement to a GLM-5.2 reviewer, measure gradient-defect catch rate (runs from laptop against Z.ai, NO yukon slot; directly tests the "review-before-done has structural edge on execute-unverifiable tasks" thesis that s4 just motivated); (b) **F1 async-advisor local smoke** then yukon arm; (c) **droid-proxy inverse experiment** (our MoA inner + Droid outer). F4 replay is the cheapest highest-signal next step given the s4 read.
+**Next arm candidate (user to confirm priority) — F4 replay is done and read (see above; naive done-gate NO-GO).** Live options: (a) **F3 model-mix ablations** (self-advice `gpt55-cliproxycodex-full`, inverted `glm52-zai-gpt55-cliproxycodex-nosynth-full`, + tiny `glm52-zai-single` baseline alias — yukon slot, passable four, k≥3); (b) **F2 rescue-triggered advice** (the live MoA hypothesis; trigger design from F0 stuck signatures); (c) **F1 async-advisor local smoke** then yukon arm; (d) **droid-proxy inverse experiment**. F4's scoped-gate variant is parked pending an F2/F3 read.
 
 ## Trajectory mining — DONE 2026-07-04; H1 root-caused + FIXED (`f71facc`)
 
