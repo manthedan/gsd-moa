@@ -1,6 +1,12 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench experiments
 
-Last updated: 2026-07-06 (F4 offline replay DONE).
+Last updated: 2026-07-06 (F2 rescue implementation LANDED `01eaa5f`).
+
+## F2 rescue-triggered advice: IMPLEMENTED, not yet run
+
+`01eaa5f` (codex-implemented from Claude spec, 2 rounds, 127/127 tests): stuck trigger (≥3 consecutive trailing failed tool results with a repeated `tool|signals` signature; success breaks streak) replaces the any-single-failure checkpoint trigger; failure-scope runs are **always advisor** (full_moa escalation deleted); caps maxPerTask=2 + cooldown=6 tool results enforced via in-process `src/rescue-ledger.ts` — **round-1 bug caught in review: injected guidance does NOT persist in session context, so context-scanning caps were dead code in production** (also retro-explains ckpt-full's `failure: 60`). New alias `gpt55-cliproxycodex-glm52-rescue` (auto mode, per-alias scopes initial:off/drift:off/failure:on). Env knobs `GSD_MOA_RESCUE_{CONSECUTIVE_FAILURES,MAX_PER_TASK,COOLDOWN_TOOL_RESULTS}`. Fires AND cap-suppressions traced (`rescueTrailingFailureStreak`, `rescueSignature`, `rescueAdvisorInjectionCount`) for the recovery-after-stuck read vs matched s2-single stuck moments.
+
+**Before the F2 arm:** (1) live smoke pending — laptop CLIProxy 8317 DOWN, smoke on yukon or after proxy restored; (2) **runtime bundle rebuild required** — `01eaa5f` touches bundled src (`.proof/omp-runtime.tar` is current only for `131b571`). Arm per roadmap: single+rescue vs s2-single, passable four, k≥5. Note: one accidental push of this branch to GitHub origin was made and deleted 07-06 (same remediation as 07-04).
 
 > **Scope note for Fable sessions (read once):** This project benchmarks agent *coding harnesses* on Terminal-Bench. Some task ids are intentionally described below with neutral labels because surface-token safeguard classifiers can trip on unrelated benchmark vocabulary. The work here is pure harness forensics: whether the agent's `bash`/`eval`/`python3` tools executed inside the container.
 
