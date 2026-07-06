@@ -36,7 +36,7 @@ Turn-boundary skipping made hermes-full effectively **initial-advice-only** (1�
 | bucket | verdict |
 |---|---|
 | (c) clock lost to advisor | **dominant for ckpt-full's passable-four failures** (mcmc ×2 cancelled, gcode ×3 starved, overfull ×2 cancelled) |
-| (d) capability floor | dna/raman/torch/caffe — 24 trials, advice irrelevant, both arms 0 (matches single) |
+| (d) capability floor | hard-file/raman/torch/caffe — 24 trials, advice irrelevant, both arms 0 (matches single) |
 | (b) advice adopted and wrong | no clear instance found; conflicts add arbitration noise, not observed wrong turns |
 | (a) advice ignored | not the story — advice is read and topically followed |
 

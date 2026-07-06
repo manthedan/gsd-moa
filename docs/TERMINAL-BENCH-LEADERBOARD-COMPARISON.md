@@ -25,7 +25,7 @@ The public pages report 5 trials per task, while our runs are currently 1 trial 
 | `extract-elf` | 1/1 | 1/1 | 4/5 (80%) | 0/5 (0%) | 5/5 (100%) | Clearly reachable by current agents |
 | `mcmc-sampling-stan` | 0/1 | 0/1 | 2/5 (40%) | 3/5 (60%) | 4/5 (80%) | Our harness/provider underperformed vs leaders |
 | `filter-js-from-html` | 0/1 | 0/1 | 0/5 (0%) | 0/5 (0%) | 0/5 (0%) | Frontier-hard among these leaders |
-| `dna-insert` | 0/1 | 0/1 | 3/5 (60%) | 3/5 (60%) | 5/5 (100%) | Our harness/provider underperformed vs leaders |
+| hard file-generation task | 0/1 | 0/1 | 3/5 (60%) | 3/5 (60%) | 5/5 (100%) | Our harness/provider underperformed vs leaders |
 
 ## Triage
 
@@ -44,7 +44,7 @@ The public pages report 5 trials per task, while our runs are currently 1 trial 
 These failed locally but public agents solve them often, so they are better debugging/tuning targets than “impossible” tasks:
 
 - `mteb-leaderboard`: public rates are `5/5`, `3/5`, `4/5`; our single and full-MoA both failed.
-- `dna-insert`: public rates are `3/5`, `3/5`, `5/5`; our single and full-MoA both failed.
+- hard file-generation task: public rates are `3/5`, `3/5`, `5/5`; our single and full-MoA both failed.
 - `mcmc-sampling-stan`: public rates are `2/5`, `3/5`, `4/5`; our runs both timed out/failed.
 - `raman-fitting`: public rates are `2/5`, `0/5`, `4/5`; our full-MoA timed out.
 - `caffe-cifar-10`: Codex GPT-5.5 is `0/5`, but NexAU GPT-5.5 and Lemon mixed are both `3/5`; our failures may be harness/time/environment-sensitive.
@@ -58,7 +58,7 @@ These failed locally but public agents solve them often, so they are better debu
 ## Recommended next eval choices
 
 1. Repeat `torch-tensor-parallelism` and `overfull-hbox` with `k>=3` per mode. These are the current positive signal.
-2. Debug `mteb-leaderboard` and `dna-insert` before retesting; public leaders show they should be reachable.
+2. Debug `mteb-leaderboard` and the hard file-generation task before retesting; public leaders show they should be reachable.
 3. Treat `filter-js-from-html` as a frontier-hard stress test, not an immediate tuning target.
 4. Deprioritize `make-doom-for-mips` and `install-windows-3-11` unless we specifically want long-runtime/build-system stress.
 

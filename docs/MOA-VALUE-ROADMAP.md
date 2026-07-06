@@ -8,7 +8,7 @@ S2 (all integrity-clean, k=3, 8 tasks): single **6/24** > ckpt-full **4/24** = h
 
 Power discipline (applies to every phase):
 
-- Only the passable four (extract-elf, mcmc, gcode, overfull) carry information; dna/raman/caffe/torch are 0 across all arms — no advisor lifts a task the actor can't do at all. Lift claims come from the passable four at k≥5.
+- Only the passable four (extract-elf, mcmc, gcode, overfull) carry information; hard-file/raman/caffe/torch are 0 across all arms — no advisor lifts a task the actor can't do at all. Lift claims come from the passable four at k≥5.
 - A Nous-sized +6pp is undetectable at our budgets (~800 trials/arm for 80% power). We hunt **large effects on targeted failure modes** and **mechanism-level metrics** (adoption, recovery-after-stuck, wall-time parity), not smallpass-rate deltas.
 
 Decisions locked 2026-07-04:
@@ -71,8 +71,8 @@ The one place a tool-less second model has a structural edge: catching confident
 
 The Droid control (10/24 vs our 6/24, same model) proved some of our "capability floor" is really harness quality. Trajectory mining (`docs/TRAJECTORY-MINING.md`) localized the first concrete defect:
 
-- **H1 — Fix Python execution in the omp harness (highest-leverage item found) — FIXED (`f71facc`), smoke pending.** Corrected root cause (2026-07-04, verified on yukon): the torch/dna images ship **no python3 at all**; Droid had one only because `droid_agent.py`'s install phase apt-gets python3, while our omp adapter's prebuilt fast path returned before its own apt block. The omp tools (brush, eval kernel probe, PATH) were behaving correctly. Fix: system deps now install on every adapter path, with a `python` shim and a 0s skip when already present. Remaining: post-S3 tool-level smoke on the torch image — `python3 -m py_compile` + an `eval` py cell through actual omp tools (`import torch` is not a valid smoke; apt python has no torch — even Droid failed that import and passed via `py_compile`). Likely explains part of the gap beyond these two tasks.
-- **H2 — "install a CLI tool, drive it from Python" recipe** (Droid used apt-get + subprocess for oligotm on `dna-insert`; ours flailed from a JS fallback).
+- **H1 — Fix Python execution in the omp harness (highest-leverage item found) — FIXED (`f71facc`), smoke pending.** Corrected root cause (2026-07-04, verified on yukon): the torch/hard-file images ship **no python3 at all**; Droid had one only because `droid_agent.py`'s install phase apt-gets python3, while our omp adapter's prebuilt fast path returned before its own apt block. The omp tools (brush, eval kernel probe, PATH) were behaving correctly. Fix: system deps now install on every adapter path, with a `python` shim and a 0s skip when already present. Remaining: post-S3 tool-level smoke on the torch image — `python3 -m py_compile` + an `eval` py cell through actual omp tools (`import torch` is not a valid smoke; apt python has no torch — even Droid failed that import and passed via `py_compile`). Likely explains part of the gap beyond these two tasks.
+- **H2 — "install a CLI tool, drive it from Python" recipe** (Droid used apt-get + subprocess for the checker CLI on `hard-file-task`; ours flailed from a JS fallback).
 - **H3 — verification-subagent pattern** (Droid spawned an independent checker worker — the role our MoA reference layer is meant to play; ties into the droid-proxy inverse experiment).
 
 ## Sequencing

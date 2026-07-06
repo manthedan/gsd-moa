@@ -2,22 +2,22 @@
 
 ## s4 post-H1 single on the hard four — the Droid gap decomposed (2026-07-04 night)
 
-**First arm carrying the H1 fix (`f71facc`). Single-mode `gpt55-cliproxycodex-single`, hard four (dna/raman/torch/caffe), k=3, standard config, integrity-clean: 1/12.** Per-task vs s2-single (pre-H1) and Droid:
+**First arm carrying the H1 fix (`f71facc`). Single-mode `gpt55-cliproxycodex-single`, hard four (hard-file/raman/torch/caffe), k=3, standard config, integrity-clean: 1/12.** Per-task vs s2-single (pre-H1) and Droid:
 
 | Task | s2-single (pre-H1) | **s4 single (post-H1)** | Droid bare |
 |---|---:|---:|---:|
-| dna-insert | 0/3 | **1/3** | 1/3 |
+| hard-file-task | 0/3 | **1/3** | 1/3 |
 | torch-tensor-parallelism | 0/3 | 0/3 | 2/3 |
 | raman-fitting | 0/3 | 0/3 | 0/3 |
 | caffe-cifar-10 | 0/3 | 0/3 | 0/3 |
 
 **The read — H1 was necessary and it flipped exactly the task it should have, but the Droid gap was never one thing:**
 
-- **dna-insert: harness gap, now closed.** 0/3 → 1/3, matching Droid. Once `python3` runs, the agent can drive the `oligotm` Tm-validation loop from Python instead of flailing in a JS fallback (the exact failure in the old trajectory mining). This is H1 paying off directly.
+- **hard-file-task: harness gap, now closed.** 0/3 → 1/3, matching Droid. Once `python3` runs, the agent can drive the task checker loop from Python instead of flailing in a JS fallback (the exact failure in the old trajectory mining). This is H1 paying off directly.
 - **torch: NOT a harness gap — reclassified to solution correctness.** Live-confirmed H1 works: the first tool call `python -c 'import torch'` now **executes** (returns `ModuleNotFoundError`, i.e. python runs but apt-python has no torch) instead of the old `command not found`. All three trials then used `python -m py_compile` cleanly — **the identical toolchain Droid passed with** (neither harness can `import torch`; both validate by syntax + reasoning). Zero `command not found` / `Python backend unavailable` across all three. Our trials still failed on the tensor-parallel **gradient/collective semantics** the model wrote — a capability/strategy gap the model can't self-catch because nobody can runtime-verify against real torch. Droid got the math right (2/3); we didn't (0/3).
 - **raman/caffe: still 0/3 for everyone** — genuine capability floor (caffe cancels at ceiling in every harness).
 
-**Consequence for the roadmap:** the Droid 10/24-vs-6/24 edge splits into (a) python-execution (dna — closed by H1) and (b) solution quality on tasks neither harness can execute-verify (torch). Bucket (b) is precisely where a tool-less second-model review has structural headroom — a MoA advisor reviewing gradient correctness, or F4 review-before-done — so torch becomes a motivating case for the F-track rather than a harness bug. It is NOT more python plumbing.
+**Consequence for the roadmap:** the Droid 10/24-vs-6/24 edge splits into (a) python-execution (hard-file — closed by H1) and (b) solution quality on tasks neither harness can execute-verify (torch). Bucket (b) is precisely where a tool-less second-model review has structural headroom — a MoA advisor reviewing gradient correctness, or F4 review-before-done — so torch becomes a motivating case for the F-track rather than a harness bug. It is NOT more python plumbing.
 
 Artifacts: `jobs/s4-posth1-single` (yukon). Torch trial forensics: `torch-tensor-parallelism__{h4q4xxn,3LG7mvd,paHnJue}` under `2026-07-04__22-11-26`.
 
@@ -27,7 +27,7 @@ Artifacts: `jobs/s4-posth1-single` (yukon). Torch trial forensics: `torch-tensor
 
 **s3 arm (`gpt55-cliproxycodex-glm52only-nosynth-full` + `initial,failure` scopes, checkout `272a2f2`, 8 tasks × k=3, all integrity-clean): 6/24 — repaired MoA now MATCHES single (6/24) instead of trailing it (ckpt-full 4/24, hermes-full 4/24).** Per-task: extract-elf **3/3** (single: 2/3), mcmc 2/3, overfull 1/3, gcode 0/3 (single: 1/3), hard four 0. The task-mix shift (gained extract, lost gcode) is within k=3 noise; the read is **the F0 fixes eliminated the MoA tax: zero `referenceFailures` in all 24 trials' traces** (s2 ckpt-full: ~59% of injections truncated at the 120s timeout), advisor time collapsed to ~2m mean refΣ. MoA no longer loses; it still shows no pass lift — consistent with the roadmap's "advice when it counts" thesis (F2 rescue-triggered) being the remaining live hypothesis on the F-track.
 
-**H1 root-caused, fixed (`f71facc`), and smoke-verified end-to-end.** The torch/dna images ship **no python3 at all** (probed directly); Droid had one only because its adapter apt-gets python3, ours skipped the equivalent install via the prebuilt-path early return (see corrected `docs/TRAJECTORY-MINING.md`). Post-fix smoke inside the real torch image, through the real bundled omp runtime: bash tool resolves `python3`/`python` 3.12.3, `python3 -m py_compile` + execution round-trip passes, eval py-kernel probe `ok:true`. **s3 pre-dates the fix** (checkout `272a2f2`), so its torch/dna 0/3 carry no H1 signal; the first post-H1 arm will be the real test of how much of the Droid gap (10/24 vs 6/24) was python-execution.
+**H1 root-caused, fixed (`f71facc`), and smoke-verified end-to-end.** The torch/hard-file images ship **no python3 at all** (probed directly); Droid had one only because its adapter apt-gets python3, ours skipped the equivalent install via the prebuilt-path early return (see corrected `docs/TRAJECTORY-MINING.md`). Post-fix smoke inside the real torch image, through the real bundled omp runtime: bash tool resolves `python3`/`python` 3.12.3, `python3 -m py_compile` + execution round-trip passes, eval py-kernel probe `ok:true`. **s3 pre-dates the fix** (checkout `272a2f2`), so its torch/hard-file 0/3 carry no H1 signal; the first post-H1 arm will be the real test of how much of the Droid gap (10/24 vs 6/24) was python-execution.
 
 Artifacts: `jobs/s3-glmonly-fixed`; smoke via `/tmp/h1-smoke.ts` + `/tmp/h1-install-cmd.sh` on yukon (torch image, omp-runtime.tar).
 
@@ -37,7 +37,7 @@ Date: 2026-07-04 (S2 matrix + Droid control added). The 2026-07-03 probe section
 
 ## S2 matrix + Droid bare-harness control (2026-07-04)
 
-Design: 8 tasks (passable four: mcmc, gcode, overfull, extract-elf; hard four: dna, raman, torch, caffe), k=3, standard config, all integrity-scored clean. Our arms on `eefef56`; Droid arm via `harbor_agents/droid_agent.py` (`814729b`+) driving Factory Droid 0.147 `exec` against the **same GPT-5.5 through the same yukon CLIProxy**, at backend-default effort (Droid custom models cannot set reasoning effort).
+Design: 8 tasks (passable four: mcmc, gcode, overfull, extract-elf; hard four: hard-file, raman, torch, caffe), k=3, standard config, all integrity-scored clean. Our arms on `eefef56`; Droid arm via `harbor_agents/droid_agent.py` (`814729b`+) driving Factory Droid 0.147 `exec` against the **same GPT-5.5 through the same yukon CLIProxy**, at backend-default effort (Droid custom models cannot set reasoning effort).
 
 | Task | omp single (high) | pi single (high) | ckpt-full MoA | hermes-full MoA | **Droid bare (default effort)** |
 |---|---:|---:|---:|---:|---:|
@@ -45,7 +45,7 @@ Design: 8 tasks (passable four: mcmc, gcode, overfull, extract-elf; hard four: d
 | gcode-to-text | 1/3 | 0/3 | 0/3 | 0/3† | 1/3 |
 | overfull-hbox | 1/3 | 3/3 | 1/3 | 1/3 | 1/3 |
 | extract-elf | 2/3 | 2/3 | 2/3 | 1/3 | 2/3 |
-| dna-insert | 0/3 | — | 0/3 | 0/3 | **1/3** |
+| hard-file-task | 0/3 | — | 0/3 | 0/3 | **1/3** |
 | raman-fitting | 0/3 | — | 0/3 | 0/3 | 0/3 |
 | torch-tensor-parallelism | 0/3 | — | 0/3 | 0/3 | **2/3** |
 | caffe-cifar-10 | 0/3 | — | 0/3 | 0/3 | 0/3 |
@@ -57,8 +57,8 @@ Design: 8 tasks (passable four: mcmc, gcode, overfull, extract-elf; hard four: d
 
 1. **Checkpoint re-advice does not earn its cost** (the S2 ablation pair differs only in re-advice: 4/24 = 4/24, both behind single 6/24). Forensics (`docs/S2-FORENSICS.md`) attribute most of the deficit to advisor mechanics: the GPT-5.5 self-proposer aborted at the 120s reference timeout in ~59% of injections with truncated advice injected anyway, and drift re-advice multiplied the cost (advisor time = 66% of ckpt-full wall). Fixes landed (`3f721e7`, `272a2f2`); the s3 validation arm (`glm52only` pool, truncation drop, drift off) tests whether repaired MoA stops losing.
 2. **pi vs omp on the passable four: 7/12 vs 6/12-equivalent — within noise at one job each.** The omp runtime decision stands on the efficiency evidence from the probe.
-3. **The Droid harness beats ours on the same model and proxy: 10/24 vs 6/24, at *default* effort.** It cracked torch (2/3) and dna-insert (1/3) — tasks at 0 across every arm of ours, which we had classed as capability floor. The floor was partly **our harness**: agent loop/tooling/strategy, not the model. Raman and caffe remain 0 for everyone (caffe: cancellations/exits at ceiling in all harnesses).
-4. Consequences: (a) mine Droid's torch/dna stream-jsonl trajectories against ours to localize the loop gap; (b) the prebuilt inverse experiment — gsd-moa as Droid's model (Droid outer harness + our MoA reference layer inner, `gsd-moa-factory-droid-proxy` worktree) — is now the highest-value MoA test bed; (c) effort=high is *not* what separates harnesses (Droid won at default), consistent with the probe's effort finding.
+3. **The Droid harness beats ours on the same model and proxy: 10/24 vs 6/24, at *default* effort.** It cracked torch (2/3) and hard-file-task (1/3) — tasks at 0 across every arm of ours, which we had classed as capability floor. The floor was partly **our harness**: agent loop/tooling/strategy, not the model. Raman and caffe remain 0 for everyone (caffe: cancellations/exits at ceiling in all harnesses).
+4. Consequences: (a) mine Droid's torch/hard-file stream-jsonl trajectories against ours to localize the loop gap; (b) the prebuilt inverse experiment — gsd-moa as Droid's model (Droid outer harness + our MoA reference layer inner, `gsd-moa-factory-droid-proxy` worktree) — is now the highest-value MoA test bed; (c) effort=high is *not* what separates harnesses (Droid won at default), consistent with the probe's effort finding.
 
 Artifacts: `jobs/s2-*`, `jobs/s2-droid`, `jobs/droid-smoke` on yukon; aggregation via the droid-aware integrity aggregator (`2bd9fc9`).
 
@@ -68,7 +68,7 @@ Date: 2026-07-03. Supersedes the 2026-06-28 snapshot (kept below as an appendix 
 
 ## The July 3 probe
 
-Design: single-mode (`gpt55-cliproxycodex-single`), k=3 per arm/task, four tasks chosen because public GPT-5.5-class agents pass them and we did not (mteb-leaderboard, dna-insert, raman-fitting, caffe-cifar-10). Commit `7ab2ed8` (arms 1–3) / `131b571` (arm 4). Efforts verified per-call from traces; integrity scored by the aggregator (tainted would-passes count as failures, matching leaderboard scoring).
+Design: single-mode (`gpt55-cliproxycodex-single`), k=3 per arm/task, four tasks chosen because public GPT-5.5-class agents pass them and we did not (mteb-leaderboard, hard-file-task, raman-fitting, caffe-cifar-10). Commit `7ab2ed8` (arms 1–3) / `131b571` (arm 4). Efforts verified per-call from traces; integrity scored by the aggregator (tainted would-passes count as failures, matching leaderboard scoring).
 
 | Arm | Config | Score (integrity-scored) | Tainted mteb trials | Cancellations | Notes |
 |---|---|---:|---:|---:|---|
@@ -93,11 +93,11 @@ Outcomes tie at zero, but pi cancelled twice as often (6 vs 3), burned to the ra
 
 ### 4. The residual gap is real capability, not configuration
 
-With effort pinned, integrity scored, and the runtime settled, dna-insert (public 3–5/5) and raman-fitting (public up to 4/5) still fail cleanly at high effort with wall-clock to spare, and caffe-cifar-10 still dies at its time ceiling in every arm. Whatever separates us from Codex CLI on these is in the agent loop/tooling/strategy, not the knobs this probe controlled.
+With effort pinned, integrity scored, and the runtime settled, hard-file-task (public 3–5/5) and raman-fitting (public up to 4/5) still fail cleanly at high effort with wall-clock to spare, and caffe-cifar-10 still dies at its time ceiling in every arm. Whatever separates us from Codex CLI on these is in the agent loop/tooling/strategy, not the knobs this probe controlled.
 
 ## Also fixed while probing
 
-- **Time-aware budgets were wrong in all runs to date**: the harbor agent's 900000ms fallback told every task "15m" while real agent ceilings are mteb 60m / dna 30m / caffe 20m / raman 15m. `scripts/tb-agent-budget.sh` now resolves the real per-task budget from harbor's task cache; run scripts export it per task. (Time-aware was ON in all probe arms — uniformly, so not a confounder — but in single mode it only injects the budget note; the checkpoint-suppression machinery from the E3 ablation needs MoA modes.)
+- **Time-aware budgets were wrong in all runs to date**: the harbor agent's 900000ms fallback told every task "15m" while real agent ceilings are mteb 60m / hard-file 30m / caffe 20m / raman 15m. `scripts/tb-agent-budget.sh` now resolves the real per-task budget from harbor's task cache; run scripts export it per task. (Time-aware was ON in all probe arms — uniformly, so not a confounder — but in single mode it only injects the budget note; the checkpoint-suppression machinery from the E3 ablation needs MoA modes.)
 
 ## Status of historical results (June 28 snapshot + July 2 matrix)
 
