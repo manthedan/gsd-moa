@@ -155,6 +155,16 @@ describe("alias registry", () => {
     assert.ok(GSD_MOA_MODELS.find((model) => model.id === id));
   });
 
+  it("registers the rescue alias with failure-only checkpoint scopes", () => {
+    const id = "gpt55-cliproxycodex-glm52-rescue";
+    const registered = ALIAS_PRESETS.find((entry) => entry.id === id);
+    assert.ok(registered);
+    assert.equal(registered.name, "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (Rescue)");
+    assert.deepEqual(fingerprint(id), CODEX_FP);
+    assert.deepEqual(buildDefaultAliasMap()[id], { mode: "auto", checkpointScopes: { initial: false, drift: false, failure: true } });
+    assert.ok(GSD_MOA_MODELS.find((model) => model.id === id));
+  });
+
   it("registers the Hermes-style no-synthesis alias with initial-only checkpoints", () => {
     const id = "gpt55-cliproxycodex-glm52-hermes-full";
     const registered = ALIAS_PRESETS.find((entry) => entry.id === id);

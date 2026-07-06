@@ -2,7 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { getRuntime } from "./pi-compat.js";
 import { buildDefaultAliasMap } from "./registry.js";
-import type { AliasMode, DefaultReasoningEffort, FullMoaConfig, FullMoaProposerConfig, FullMoaSynthesisConfig, GsdMoaConfig, ModelRef, ReasoningEffort, UpstreamRoute } from "./types.js";
+import type { AliasConfig, AliasMode, CheckpointScopesConfig, DefaultReasoningEffort, FullMoaConfig, FullMoaProposerConfig, FullMoaSynthesisConfig, GsdMoaConfig, ModelRef, ReasoningEffort, UpstreamRoute } from "./types.js";
 import { PROVIDER_ID } from "./types.js";
 
 export const DEFAULT_CONFIG_PATH = ".pi/gsd-moa.json";
@@ -137,6 +137,7 @@ export const DEFAULT_CONFIG: GsdMoaConfig = {
     maxToolResults: 4,
     driftToolResultThreshold: 3,
     scopes: { initial: true, drift: true, failure: true },
+    rescue: { consecutiveFailures: 3, repeatedSignatureMin: 2, maxPerTask: 2, cooldownToolResults: 6 },
   },
   timeAware: {
     enabled: true,
@@ -292,7 +293,7 @@ function parseConfigFile(fullPath: string, displayPath: string): GsdMoaConfig {
     reference: mergeRoute(defaultReferenceRoute(routePresets), parsed.reference),
     fullMoa: mergeFullMoa(DEFAULT_CONFIG.fullMoa, parsed.fullMoa),
     aliases: isRecord(parsed.aliases)
-      ? { ...structuredClone(DEFAULT_CONFIG.aliases), ...(parsed.aliases as GsdMoaConfig["aliases"]) }
+      ? mergeAliases(DEFAULT_CONFIG.aliases, parsed.aliases)
       : structuredClone(DEFAULT_CONFIG.aliases),
     auto: isRecord(parsed.auto)
       ? {
@@ -352,6 +353,15 @@ function applyEnvOverrides(cfg: GsdMoaConfig): void {
   if (process.env.GSD_MOA_CHECKPOINT_DRIFT_TOOL_RESULTS !== undefined) {
     cfg.checkpoint.driftToolResultThreshold = Number(process.env.GSD_MOA_CHECKPOINT_DRIFT_TOOL_RESULTS);
   }
+  if (process.env.GSD_MOA_RESCUE_CONSECUTIVE_FAILURES !== undefined) {
+    cfg.checkpoint.rescue.consecutiveFailures = Number(process.env.GSD_MOA_RESCUE_CONSECUTIVE_FAILURES);
+  }
+  if (process.env.GSD_MOA_RESCUE_MAX_PER_TASK !== undefined) {
+    cfg.checkpoint.rescue.maxPerTask = Number(process.env.GSD_MOA_RESCUE_MAX_PER_TASK);
+  }
+  if (process.env.GSD_MOA_RESCUE_COOLDOWN_TOOL_RESULTS !== undefined) {
+    cfg.checkpoint.rescue.cooldownToolResults = Number(process.env.GSD_MOA_RESCUE_COOLDOWN_TOOL_RESULTS);
+  }
   if (process.env.GSD_MOA_CHECKPOINT_SCOPES !== undefined) {
     cfg.checkpoint.scopes = parseCheckpointScopes(process.env.GSD_MOA_CHECKPOINT_SCOPES);
   }
@@ -401,6 +411,7 @@ export function validateConfig(cfg: GsdMoaConfig): void {
   for (const [name, alias] of Object.entries(cfg.aliases)) {
     if (!name.trim()) throw new Error("aliases must not contain blank model ids");
     validateMode(`aliases.${name}.mode`, alias.mode);
+    if (alias.checkpointScopes !== undefined) validatePartialCheckpointScopes(`aliases.${name}.checkpointScopes`, alias.checkpointScopes);
   }
 
   validateMode("auto.defaultMode", cfg.auto.defaultMode);
@@ -426,6 +437,7 @@ export function validateConfig(cfg: GsdMoaConfig): void {
     throw new Error("checkpoint.driftToolResultThreshold must be a positive integer");
   }
   validateCheckpointScopes(cfg.checkpoint.scopes);
+  validateRescuePolicy(cfg.checkpoint.rescue);
   validateTimeAware(cfg.timeAware);
   if (typeof cfg.asyncAdvisor.enabled !== "boolean") throw new Error("asyncAdvisor.enabled must be boolean");
   if (!Number.isInteger(cfg.asyncAdvisor.maxPendingMs) || cfg.asyncAdvisor.maxPendingMs < 1) {
@@ -502,6 +514,23 @@ function mergeRoutePresets(defaults: GsdMoaConfig["routePresets"], overrides: Re
   return merged;
 }
 
+function mergeAliases(defaults: GsdMoaConfig["aliases"], overrides: Record<string, unknown>): GsdMoaConfig["aliases"] {
+  const merged = structuredClone(defaults);
+  for (const [name, override] of Object.entries(overrides)) {
+    if (!isRecord(override)) continue;
+    const existing = merged[name];
+    const mode = typeof override.mode === "string" ? override.mode as AliasMode : existing?.mode;
+    if (!mode) continue;
+    const alias: AliasConfig = { ...(existing ?? { mode }), mode };
+    if (override.checkpointScopes !== undefined) {
+      if (!isRecord(override.checkpointScopes)) throw new Error(`aliases.${name}.checkpointScopes must be an object`);
+      alias.checkpointScopes = { ...(override.checkpointScopes as Partial<CheckpointScopesConfig>) };
+    }
+    merged[name] = alias;
+  }
+  return merged;
+}
+
 function mergeCheckpoint(override: unknown): GsdMoaConfig["checkpoint"] {
   if (!isRecord(override)) return structuredClone(DEFAULT_CONFIG.checkpoint);
   return {
@@ -510,6 +539,9 @@ function mergeCheckpoint(override: unknown): GsdMoaConfig["checkpoint"] {
     scopes: isRecord(override.scopes)
       ? { ...DEFAULT_CONFIG.checkpoint.scopes, ...override.scopes } as GsdMoaConfig["checkpoint"]["scopes"]
       : structuredClone(DEFAULT_CONFIG.checkpoint.scopes),
+    rescue: isRecord(override.rescue)
+      ? { ...DEFAULT_CONFIG.checkpoint.rescue, ...override.rescue } as GsdMoaConfig["checkpoint"]["rescue"]
+      : structuredClone(DEFAULT_CONFIG.checkpoint.rescue),
   } as GsdMoaConfig["checkpoint"];
 }
 
@@ -527,12 +559,25 @@ function parseCheckpointScopes(raw: string): GsdMoaConfig["checkpoint"]["scopes"
 
 function validateCheckpointScopes(scopes: GsdMoaConfig["checkpoint"]["scopes"]): void {
   if (!isRecord(scopes)) throw new Error("checkpoint.scopes must be an object");
-  const allowed = new Set(["initial", "drift", "failure"]);
-  for (const scope of Object.keys(scopes)) {
-    if (!allowed.has(scope)) throw new Error(`checkpoint.scopes contains unsupported scope: ${scope}`);
-  }
+  validatePartialCheckpointScopes("checkpoint.scopes", scopes);
   for (const scope of ["initial", "drift", "failure"] as const) {
     if (typeof scopes[scope] !== "boolean") throw new Error(`checkpoint.scopes.${scope} must be boolean`);
+  }
+}
+
+function validatePartialCheckpointScopes(label: string, scopes: Partial<CheckpointScopesConfig>): void {
+  if (!isRecord(scopes)) throw new Error(`${label} must be an object`);
+  const allowed = new Set(["initial", "drift", "failure"]);
+  for (const scope of Object.keys(scopes)) {
+    if (!allowed.has(scope)) throw new Error(`${label} contains unsupported scope: ${scope}`);
+    if (typeof scopes[scope as keyof CheckpointScopesConfig] !== "boolean") throw new Error(`${label}.${scope} must be boolean`);
+  }
+}
+
+function validateRescuePolicy(rescue: GsdMoaConfig["checkpoint"]["rescue"]): void {
+  if (!isRecord(rescue)) throw new Error("checkpoint.rescue must be an object");
+  for (const key of ["consecutiveFailures", "repeatedSignatureMin", "maxPerTask", "cooldownToolResults"] as const) {
+    if (!Number.isInteger(rescue[key]) || rescue[key] < 1) throw new Error(`checkpoint.rescue.${key} must be a positive integer`);
   }
 }
 

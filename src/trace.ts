@@ -217,7 +217,7 @@ function compactPrimaryEvent(event: AssistantMessageEvent, includeOutputs: boole
 }
 
 function compactAction(action: MoaAction): MoaAction {
-  if (action.kind === "single" || !action.observationSummary) return traceClone(action);
+  if (!action.observationSummary) return traceClone(action);
   const { text: _text, ...summary } = action.observationSummary;
   return traceClone({ ...action, observationSummary: summary }) as MoaAction;
 }

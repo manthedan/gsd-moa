@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import type { Context } from "../src/pi-compat.js";
 import { DEFAULT_CONFIG, loadConfig, resetConfigCache, resolveProposerRoute, resolveSynthesisRoute, validateConfig } from "../src/config.ts";
 import { advisorCacheKey, readAdvisorCache, readCacheByKey, referenceCacheKey, writeAdvisorCache } from "../src/cache.ts";
-import { buildToolObservationSummary, hasRecentToolResults, latestUserText, sanitizeReferenceContext } from "../src/context.ts";
+import { buildToolObservationSummary, countAdvisorInjections, hasRecentToolResults, latestUserText, sanitizeReferenceContext } from "../src/context.ts";
 import { chooseAction, chooseMode, stripMoaMarkers } from "../src/policy.ts";
 import { applyModelPreset } from "../src/presets.ts";
 import { resolveConfigValue, streamOptionsForRoute } from "../src/upstream.ts";
@@ -74,51 +74,132 @@ describe("mode policy", () => {
     assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-advisor", latestUserText: "<!-- gsd-moa:off --> review" }).mode, "single");
   });
 
-  it("chooses checkpoint actions for tool-loop continuations", () => {
-    const failedContext: Context = {
+  it("only fires failure checkpoints for repeated trailing failures", () => {
+    const singleFailure: Context = {
       messages: [
         { role: "user", content: "<!-- gsd-moa:full --> fix tests", timestamp: 1 },
         { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "npm test exited with status 1\nAssertionError: expected true" }], isError: true, timestamp: 2 } as any,
       ],
     };
-    const failedInput = {
+    const singleInput = {
       alias: "gpt55-glm52-full",
-      latestUserText: latestUserText(failedContext, true),
-      hasToolResults: hasRecentToolResults(failedContext),
-      recentToolSummary: buildToolObservationSummary(failedContext),
+      latestUserText: latestUserText(singleFailure, true),
+      hasToolResults: hasRecentToolResults(singleFailure),
+      recentToolSummary: buildToolObservationSummary(singleFailure),
     };
-    const failedPolicy = chooseMode(DEFAULT_CONFIG, failedInput);
-    const failedAction = chooseAction(DEFAULT_CONFIG, failedPolicy, failedInput);
-    assert.equal(failedAction.kind, "run");
-    if (failedAction.kind === "run") {
-      assert.equal(failedAction.scope, "failure");
-      assert.equal(failedAction.mode, "full_moa");
-      assert.ok(failedAction.observationSummary?.latestFailureSignals.includes("tool-result-error"));
-    }
+    assert.deepEqual(chooseAction(DEFAULT_CONFIG, chooseMode(DEFAULT_CONFIG, singleInput), singleInput), { kind: "single", reason: "tool-loop continuation without checkpoint signal" });
 
-    const explicitFullSingleAliasInput = { ...failedInput, alias: "gpt55-glm52-single" };
-    const explicitFullSingleAliasAction = chooseAction(DEFAULT_CONFIG, chooseMode(DEFAULT_CONFIG, explicitFullSingleAliasInput), explicitFullSingleAliasInput);
-    assert.equal(explicitFullSingleAliasAction.kind, "run");
-    if (explicitFullSingleAliasAction.kind === "run") {
-      assert.equal(explicitFullSingleAliasAction.scope, "failure");
-      assert.equal(explicitFullSingleAliasAction.mode, "full_moa");
-    }
-
-    const successContext: Context = {
+    const successBreaksStreak: Context = {
       messages: [
-        failedContext.messages[0],
-        failedContext.messages[1],
-        { role: "toolResult", toolName: "Bash", toolCallId: "call-2", content: [{ type: "text", text: "created file\ndone" }], timestamp: 3 } as any,
+        singleFailure.messages[0],
+        singleFailure.messages[1],
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-2", content: [{ type: "text", text: "error: still failing" }], isError: true, timestamp: 3 } as any,
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-3", content: [{ type: "text", text: "created file\ndone" }], timestamp: 4 } as any,
       ],
     };
     const successInput = {
       alias: "gpt55-glm52-full",
-      latestUserText: latestUserText(successContext, true),
-      hasToolResults: hasRecentToolResults(successContext),
-      recentToolSummary: buildToolObservationSummary(successContext),
+      latestUserText: latestUserText(successBreaksStreak, true),
+      hasToolResults: true,
+      recentToolSummary: buildToolObservationSummary(successBreaksStreak),
     };
-    const successAction = chooseAction(DEFAULT_CONFIG, chooseMode(DEFAULT_CONFIG, successInput), successInput);
-    assert.deepEqual(successAction, { kind: "single", reason: "tool-loop continuation without checkpoint signal" });
+    assert.equal(successInput.recentToolSummary?.trailingFailureStreak, 0);
+    const noDriftCfg = { ...DEFAULT_CONFIG, checkpoint: { ...DEFAULT_CONFIG.checkpoint, driftToolResultThreshold: 10 } };
+    assert.deepEqual(chooseAction(noDriftCfg, chooseMode(noDriftCfg, successInput), successInput), { kind: "single", reason: "tool-loop continuation without checkpoint signal" });
+
+    const rescueContext: Context = {
+      messages: [
+        { role: "user", content: "<!-- gsd-moa:full --> fix tests", timestamp: 1 },
+        ...[1, 2, 3].map((n) => ({ role: "toolResult", toolName: "Bash", toolCallId: `call-${n}`, content: [{ type: "text", text: "npm test exited with status 1\nAssertionError: expected true" }], isError: true, timestamp: n + 1 }) as any),
+      ],
+    };
+    const rescueInput = {
+      alias: "gpt55-glm52-full",
+      latestUserText: latestUserText(rescueContext, true),
+      hasToolResults: true,
+      recentToolSummary: buildToolObservationSummary(rescueContext),
+    };
+    const rescueAction = chooseAction(DEFAULT_CONFIG, chooseMode(DEFAULT_CONFIG, rescueInput), rescueInput);
+    assert.equal(rescueAction.kind, "run");
+    if (rescueAction.kind === "run") {
+      assert.equal(rescueAction.scope, "failure");
+      assert.equal(rescueAction.mode, "advisor");
+      assert.match(rescueAction.reason, /MoA rescue: 3 consecutive failures/);
+      assert.match(rescueAction.reason, /Bash\|/);
+      assert.equal(rescueAction.observationSummary?.trailingFailureStreak, 3);
+    }
+
+    const distinctFailures: Context = {
+      messages: [
+        { role: "user", content: "<!-- gsd-moa:full --> fix tests", timestamp: 1 },
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "AssertionError: expected true" }], timestamp: 2 } as any,
+        { role: "toolResult", toolName: "Read", toolCallId: "call-2", content: [{ type: "text", text: "Error: not found" }], timestamp: 3 } as any,
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-3", content: [{ type: "text", text: "timeout" }], timestamp: 4 } as any,
+      ],
+    };
+    const distinctInput = { alias: "gpt55-glm52-full", latestUserText: latestUserText(distinctFailures, true), hasToolResults: true, recentToolSummary: buildToolObservationSummary(distinctFailures) };
+    assert.equal(distinctInput.recentToolSummary?.repeatedFailureSignature, undefined);
+    assert.deepEqual(chooseAction(noDriftCfg, chooseMode(noDriftCfg, distinctInput), distinctInput), { kind: "single", reason: "tool-loop continuation without checkpoint signal" });
+  });
+
+  it("applies rescue caps, cooldowns, advisor-only mode, and alias scope overrides", () => {
+    const rescueContext: Context = {
+      messages: [
+        { role: "user", content: "fix tests", timestamp: 1 },
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "timeout and process crashed" }], timestamp: 2 } as any,
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-2", content: [{ type: "text", text: "timeout and process crashed" }], timestamp: 3 } as any,
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-3", content: [{ type: "text", text: "timeout and process crashed" }], timestamp: 4 } as any,
+      ],
+    };
+    const baseInput = { alias: "gpt55-glm52-full", latestUserText: latestUserText(rescueContext, true), hasToolResults: true, recentToolSummary: buildToolObservationSummary(rescueContext) };
+    const action = chooseAction(DEFAULT_CONFIG, chooseMode(DEFAULT_CONFIG, baseInput), baseInput);
+    assert.equal(action.kind, "run");
+    if (action.kind === "run") assert.equal(action.mode, "advisor");
+
+    const capped = chooseAction(DEFAULT_CONFIG, chooseMode(DEFAULT_CONFIG, baseInput), { ...baseInput, advisorInjectionCount: 2 });
+    assert.equal(capped.kind, "single");
+    assert.match(capped.reason, /maxPerTask/);
+
+    const cooledDown = chooseAction(DEFAULT_CONFIG, chooseMode(DEFAULT_CONFIG, baseInput), { ...baseInput, advisorInjectionCount: 1, toolResultsSinceLastInjection: 5 });
+    assert.equal(cooledDown.kind, "single");
+    assert.match(cooledDown.reason, /cooldown/);
+
+    const enoughCooldown = chooseAction(DEFAULT_CONFIG, chooseMode(DEFAULT_CONFIG, baseInput), { ...baseInput, advisorInjectionCount: 1, toolResultsSinceLastInjection: 6 });
+    assert.equal(enoughCooldown.kind, "run");
+
+    const cfg = structuredClone(DEFAULT_CONFIG);
+    cfg.checkpoint.driftToolResultThreshold = 3;
+    cfg.aliases["rescue-only-test"] = { mode: "auto", checkpointScopes: { initial: false, drift: false, failure: true } };
+    const driftContext: Context = {
+      messages: [
+        { role: "user", content: "continue", timestamp: 1 },
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "done 1" }], timestamp: 2 } as any,
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-2", content: [{ type: "text", text: "done 2" }], timestamp: 3 } as any,
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-3", content: [{ type: "text", text: "done 3" }], timestamp: 4 } as any,
+      ],
+    };
+    const driftInput = { alias: "rescue-only-test", latestUserText: latestUserText(driftContext, true), hasToolResults: true, recentToolSummary: buildToolObservationSummary(driftContext) };
+    assert.deepEqual(chooseAction(cfg, chooseMode(cfg, driftInput), driftInput), { kind: "single", reason: "scope drift disabled" });
+    const rescueOnlyInput = { ...baseInput, alias: "rescue-only-test" };
+    const rescueOnlyAction = chooseAction(cfg, chooseMode(cfg, rescueOnlyInput), rescueOnlyInput);
+    assert.equal(rescueOnlyAction.kind, "run");
+    if (rescueOnlyAction.kind === "run") assert.equal(rescueOnlyAction.scope, "failure");
+  });
+
+  it("counts advisor guidance injections and tool results since the last one", () => {
+    const context: Context = {
+      messages: [
+        { role: "user", content: "task", timestamp: 1 },
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "done" }], timestamp: 2 } as any,
+        { role: "user", content: "[gsd-moa advisor guidance — private context]\nGuidance", timestamp: 3 },
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-2", content: [{ type: "text", text: "done" }], timestamp: 4 } as any,
+        { role: "user", content: "[gsd-moa full MoA guidance — private context]\nGuidance", timestamp: 5 },
+        { role: "toolResult", toolName: "Read", toolCallId: "call-3", content: [{ type: "text", text: "done" }], timestamp: 6 } as any,
+        { role: "toolResult", toolName: "Bash", toolCallId: "call-4", content: [{ type: "text", text: "done" }], timestamp: 7 } as any,
+      ],
+    };
+    assert.deepEqual(countAdvisorInjections(context), { count: 2, toolResultsSinceLast: 2 });
+    assert.deepEqual(countAdvisorInjections({ messages: [{ role: "user", content: "task", timestamp: 1 }] }), { count: 0, toolResultsSinceLast: Number.MAX_SAFE_INTEGER });
   });
 
   it("fires drift checkpoints periodically using uncapped tool-result count", () => {
@@ -177,7 +258,7 @@ describe("mode policy", () => {
     const failureContext: Context = {
       messages: [
         { role: "user", content: "deep review", timestamp: 1 },
-        { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "Error: failed" }], isError: true, timestamp: 2 } as any,
+        ...[1, 2, 3].map((n) => ({ role: "toolResult", toolName: "Bash", toolCallId: `call-${n}`, content: [{ type: "text", text: "Error: failed" }], isError: true, timestamp: n + 1 }) as any),
       ],
     };
     const failureInput = { alias: "gpt55-glm52-full", latestUserText: latestUserText(failureContext, true), hasToolResults: true, recentToolSummary: buildToolObservationSummary(failureContext) };
@@ -198,14 +279,28 @@ describe("mode policy", () => {
 
     const dir = mkdtempSync(join(tmpdir(), "gsd-moa-scope-env-test-"));
     const oldScopes = process.env.GSD_MOA_CHECKPOINT_SCOPES;
+    const oldRescueFailures = process.env.GSD_MOA_RESCUE_CONSECUTIVE_FAILURES;
+    const oldRescueMax = process.env.GSD_MOA_RESCUE_MAX_PER_TASK;
+    const oldRescueCooldown = process.env.GSD_MOA_RESCUE_COOLDOWN_TOOL_RESULTS;
     try {
       process.env.GSD_MOA_CHECKPOINT_SCOPES = "initial,failure";
-      assert.deepEqual(loadConfig("missing.json", dir).checkpoint.scopes, { initial: true, drift: false, failure: true });
+      process.env.GSD_MOA_RESCUE_CONSECUTIVE_FAILURES = "4";
+      process.env.GSD_MOA_RESCUE_MAX_PER_TASK = "3";
+      process.env.GSD_MOA_RESCUE_COOLDOWN_TOOL_RESULTS = "8";
+      const envCfg = loadConfig("missing.json", dir);
+      assert.deepEqual(envCfg.checkpoint.scopes, { initial: true, drift: false, failure: true });
+      assert.deepEqual(envCfg.checkpoint.rescue, { ...DEFAULT_CONFIG.checkpoint.rescue, consecutiveFailures: 4, maxPerTask: 3, cooldownToolResults: 8 });
       process.env.GSD_MOA_CHECKPOINT_SCOPES = "initial,unknown";
       assert.throws(() => loadConfig("missing.json", dir), /unsupported scope: unknown/);
     } finally {
       if (oldScopes === undefined) delete process.env.GSD_MOA_CHECKPOINT_SCOPES;
       else process.env.GSD_MOA_CHECKPOINT_SCOPES = oldScopes;
+      if (oldRescueFailures === undefined) delete process.env.GSD_MOA_RESCUE_CONSECUTIVE_FAILURES;
+      else process.env.GSD_MOA_RESCUE_CONSECUTIVE_FAILURES = oldRescueFailures;
+      if (oldRescueMax === undefined) delete process.env.GSD_MOA_RESCUE_MAX_PER_TASK;
+      else process.env.GSD_MOA_RESCUE_MAX_PER_TASK = oldRescueMax;
+      if (oldRescueCooldown === undefined) delete process.env.GSD_MOA_RESCUE_COOLDOWN_TOOL_RESULTS;
+      else process.env.GSD_MOA_RESCUE_COOLDOWN_TOOL_RESULTS = oldRescueCooldown;
       rmSync(dir, { recursive: true, force: true });
     }
   });

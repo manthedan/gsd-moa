@@ -33,6 +33,7 @@ export type RoutePresetConfig = Partial<UpstreamRoute>;
 
 export interface AliasConfig {
   mode: AliasMode;
+  checkpointScopes?: Partial<CheckpointScopesConfig>;
 }
 
 export interface AutoPolicyConfig {
@@ -66,11 +67,19 @@ export interface CheckpointScopesConfig {
   failure: boolean;
 }
 
+export interface RescuePolicyConfig {
+  consecutiveFailures: number;
+  repeatedSignatureMin: number;
+  maxPerTask: number;
+  cooldownToolResults: number;
+}
+
 export interface CheckpointPolicyConfig {
   enabled: boolean;
   maxToolResults: number;
   driftToolResultThreshold: number;
   scopes: CheckpointScopesConfig;
+  rescue: RescuePolicyConfig;
 }
 
 export type TimePhase = "explore" | "implement" | "validate" | "reserve";
@@ -158,6 +167,9 @@ export interface ToolObservationSummary {
   successSignals: string[];
   filesMentioned: string[];
   likelyStateChange: boolean;
+  trailingFailureStreak: number;
+  repeatedFailureSignature?: string;
+  repeatedFailureSignatureCount?: number;
   digest: string;
   text: string;
 }
@@ -169,6 +181,9 @@ export interface PolicyInput {
   hasFreshMoaMarker?: boolean;
   recentToolSummary?: ToolObservationSummary;
   timeState?: TimeState;
+  advisorInjectionCount?: number;
+  toolResultsSinceLastInjection?: number;
+  effectiveScopes?: CheckpointScopesConfig;
 }
 
 export interface PolicyDecision {
@@ -182,7 +197,7 @@ export interface PolicyDecision {
 export type CheckpointScope = "initial" | "explicit" | "failure" | "drift";
 
 export type MoaAction =
-  | { kind: "single"; reason: string }
+  | { kind: "single"; reason: string; observationSummary?: ToolObservationSummary; rescueSuppressionReason?: string }
   | { kind: "run"; mode: Exclude<MoaMode, "single">; scope: CheckpointScope; reason: string; observationSummary?: ToolObservationSummary };
 
 export interface AdvisorResult {
@@ -272,6 +287,9 @@ export interface MoaRunDetails {
   observationToolResultCount?: number;
   observationLatestFailureSignals?: string[];
   observationFailureSignals?: string[];
+  rescueTrailingFailureStreak?: number;
+  rescueSignature?: string;
+  rescueAdvisorInjectionCount?: number;
   observationFilesMentioned?: string[];
   cacheHit?: boolean;
   guidanceInjected?: boolean;

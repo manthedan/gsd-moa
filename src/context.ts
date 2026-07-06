@@ -56,10 +56,21 @@ export function buildToolObservationSummary(context: Context, maxToolResults = 4
       importantLines,
     };
   });
+  const allChunks = allToolResults.map((msg, index) => {
+    const raw = redactSensitiveText(msg.content.map((item) => item.type === "text" ? item.text : "[image]").join("\n"));
+    return {
+      index: index + 1,
+      toolName: msg.toolName,
+      isError: Boolean(msg.isError),
+      raw,
+    };
+  });
   const latestChunk = chunks.at(-1);
   const latestFailureSignals = latestChunk ? unique(detectFailureSignals(latestChunk.raw, latestChunk.isError)) : [];
   const failureSignals = unique(chunks.flatMap((chunk) => detectFailureSignals(chunk.raw, chunk.isError)));
   const successSignals = unique(chunks.flatMap((chunk) => detectSuccessSignals(chunk.raw, chunk.isError)));
+  const trailingFailures = trailingFailureChunks(allChunks);
+  const repeatedFailure = dominantRepeatedSignature(trailingFailures.map((chunk) => chunk.signature));
   const filesMentioned = unique(chunks.flatMap((chunk) => Array.from(chunk.raw.matchAll(/[A-Za-z0-9_./-]+\.[A-Za-z0-9_/-]+/g)).map((match) => match[0]).slice(0, 10))).slice(0, 20);
   const likelyStateChange = chunks.some((chunk) => /\b(wrote|created|updated|modified|deleted|patched|installed|saved|generated)\b/i.test(chunk.raw));
   const text = [
@@ -71,21 +82,78 @@ export function buildToolObservationSummary(context: Context, maxToolResults = 4
     failureSignals.length ? `Failure signals: ${failureSignals.join("; ")}` : undefined,
     successSignals.length ? `Success/progress signals: ${successSignals.join("; ")}` : undefined,
     filesMentioned.length ? `Files mentioned: ${filesMentioned.join(", ")}` : undefined,
+    trailingFailures.length >= 2 ? `Trailing failure streak: ${trailingFailures.length} (signature: ${repeatedFailure?.signature ?? trailingFailures.at(-1)?.signature})` : undefined,
     "Update your advice based on these observations. Do not repeat the initial plan unless it is still directly relevant.",
   ].filter(Boolean).join("\n");
 
   return {
     toolResultCount: toolResults.length,
     totalToolResultCount: allToolResults.length,
-    failedToolResultCount: chunks.filter((chunk) => chunk.isError).length,
+    failedToolResultCount: chunks.filter((chunk) => detectFailureSignals(chunk.raw, chunk.isError).length > 0).length,
     latestFailureSignals,
     failureSignals,
     successSignals,
     filesMentioned,
     likelyStateChange,
+    trailingFailureStreak: trailingFailures.length,
+    repeatedFailureSignature: repeatedFailure?.signature,
+    repeatedFailureSignatureCount: repeatedFailure?.count,
     digest: createHash("sha256").update(text).digest("hex"),
     text,
   };
+}
+
+export function countAdvisorInjections(context: Context): { count: number; toolResultsSinceLast: number } {
+  let count = 0;
+  let lastInjectionIndex = -1;
+  context.messages.forEach((message, index) => {
+    if (message.role !== "user") return;
+    const text = rawMessageText(message);
+    if (text.startsWith("[gsd-moa advisor guidance") || text.startsWith("[gsd-moa full MoA guidance")) {
+      count += 1;
+      lastInjectionIndex = index;
+    }
+  });
+  if (lastInjectionIndex < 0) return { count, toolResultsSinceLast: Number.MAX_SAFE_INTEGER };
+  return {
+    count,
+    toolResultsSinceLast: context.messages.slice(lastInjectionIndex + 1).filter((message) => message.role === "toolResult").length,
+  };
+}
+
+type FailureChunk = { signature: string };
+
+function trailingFailureChunks(chunks: Array<{ toolName: string; isError: boolean; raw: string }>): FailureChunk[] {
+  const trailing: FailureChunk[] = [];
+  for (let i = chunks.length - 1; i >= 0; i--) {
+    const chunk = chunks[i];
+    const failureSignals = unique(detectFailureSignals(chunk.raw, chunk.isError)).sort();
+    const successSignals = detectSuccessSignals(chunk.raw, chunk.isError);
+    if (failureSignals.length > 0) {
+      const signatureSignals = failureSignals.length > 0 ? failureSignals : ["tool-result-error"];
+      trailing.unshift({ signature: `${chunk.toolName}|${signatureSignals.join(",")}` });
+      continue;
+    }
+    if (successSignals.length > 0) break;
+    break;
+  }
+  return trailing;
+}
+
+function dominantRepeatedSignature(signatures: string[]): { signature: string; count: number } | undefined {
+  const counts = new Map<string, { count: number; latestIndex: number }>();
+  signatures.forEach((signature, index) => {
+    const existing = counts.get(signature);
+    counts.set(signature, { count: (existing?.count ?? 0) + 1, latestIndex: index });
+  });
+  let dominant: { signature: string; count: number; latestIndex: number } | undefined;
+  for (const [signature, details] of counts.entries()) {
+    if (details.count < 2) continue;
+    if (!dominant || details.count > dominant.count || (details.count === dominant.count && details.latestIndex > dominant.latestIndex)) {
+      dominant = { signature, ...details };
+    }
+  }
+  return dominant ? { signature: dominant.signature, count: dominant.count } : undefined;
 }
 
 export function redactSensitiveText(raw: string): string {

@@ -570,13 +570,15 @@ describe("full MoA orchestration", () => {
     }
   });
 
-  it("reruns full MoA with compact observations after a failed tool result", async () => {
+  it("runs rescue advisor with compact observations after repeated failed tool results", async () => {
     const { cfg, dir } = tempConfig();
     try {
       const context: Context = {
         messages: [
           { role: "user", content: "<!-- gsd-moa:full --> fix the failing test", timestamp: 1 },
           { role: "toolResult", toolName: "Bash", toolCallId: "call-1", content: [{ type: "text", text: "npm test exited with status 1\nAssertionError: expected 2 actual 3\nsrc/example.test.ts" }], isError: true, timestamp: 2 } as any,
+          { role: "toolResult", toolName: "Bash", toolCallId: "call-2", content: [{ type: "text", text: "npm test exited with status 1\nAssertionError: expected 2 actual 3\nsrc/example.test.ts" }], isError: true, timestamp: 3 } as any,
+          { role: "toolResult", toolName: "Bash", toolCallId: "call-3", content: [{ type: "text", text: "npm test exited with status 1\nAssertionError: expected 2 actual 3\nsrc/example.test.ts" }], isError: true, timestamp: 4 } as any,
         ],
         tools: [{ name: "Bash", description: "run shell", parameters: { type: "object" } as any }],
       };
@@ -588,22 +590,24 @@ describe("full MoA orchestration", () => {
         },
         stream(seenModel, seenContext) {
           assert.doesNotMatch(seenContext.systemPrompt ?? "", /Mixture of Agents reference context/);
-          assert.match(JSON.stringify(seenContext.messages), /Mixture of Agents reference context/);
+          assert.match(JSON.stringify(seenContext.messages), /gsd-moa advisor guidance/);
           return streamText(seenModel, "final", usage(1, 1));
         },
       };
 
       const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
-      assert.equal(referenceContexts.length, cfg.fullMoa.proposers.length + 1);
+      assert.equal(referenceContexts.length, 1);
       assert.ok(referenceContexts.every((seenContext) => JSON.stringify(seenContext.messages).includes("Recent tool observations:")));
       assert.ok(referenceContexts.every((seenContext) => JSON.stringify(seenContext.messages).includes("AssertionError")));
       const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
       const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
-      assert.equal(details.mode, "full_moa");
+      assert.equal(details.mode, "advisor");
       assert.equal(details.checkpointScope, "failure");
-      assert.match(details.reason, /tool failure/);
+      assert.match(details.reason, /MoA rescue: 3 consecutive failures/);
       assert.equal(details.guidanceInjected, true);
-      assert.equal(details.observationToolResultCount, 1);
+      assert.equal(details.observationToolResultCount, 3);
+      assert.equal(details.rescueTrailingFailureStreak, 3);
+      assert.ok(details.rescueSignature.includes("Bash|"));
       assert.ok(details.observationDigest);
       assert.ok(details.observationLatestFailureSignals.includes("tool-result-error"));
       assert.ok(details.observationFilesMentioned.includes("src/example.test.ts"));

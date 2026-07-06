@@ -1,5 +1,5 @@
 import { hasReferenceTimeBudget } from "./time.js";
-import type { AliasMode, GsdMoaConfig, MoaAction, MoaMode, PolicyDecision, PolicyInput } from "./types.js";
+import type { AliasMode, CheckpointScopesConfig, GsdMoaConfig, MoaAction, MoaMode, PolicyDecision, PolicyInput } from "./types.js";
 
 const ADVISOR_MARKERS = ["<!-- gsd-moa:advisor -->", "<!-- gsd-moa:on -->"];
 const FULL_MOA_MARKERS = ["<!-- gsd-moa:full -->", "<!-- gsd-moa:full_moa -->"];
@@ -66,6 +66,7 @@ export function chooseAction(config: GsdMoaConfig, policy: PolicyDecision, input
   const explicitSingle = policy.markers.some((m) => SINGLE_MARKERS.includes(m));
   const explicitFreshMoaMarker = Boolean(input.hasFreshMoaMarker && (explicitAdvisor || explicitFull));
   const summary = input.recentToolSummary;
+  const effectiveScopes = input.effectiveScopes ?? { ...config.checkpoint.scopes, ...(config.aliases[input.alias]?.checkpointScopes ?? {}) };
 
   if (explicitSingle) return { kind: "single", reason: policy.reason };
 
@@ -79,7 +80,7 @@ export function chooseAction(config: GsdMoaConfig, policy: PolicyDecision, input
 
   if (!input.hasToolResults) {
     if (policy.mode === "advisor" || policy.mode === "full_moa") {
-      return scopedRun(config, {
+      return scopedRun(effectiveScopes, {
         kind: "run",
         mode: policy.mode,
         scope: explicitAdvisor || explicitFull ? "explicit" : "initial",
@@ -99,24 +100,31 @@ export function chooseAction(config: GsdMoaConfig, policy: PolicyDecision, input
     };
   }
 
-  if (summary && summary.latestFailureSignals.length > 0 && (policy.requestedMode !== "single" || explicitAdvisor || explicitFull)) {
-    const requested = policy.requestedMode === "full_moa" || policy.mode === "full_moa";
-    const repeatedOrSevere = summary.failedToolResultCount >= 2 || summary.latestFailureSignals.includes("timeout") || summary.latestFailureSignals.includes("process-crash");
-    const mode = requested || repeatedOrSevere ? "full_moa" : "advisor";
-    return scopedRun(config, {
-      kind: "run",
-      mode: mode === "full_moa" && config.fullMoa.enabled ? "full_moa" : "advisor",
-      scope: "failure",
-      reason: `MoA checkpoint after latest tool failure: ${summary.latestFailureSignals.join(", ")}`,
-      observationSummary: summary,
-    });
+  const rescueEligibleByMode = policy.requestedMode !== "single" || explicitAdvisor || explicitFull;
+  if (summary?.trailingFailureStreak && summary.trailingFailureStreak >= config.checkpoint.rescue.consecutiveFailures && rescueEligibleByMode) {
+    const rescueSignatureCount = summary.repeatedFailureSignatureCount ?? 0;
+    if (summary.repeatedFailureSignature && rescueSignatureCount >= config.checkpoint.rescue.repeatedSignatureMin) {
+      if ((input.advisorInjectionCount ?? 0) >= config.checkpoint.rescue.maxPerTask) {
+        return rescueSuppressed("maxPerTask", summary, input);
+      }
+      if ((input.toolResultsSinceLastInjection ?? Number.MAX_SAFE_INTEGER) < config.checkpoint.rescue.cooldownToolResults) {
+        return rescueSuppressed("cooldown", summary, input);
+      }
+      return scopedRun(effectiveScopes, {
+        kind: "run",
+        mode: "advisor",
+        scope: "failure",
+        reason: `MoA rescue: ${summary.trailingFailureStreak} consecutive failures (${summary.repeatedFailureSignature})`,
+        observationSummary: summary,
+      });
+    }
   }
 
   const driftEligible = policy.mode === "advisor" || policy.mode === "full_moa" || policy.requestedMode === "auto";
   if (summary && summary.totalToolResultCount > 0 && summary.totalToolResultCount % config.checkpoint.driftToolResultThreshold === 0 && driftEligible) {
     const baseMode = policy.mode === "full_moa" && config.fullMoa.enabled ? "full_moa" : "advisor";
     const mode = config.timeAware.downgradeInValidate && input.timeState?.phase === "validate" && baseMode === "full_moa" ? "advisor" : baseMode;
-    return scopedRun(config, {
+    return scopedRun(effectiveScopes, {
       kind: "run",
       mode,
       scope: "drift",
@@ -130,9 +138,21 @@ export function chooseAction(config: GsdMoaConfig, policy: PolicyDecision, input
   return { kind: "single", reason: "tool-loop continuation without checkpoint signal" };
 }
 
-function scopedRun(config: GsdMoaConfig, action: Extract<MoaAction, { kind: "run" }>): MoaAction {
+function scopedRun(effectiveScopes: CheckpointScopesConfig, action: Extract<MoaAction, { kind: "run" }>): MoaAction {
   if (action.scope === "explicit") return action;
-  return config.checkpoint.scopes[action.scope] ? action : { kind: "single", reason: `scope ${action.scope} disabled` };
+  return effectiveScopes[action.scope] ? action : { kind: "single", reason: `scope ${action.scope} disabled` };
+}
+
+function rescueSuppressed(reason: "maxPerTask" | "cooldown", summary: NonNullable<PolicyInput["recentToolSummary"]>, input: PolicyInput): MoaAction {
+  const detail = reason === "maxPerTask"
+    ? `maxPerTask reached (${input.advisorInjectionCount ?? 0})`
+    : `cooldown active (${input.toolResultsSinceLastInjection ?? Number.MAX_SAFE_INTEGER} tool results since last injection)`;
+  return {
+    kind: "single",
+    reason: `MoA rescue suppressed: ${detail}`,
+    observationSummary: summary,
+    rescueSuppressionReason: reason,
+  };
 }
 
 function shouldSuppressForReserve(config: GsdMoaConfig, input: PolicyInput): boolean {

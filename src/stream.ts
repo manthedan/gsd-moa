@@ -10,19 +10,48 @@ import {
 import { runAdvisor } from "./advisor.js";
 import { maybeUseAsyncAdvisor, type AsyncAdvisorDecision } from "./async-advisor.js";
 import { loadConfig } from "./config.js";
-import { buildToolObservationSummary, isToolLoopContinuation, latestMessageHasMoaMarker, latestUserText, redactSensitiveText, stripMarkersFromContext, withAdvisorGuidance, withBenchmarkIntegrityNote, withFullMoaGuidance, withTimeAwarenessNote } from "./context.js";
+import { buildToolObservationSummary, countAdvisorInjections, isToolLoopContinuation, latestMessageHasMoaMarker, latestUserText, redactSensitiveText, stripMarkersFromContext, withAdvisorGuidance, withBenchmarkIntegrityNote, withFullMoaGuidance, withTimeAwarenessNote } from "./context.js";
 import { runFullMoa } from "./moa.js";
 import { chooseAction, chooseMode } from "./policy.js";
 import { applyModelPreset } from "./presets.js";
+import { readRescueLedger, recordRescue, rescueLedgerKey } from "./rescue-ledger.js";
 import { timeEnvFromProcess, computeTimeState } from "./time.js";
 import { createTraceRecorder } from "./trace.js";
-import type { AdvisorResult, FullMoaResult, GsdMoaConfig, MoaAction, MoaRunDetails, TimeState } from "./types.js";
+import type { AdvisorResult, FullMoaResult, GsdMoaConfig, MoaAction, MoaRunDetails, PolicyInput, TimeState } from "./types.js";
 import { effortForTrace, routeToModel, streamOptionsForRoute, type UpstreamClient, compatUpstreamClient } from "./upstream.js";
 import { addUsage } from "./usage.js";
 
 export interface StreamDependencies {
   config?: GsdMoaConfig;
   upstream?: UpstreamClient;
+}
+
+export function assembleMoaPolicyInput(
+  config: GsdMoaConfig,
+  aliasId: string,
+  context: Context,
+  timeState?: TimeState,
+): PolicyInput {
+  const contextIsToolLoopContinuation = isToolLoopContinuation(context);
+  const recentToolSummary = contextIsToolLoopContinuation ? buildToolObservationSummary(context, config.checkpoint.maxToolResults) : undefined;
+  const contextInjections = countAdvisorInjections(context);
+  const ledgerEntry = readRescueLedger(rescueLedgerKey(aliasId, context));
+  const ledgerToolResultsSinceLast = ledgerEntry
+    ? Math.max(0, (recentToolSummary?.totalToolResultCount ?? 0) - ledgerEntry.totalToolResultsAtLast)
+    : Number.MAX_SAFE_INTEGER;
+  const aliasConfig = config.aliases[aliasId];
+  const effectiveScopes = { ...config.checkpoint.scopes, ...(aliasConfig?.checkpointScopes ?? {}) };
+  return {
+    alias: aliasId,
+    latestUserText: latestUserText(context, true),
+    hasToolResults: contextIsToolLoopContinuation,
+    hasFreshMoaMarker: latestMessageHasMoaMarker(context),
+    recentToolSummary,
+    timeState,
+    advisorInjectionCount: Math.max(contextInjections.count, ledgerEntry?.count ?? 0),
+    toolResultsSinceLastInjection: Math.min(contextInjections.toolResultsSinceLast, ledgerToolResultsSinceLast),
+    effectiveScopes,
+  };
 }
 
 export function streamGsdMoa(
@@ -39,16 +68,10 @@ export function streamGsdMoa(
       const config = applyModelPreset(deps.config ?? loadConfig(), model.id);
       const upstream = deps.upstream ?? compatUpstreamClient;
       const timeState = computeTimeState(config.timeAware, timeEnvFromProcess(), Date.now());
-      const contextIsToolLoopContinuation = isToolLoopContinuation(context);
-      const recentToolSummary = contextIsToolLoopContinuation ? buildToolObservationSummary(context, config.checkpoint.maxToolResults) : undefined;
-      const policyInput = {
-        alias: model.id,
-        latestUserText: latestUserText(context, true),
-        hasToolResults: contextIsToolLoopContinuation,
-        hasFreshMoaMarker: latestMessageHasMoaMarker(context),
-        recentToolSummary,
-        timeState,
-      };
+      const policyInput = assembleMoaPolicyInput(config, model.id, context, timeState);
+      const contextIsToolLoopContinuation = Boolean(policyInput.hasToolResults);
+      const recentToolSummary = policyInput.recentToolSummary;
+      const rescueKey = rescueLedgerKey(model.id, context);
       const requestedPolicy = chooseMode(config, policyInput);
       const action = chooseAction(config, requestedPolicy, policyInput);
       const policy = action.kind === "run"
@@ -108,6 +131,10 @@ export function streamGsdMoa(
         guidanceSkippedReason = action.reason;
       }
 
+      if (guidanceInjected === true && action.kind === "run" && action.scope === "failure") {
+        recordRescue(rescueKey, recentToolSummary?.totalToolResultCount ?? 0);
+      }
+
       if (timeState) finalContext = withTimeAwarenessNote(finalContext, timeState);
       if (config.benchmarkIntegrity) finalContext = withBenchmarkIntegrityNote(finalContext);
 
@@ -123,7 +150,7 @@ export function streamGsdMoa(
           const primaryUsage = event.message.usage;
           const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
           event.message.usage = combinedUsage;
-          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor);
+          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount);
           event.message.diagnostics = [
             ...(event.message.diagnostics ?? []),
             diagnostic,
@@ -133,7 +160,7 @@ export function streamGsdMoa(
           const primaryUsage = event.error.usage;
           const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
           event.error.usage = combinedUsage;
-          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor);
+          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount);
           event.error.diagnostics = [
             ...(event.error.diagnostics ?? []),
             diagnostic,
@@ -171,6 +198,7 @@ function moaDiagnostic(
   guidanceSkippedReason?: string,
   timeState?: TimeState,
   asyncAdvisor?: AsyncAdvisorDecision,
+  advisorInjectionCount?: number,
 ): NonNullable<AssistantMessage["diagnostics"]>[number] {
   const timeSuppressed = timeState && action.kind === "single" && action.reason.startsWith("time reserve") ? action.reason : undefined;
   const details: MoaRunDetails & { combinedUsage: AssistantMessage["usage"]; tracePath?: string } = {
@@ -178,11 +206,14 @@ function moaDiagnostic(
     requestedMode: policy.requestedMode,
     reason: policy.reason,
     ...(action.kind === "run" ? { checkpointScope: action.scope } : {}),
-    ...(action.kind === "run" && action.observationSummary ? {
+    ...(action.observationSummary ? {
       observationDigest: action.observationSummary.digest,
       observationToolResultCount: action.observationSummary.toolResultCount,
       observationLatestFailureSignals: action.observationSummary.latestFailureSignals,
       observationFailureSignals: action.observationSummary.failureSignals,
+      rescueTrailingFailureStreak: action.observationSummary.trailingFailureStreak,
+      ...(action.observationSummary.repeatedFailureSignature ? { rescueSignature: action.observationSummary.repeatedFailureSignature } : {}),
+      ...(advisorInjectionCount !== undefined ? { rescueAdvisorInjectionCount: advisorInjectionCount } : {}),
       observationFilesMentioned: action.observationSummary.filesMentioned,
     } : {}),
     cacheHit: fullMoa
