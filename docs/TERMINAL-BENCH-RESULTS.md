@@ -1,5 +1,29 @@
 # Terminal-Bench Evidence Snapshot
 
+## F2 rescue-triggered advice — first arm (2026-07-06)
+
+**Arm: `gpt55-cliproxycodex-glm52-rescue` (single + stuck-triggered advisor, `01eaa5f`), passable four, k=5, standard config, post-H1: 11/20 (55%), integrity-clean.** Per-task vs s2-single (k=3, pre-H1):
+
+| Task | s2-single | **f2-rescue (k=5)** | rescue fires |
+|---|---:|---:|---:|
+| extract-elf | 2/3 | 3/5 (+1 setup-flake fail, agent never ran) | 0 |
+| mcmc-sampling-stan | 2/3 | 4/5 (1 loss = AgentTimeout at ceiling, no failure streak) | 0 |
+| gcode-to-text | 1/3 | 0/5 | **1** |
+| overfull-hbox | 1/3 | 4/5 | 0 |
+
+**Mechanism read — the trigger does exactly what it was tuned to do:**
+
+- **One fire in 20 trials** (gcode `HZ5DX3S`): 3 consecutive sub-second `bash` exit-1 failures (`bash|tool-result-error` signature) → single GLM-5.2 advisory (~24s, effort high) correctly diagnosed a command-construction/quoting loop, told the actor to switch to python3 heredocs, and supplied a task strategy. **The failure loop ended immediately post-injection** (no re-fire, no cap suppression for the rest of the trial) — recovery-after-stuck: 1/1. The trial still failed on solution correctness (decoded text wrong), the F4-class defect advice can't fix.
+- **Zero spurious fires across 19 non-stuck trials, zero drift/initial checkpoints** (per-alias scopes verified live: `scope drift disabled` skips) — vs ckpt-full's ~2.5 fires/trial on the same failure-scope machinery. Total advisor overhead for the whole arm: **~24s** (s2 ckpt-full: ~1500s advisor-blocked in a single mcmc trial). Wall-time parity with single achieved trivially.
+- **Injected-guidance non-persistence confirmed live**: only the fire call's trace contains the guidance message; later contexts never do. The in-process rescue ledger (not context scanning) is what makes `maxPerTask`/cooldown real — the round-1 implementation would have re-advised every turn while stuck.
+- **The two loss classes rescue correctly ignores**: clock exhaustion without error streaks (mcmc `vboGrPj`, cancelled at ceiling — F1 async territory) and confidently-wrong solutions with clean tool results (gcode/torch class — F4 territory).
+
+**Pass-rate read: 11/20 (55%) vs s2-single 6/12 (50%) — no detectable lift, as expected** (1 fire/20 trials can't move an aggregate; overfull 4/5 vs 1/3 has zero fires so it's H1/variance, not MoA). The mechanism is validated — cheap, quiet, fires correctly, and cured the one stuck loop it saw — but on the passable four, stuck-ness is rare: **the rescue lever works; this task set offers it almost no leverage.** Supports the strategic pivot to judgment-checkpoint integration (GSD plan/review surfaces) with rescue kept as the default in-loop safety net.
+
+Artifacts: `jobs/f2-rescue` (yukon). Fire-trial traces: `2026-07-06__17-13-22/gcode-to-text__HZ5DX3S/agent/pi-gsd-moa/traces/` (fire call `...b5igm7gr.json`, `rescueAdvisorInjectionCount: 0`).
+
+---
+
 ## s4 post-H1 single on the hard four — the Droid gap decomposed (2026-07-04 night)
 
 **First arm carrying the H1 fix (`f71facc`). Single-mode `gpt55-cliproxycodex-single`, hard four (hard-file/raman/torch/caffe), k=3, standard config, integrity-clean: 1/12.** Per-task vs s2-single (pre-H1) and Droid:

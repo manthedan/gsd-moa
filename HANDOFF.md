@@ -1,8 +1,12 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench experiments
 
-Last updated: 2026-07-06 (F2 rescue implementation LANDED `01eaa5f`).
+Last updated: 2026-07-06 (F2 arm DONE — read in `docs/TERMINAL-BENCH-RESULTS.md` top section).
 
-## F2 rescue-triggered advice: IMPLEMENTED, not yet run
+## F2 ARM: DONE 2026-07-06 18:04 PT — 11/20 (55%), integrity-clean, yukon slot FREE
+
+`gpt55-cliproxycodex-glm52-rescue`, passable four, k=5: extract 3/5 (+1 setup flake) · mcmc 4/5 · overfull 4/5 · gcode 0/5. **Exactly 1 rescue fire in 20 trials** (gcode: 3× sub-second bash exit-1 loop → 24s GLM advisory → loop cured, trial still lost on solution correctness). Zero spurious fires, zero drift/initial, wall parity, ~24s total advisor overhead for the arm. Non-persistence of injected guidance confirmed live → the rescue ledger is the binding cap. **Read: mechanism VALIDATED, leverage on passable four ≈ nil (stuck-ness is rare there). Remaining losses are clock-class (F1) and solution-correctness-class (F4/GSD-checkpoint).** No bundle rebuild was needed (agent source overlays from checkout; tar only carries node_modules — HANDOFF's earlier "rebuild after src changes" was wrong for src-only commits). Arm driver: `/tmp/run-f2-rescue-arm.sh` (needs `PYTHONPATH=$HOME/projects/gsd-moa` for the harbor agent import). Aggregate: `/tmp/omp-bun/bun /tmp/aggregate-integrity.ts --dir ~/projects/gsd-moa/jobs/f2-rescue`.
+
+## F2 rescue-triggered advice: implementation notes (`01eaa5f`)
 
 `01eaa5f` (codex-implemented from Claude spec, 2 rounds, 127/127 tests): stuck trigger (≥3 consecutive trailing failed tool results with a repeated `tool|signals` signature; success breaks streak) replaces the any-single-failure checkpoint trigger; failure-scope runs are **always advisor** (full_moa escalation deleted); caps maxPerTask=2 + cooldown=6 tool results enforced via in-process `src/rescue-ledger.ts` — **round-1 bug caught in review: injected guidance does NOT persist in session context, so context-scanning caps were dead code in production** (also retro-explains ckpt-full's `failure: 60`). New alias `gpt55-cliproxycodex-glm52-rescue` (auto mode, per-alias scopes initial:off/drift:off/failure:on). Env knobs `GSD_MOA_RESCUE_{CONSECUTIVE_FAILURES,MAX_PER_TASK,COOLDOWN_TOOL_RESULTS}`. Fires AND cap-suppressions traced (`rescueTrailingFailureStreak`, `rescueSignature`, `rescueAdvisorInjectionCount`) for the recovery-after-stuck read vs matched s2-single stuck moments.
 
