@@ -1,6 +1,10 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench experiments
 
-Last updated: 2026-07-08 (Roadmap v2 adopted; M1 done-gate implemented and smoked).
+Last updated: 2026-07-08 (Roadmap v2 adopted; M1 done-gate implemented, smoked, autoreview-hardened, and merged to main).
+
+## MERGED TO MAIN 2026-07-08 — `15387ea` on origin/main AND yukon/oh-my-pi-port (user-pushed)
+
+`oh-my-pi-port` fast-forwarded into `main` and pushed to GitHub origin by the user (the old "never push this branch to origin" rule is superseded for merged main; the working branch still syncs to yukon). `15387ea` is the user's autoreview hardening pass on M1 (accepted findings): session-state scoped to the latest user turn; verifier/file-mod detection hardened against written-file-content false positives, read-only output, heredocs, eval writes, and apply_patch; interpreter-heredoc verifier checks added; done-gate ledger re-keyed to latest-user-turn + first-toolCall/toolResult discriminator so repeated identical prompts in one process get separate cap entries (Claude-reviewed: stable within a turn, per-turn semantics, sound). 157/157 tests, both runtimes. Still src+tests only — no bundle rebuild needed; yukon checkout needs a `git pull` before the M1 arm (nothing running, safe).
 
 ## ROADMAP V2 ADOPTED 2026-07-08 (`81406ce`) — plan of record is the v2 section of `docs/MOA-VALUE-ROADMAP.md`
 
