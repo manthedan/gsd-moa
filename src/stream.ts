@@ -2,6 +2,7 @@ import {
   createAssistantMessageEventStream,
   type Api,
   type AssistantMessage,
+  type AssistantMessageEvent,
   type AssistantMessageEventStream,
   type Context,
   type Model,
@@ -14,7 +15,9 @@ import { buildToolObservationSummary, countAdvisorInjections, isToolLoopContinua
 import { runFullMoa } from "./moa.js";
 import { chooseAction, chooseMode } from "./policy.js";
 import { applyModelPreset } from "./presets.js";
+import { doneGateLedgerKey, readDoneGateLedger, recordDoneGateFire, shouldArmDoneGate, withDoneGateNote } from "./done-gate.js";
 import { readRescueLedger, recordRescue, rescueLedgerKey } from "./rescue-ledger.js";
+import { buildSessionStateSummary, type SessionStateSummary } from "./session-state.js";
 import { timeEnvFromProcess, computeTimeState } from "./time.js";
 import { createTraceRecorder } from "./trace.js";
 import type { AdvisorResult, FullMoaResult, GsdMoaConfig, MoaAction, MoaRunDetails, PolicyInput, TimeState } from "./types.js";
@@ -24,6 +27,18 @@ import { addUsage } from "./usage.js";
 export interface StreamDependencies {
   config?: GsdMoaConfig;
   upstream?: UpstreamClient;
+}
+
+interface DoneGateRunDiagnostic {
+  armed: boolean;
+  fired: boolean;
+  armReason?: string;
+  suppressedReason?: string;
+  filesModified: boolean;
+  verifierRan: boolean;
+  lastVerifierPassed?: boolean;
+  commandsRun: number;
+  firstStopReason?: string;
 }
 
 export function assembleMoaPolicyInput(
@@ -138,36 +153,121 @@ export function streamGsdMoa(
       if (timeState) finalContext = withTimeAwarenessNote(finalContext, timeState);
       if (config.benchmarkIntegrity) finalContext = withBenchmarkIntegrityNote(finalContext);
 
+      const doneGateKey = config.doneGate.enabled ? doneGateLedgerKey(model.id, context) : undefined;
+      const sessionState = config.doneGate.enabled ? buildSessionStateSummary(context) : undefined;
+      const doneGateDecision = sessionState && doneGateKey
+        ? shouldArmDoneGate(config, context, sessionState, readDoneGateLedger(doneGateKey)?.count ?? 0, timeState)
+        : undefined;
+      let doneGateDetails = doneGateDecision && sessionState ? doneGateDiagnostic(doneGateDecision.armed, false, doneGateDecision.reason, sessionState) : undefined;
+
       trace?.recordFinalContext(finalContext);
       const primaryModel = routeToModel(config.primary);
       const primaryOptions = streamOptionsForRoute(config.primary, options, config.defaultEffort);
       const primaryEffort = effortForTrace(primaryOptions);
       trace?.recordPrimaryCall({ route: config.primary, effort: primaryEffort, startedAt: Date.now() });
       const inner = upstream.stream(primaryModel, finalContext, primaryOptions);
+
+      if (!doneGateDecision?.armed) {
+        for await (const event of inner) {
+          trace?.recordPrimaryEvent(event);
+          if (event.type === "done") {
+            const primaryUsage = event.message.usage;
+            const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
+            event.message.usage = combinedUsage;
+            const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails);
+            event.message.diagnostics = [
+              ...(event.message.diagnostics ?? []),
+              diagnostic,
+            ];
+            trace?.finish(event.message, diagnostic.details);
+          } else if (event.type === "error") {
+            const primaryUsage = event.error.usage;
+            const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
+            event.error.usage = combinedUsage;
+            const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails);
+            event.error.diagnostics = [
+              ...(event.error.diagnostics ?? []),
+              diagnostic,
+            ];
+            trace?.finishError(event.error, diagnostic.details);
+          }
+          stream.push(event);
+        }
+        stream.end();
+        return;
+      }
+
+      const buffered: AssistantMessageEvent[] = [];
       for await (const event of inner) {
         trace?.recordPrimaryEvent(event);
-        if (event.type === "done") {
-          const primaryUsage = event.message.usage;
-          const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
-          event.message.usage = combinedUsage;
-          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount);
-          event.message.diagnostics = [
-            ...(event.message.diagnostics ?? []),
-            diagnostic,
-          ];
-          trace?.finish(event.message, diagnostic.details);
-        } else if (event.type === "error") {
+        buffered.push(event);
+        if (event.type === "error") {
           const primaryUsage = event.error.usage;
           const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
           event.error.usage = combinedUsage;
-          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount);
+          doneGateDetails = doneGateDetails ? { ...doneGateDetails, firstStopReason: event.reason } : undefined;
+          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails);
           event.error.diagnostics = [
             ...(event.error.diagnostics ?? []),
             diagnostic,
           ];
           trace?.finishError(event.error, diagnostic.details);
+          for (const bufferedEvent of buffered) stream.push(bufferedEvent);
+          stream.end();
+          return;
         }
-        stream.push(event);
+        if (event.type !== "done") continue;
+
+        const firstPrimaryUsage = event.message.usage;
+        doneGateDetails = doneGateDetails ? { ...doneGateDetails, firstStopReason: event.message.stopReason ?? event.reason } : undefined;
+        if (assistantHasToolCalls(event.message) || event.reason !== "stop") {
+          const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, firstPrimaryUsage);
+          event.message.usage = combinedUsage;
+          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, firstPrimaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails);
+          event.message.diagnostics = [
+            ...(event.message.diagnostics ?? []),
+            diagnostic,
+          ];
+          trace?.finish(event.message, diagnostic.details);
+          for (const bufferedEvent of buffered) stream.push(bufferedEvent);
+          stream.end();
+          return;
+        }
+
+        if (!doneGateKey) throw new Error("done gate key missing");
+        recordDoneGateFire(doneGateKey);
+        doneGateDetails = doneGateDetails ? { ...doneGateDetails, fired: true } : undefined;
+        const retryContext = withDoneGateNote(finalContext);
+        trace?.recordFinalContext(retryContext);
+        trace?.recordPrimaryCall({ route: config.primary, effort: primaryEffort, startedAt: Date.now() });
+        const retry = upstream.stream(primaryModel, retryContext, primaryOptions);
+        for await (const retryEvent of retry) {
+          trace?.recordPrimaryEvent(retryEvent);
+          if (retryEvent.type === "done") {
+            const retryUsage = retryEvent.message.usage;
+            const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, firstPrimaryUsage, retryUsage);
+            retryEvent.message.usage = combinedUsage;
+            const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, retryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails, firstPrimaryUsage);
+            retryEvent.message.diagnostics = [
+              ...(retryEvent.message.diagnostics ?? []),
+              diagnostic,
+            ];
+            trace?.finish(retryEvent.message, diagnostic.details);
+          } else if (retryEvent.type === "error") {
+            const retryUsage = retryEvent.error.usage;
+            const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, firstPrimaryUsage, retryUsage);
+            retryEvent.error.usage = combinedUsage;
+            const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, retryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails, firstPrimaryUsage);
+            retryEvent.error.diagnostics = [
+              ...(retryEvent.error.diagnostics ?? []),
+              diagnostic,
+            ];
+            trace?.finishError(retryEvent.error, diagnostic.details);
+          }
+          stream.push(retryEvent);
+        }
+        stream.end();
+        return;
       }
       stream.end();
     } catch (error) {
@@ -199,6 +299,8 @@ function moaDiagnostic(
   timeState?: TimeState,
   asyncAdvisor?: AsyncAdvisorDecision,
   advisorInjectionCount?: number,
+  doneGate?: DoneGateRunDiagnostic,
+  priorPrimaryUsage?: AssistantMessage["usage"],
 ): NonNullable<AssistantMessage["diagnostics"]>[number] {
   const timeSuppressed = timeState && action.kind === "single" && action.reason.startsWith("time reserve") ? action.reason : undefined;
   const details: MoaRunDetails & { combinedUsage: AssistantMessage["usage"]; tracePath?: string } = {
@@ -239,11 +341,13 @@ function moaDiagnostic(
         ...(asyncAdvisor.error ? { error: asyncAdvisor.error } : {}),
       },
     } : {}),
+    ...(doneGate ? { doneGate } : {}),
     innerCalls: [
       ...(advisor
         ? [{ role: "reference" as const, provider: config.reference.provider, model: config.reference.model, usage: advisor.usage, cacheHit: advisor.cacheHit, durationMs: advisor.durationMs, effort: advisor.effort }]
         : []),
       ...(fullMoa?.innerCalls ?? []),
+      ...(priorPrimaryUsage ? [{ role: "primary" as const, provider: config.primary.provider, model: config.primary.model, usage: priorPrimaryUsage, effort: primaryEffort }] : []),
       { role: "primary" as const, provider: config.primary.provider, model: config.primary.model, usage: primaryUsage, effort: primaryEffort },
     ],
     ...(fullMoa ? { portfolio: fullMoa.portfolio } : {}),
@@ -251,6 +355,25 @@ function moaDiagnostic(
     ...(tracePath ? { tracePath } : {}),
   };
   return { type: "gsd-moa.details", timestamp: Date.now(), details: details as unknown as Record<string, unknown> };
+}
+
+function doneGateDiagnostic(armed: boolean, fired: boolean, reason: string, sessionState: SessionStateSummary): DoneGateRunDiagnostic {
+  return {
+    armed,
+    fired,
+    ...(armed ? { armReason: reason } : { suppressedReason: reason }),
+    filesModified: sessionState.filesModified,
+    verifierRan: sessionState.verifierRan,
+    ...(sessionState.lastVerifierPassed !== undefined ? { lastVerifierPassed: sessionState.lastVerifierPassed } : {}),
+    commandsRun: sessionState.commandsRun,
+  };
+}
+
+function assistantHasToolCalls(message: AssistantMessage): boolean {
+  return message.content.some((item) => {
+    const type = (item as { type?: unknown }).type;
+    return type === "toolCall" || type === "tool-call";
+  });
 }
 
 function safeErrorMessage(error: unknown): string {

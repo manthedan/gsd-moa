@@ -31,6 +31,25 @@ function withBenchmarkIntegrityEnv<T>(value: string | undefined, fn: () => T): T
   }
 }
 
+function withDoneGateEnv<T>(env: Record<string, string | undefined>, fn: () => T): T {
+  const keys = ["GSD_MOA_DONE_GATE", "GSD_MOA_DONE_GATE_MAX_PER_TASK", "GSD_MOA_DONE_GATE_MIN_REMAINING_MS"] as const;
+  const old = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  try {
+    for (const key of keys) {
+      const value = env[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    return fn();
+  } finally {
+    for (const key of keys) {
+      const value = old[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
 function optionsFor(route: Partial<UpstreamRoute>, hostReasoning: string | undefined, env: string | undefined, defaultEffort: DefaultReasoningEffort | undefined): any {
   return withEffortEnv(env, () => streamOptionsForRoute(
     { provider: "p", model: "m", ...route } as UpstreamRoute,
@@ -120,6 +139,28 @@ describe("reasoning effort configuration", () => {
       resetConfigCache();
       withBenchmarkIntegrityEnv("true", () => assert.equal(loadConfig("missing.json", dir).benchmarkIntegrity, true));
       assert.throws(() => validateConfig({ ...DEFAULT_CONFIG, benchmarkIntegrity: "yes" as never }), /benchmarkIntegrity must be boolean/);
+    } finally {
+      resetConfigCache();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads, overrides, and validates done gate config", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gsd-moa-donegate-"));
+    try {
+      resetConfigCache();
+      withDoneGateEnv({}, () => assert.deepEqual(loadConfig("missing.json", dir).doneGate, { enabled: false, maxPerTask: 1, minRemainingMs: 90_000 }));
+      writeFileSync(join(dir, "gsd-moa.json"), JSON.stringify({ doneGate: { enabled: true, maxPerTask: 3, minRemainingMs: 5 } }));
+      resetConfigCache();
+      withDoneGateEnv({}, () => assert.deepEqual(loadConfig("gsd-moa.json", dir).doneGate, { enabled: true, maxPerTask: 3, minRemainingMs: 5 }));
+      resetConfigCache();
+      withDoneGateEnv({ GSD_MOA_DONE_GATE: "0", GSD_MOA_DONE_GATE_MAX_PER_TASK: "2", GSD_MOA_DONE_GATE_MIN_REMAINING_MS: "7" }, () => {
+        assert.deepEqual(loadConfig("gsd-moa.json", dir).doneGate, { enabled: false, maxPerTask: 2, minRemainingMs: 7 });
+      });
+      resetConfigCache();
+      withDoneGateEnv({ GSD_MOA_DONE_GATE: "true" }, () => assert.equal(loadConfig("missing.json", dir).doneGate.enabled, true));
+      assert.throws(() => validateConfig({ ...DEFAULT_CONFIG, doneGate: { ...DEFAULT_CONFIG.doneGate, maxPerTask: 0 } }), /doneGate\.maxPerTask/);
+      assert.throws(() => validateConfig({ ...DEFAULT_CONFIG, doneGate: { ...DEFAULT_CONFIG.doneGate, minRemainingMs: -1 } }), /doneGate\.minRemainingMs/);
     } finally {
       resetConfigCache();
       rmSync(dir, { recursive: true, force: true });

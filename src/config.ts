@@ -153,6 +153,11 @@ export const DEFAULT_CONFIG: GsdMoaConfig = {
     enabled: false,
     maxPendingMs: 600_000,
   },
+  doneGate: {
+    enabled: false,
+    maxPerTask: 1,
+    minRemainingMs: 90_000,
+  },
   referenceTimeoutMs: 120000,
   referenceMaxTokens: undefined,
 };
@@ -316,6 +321,7 @@ function parseConfigFile(fullPath: string, displayPath: string): GsdMoaConfig {
     checkpoint: mergeCheckpoint(parsed.checkpoint),
     timeAware: isRecord(parsed.timeAware) ? { ...DEFAULT_CONFIG.timeAware, ...parsed.timeAware } as GsdMoaConfig["timeAware"] : structuredClone(DEFAULT_CONFIG.timeAware),
     asyncAdvisor: isRecord(parsed.asyncAdvisor) ? { ...DEFAULT_CONFIG.asyncAdvisor, ...parsed.asyncAdvisor } as GsdMoaConfig["asyncAdvisor"] : structuredClone(DEFAULT_CONFIG.asyncAdvisor),
+    doneGate: isRecord(parsed.doneGate) ? { ...DEFAULT_CONFIG.doneGate, ...parsed.doneGate } as GsdMoaConfig["doneGate"] : structuredClone(DEFAULT_CONFIG.doneGate),
     referenceTimeoutMs: typeof parsed.referenceTimeoutMs === "number" ? parsed.referenceTimeoutMs : DEFAULT_CONFIG.referenceTimeoutMs,
     referenceMaxTokens: typeof parsed.referenceMaxTokens === "number" ? parsed.referenceMaxTokens : DEFAULT_CONFIG.referenceMaxTokens,
   };
@@ -361,6 +367,15 @@ function applyEnvOverrides(cfg: GsdMoaConfig): void {
   }
   if (process.env.GSD_MOA_RESCUE_COOLDOWN_TOOL_RESULTS !== undefined) {
     cfg.checkpoint.rescue.cooldownToolResults = Number(process.env.GSD_MOA_RESCUE_COOLDOWN_TOOL_RESULTS);
+  }
+  if (process.env.GSD_MOA_DONE_GATE !== undefined) {
+    cfg.doneGate.enabled = /^(1|true|yes|on)$/i.test(process.env.GSD_MOA_DONE_GATE);
+  }
+  if (process.env.GSD_MOA_DONE_GATE_MAX_PER_TASK !== undefined) {
+    cfg.doneGate.maxPerTask = Number(process.env.GSD_MOA_DONE_GATE_MAX_PER_TASK);
+  }
+  if (process.env.GSD_MOA_DONE_GATE_MIN_REMAINING_MS !== undefined) {
+    cfg.doneGate.minRemainingMs = Number(process.env.GSD_MOA_DONE_GATE_MIN_REMAINING_MS);
   }
   if (process.env.GSD_MOA_CHECKPOINT_SCOPES !== undefined) {
     cfg.checkpoint.scopes = parseCheckpointScopes(process.env.GSD_MOA_CHECKPOINT_SCOPES);
@@ -443,6 +458,7 @@ export function validateConfig(cfg: GsdMoaConfig): void {
   if (!Number.isInteger(cfg.asyncAdvisor.maxPendingMs) || cfg.asyncAdvisor.maxPendingMs < 1) {
     throw new Error("asyncAdvisor.maxPendingMs must be a positive integer");
   }
+  validateDoneGate(cfg.doneGate);
   if (!Number.isInteger(cfg.referenceTimeoutMs) || cfg.referenceTimeoutMs < 1) {
     throw new Error("referenceTimeoutMs must be a positive integer");
   }
@@ -579,6 +595,13 @@ function validateRescuePolicy(rescue: GsdMoaConfig["checkpoint"]["rescue"]): voi
   for (const key of ["consecutiveFailures", "repeatedSignatureMin", "maxPerTask", "cooldownToolResults"] as const) {
     if (!Number.isInteger(rescue[key]) || rescue[key] < 1) throw new Error(`checkpoint.rescue.${key} must be a positive integer`);
   }
+}
+
+function validateDoneGate(doneGate: GsdMoaConfig["doneGate"]): void {
+  if (!isRecord(doneGate)) throw new Error("doneGate must be an object");
+  if (typeof doneGate.enabled !== "boolean") throw new Error("doneGate.enabled must be boolean");
+  if (!Number.isInteger(doneGate.maxPerTask) || doneGate.maxPerTask < 1) throw new Error("doneGate.maxPerTask must be a positive integer");
+  if (!Number.isInteger(doneGate.minRemainingMs) || doneGate.minRemainingMs < 0) throw new Error("doneGate.minRemainingMs must be a non-negative integer");
 }
 
 function mergeFullMoa(defaults: FullMoaConfig, override: unknown): FullMoaConfig {

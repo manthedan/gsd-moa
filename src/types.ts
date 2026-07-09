@@ -100,6 +100,12 @@ export interface AsyncAdvisorConfig {
   maxPendingMs: number;
 }
 
+export interface DoneGateConfig {
+  enabled: boolean;
+  maxPerTask: number;
+  minRemainingMs: number;
+}
+
 export interface TimeState {
   remainingMs: number;
   elapsedMs?: number;
@@ -154,6 +160,7 @@ export interface GsdMoaConfig {
   checkpoint: CheckpointPolicyConfig;
   timeAware: TimeAwareConfig;
   asyncAdvisor: AsyncAdvisorConfig;
+  doneGate: DoneGateConfig;
   referenceTimeoutMs: number;
   referenceMaxTokens?: number;
 }
@@ -307,6 +314,17 @@ export interface MoaRunDetails {
     status: "fired" | "pending" | "injected" | "failed";
     ageMs?: number;
     error?: string;
+  };
+  doneGate?: {
+    armed: boolean;
+    fired: boolean;
+    armReason?: string;
+    suppressedReason?: string;
+    filesModified: boolean;
+    verifierRan: boolean;
+    lastVerifierPassed?: boolean;
+    commandsRun: number;
+    firstStopReason?: string;
   };
   innerCalls: InnerCallDetails[];
   portfolio?: PortfolioDecision[];

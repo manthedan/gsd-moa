@@ -27,6 +27,7 @@ function fingerprint(alias: string) {
       routePreset: cfg.fullMoa.synthesis.routePreset,
       route: routeId(synthesisRoute),
     },
+    doneGate: cfg.doneGate.enabled,
     proposers: cfg.fullMoa.proposers.map((proposer) => ({
       id: proposer.id,
       enabled: proposer.enabled,
@@ -42,6 +43,7 @@ const DEFAULT_FP = {
   primary: "factory-codex/gpt-5.5",
   reference: "zai/glm-5.2",
   synthesis: { enabled: true, modelRef: "factory-codex/gpt-5.5", routePreset: "factory-codex-local", route: "factory-codex/gpt-5.5" },
+  doneGate: false,
   proposers: [
     { id: "glm52", enabled: undefined, modelRef: undefined, routePreset: undefined, route: "zai/glm-5.2", when: undefined },
     { id: "gpt55", enabled: undefined, modelRef: "factory-codex/gpt-5.5", routePreset: "factory-codex-local", route: "factory-codex/gpt-5.5", when: undefined },
@@ -62,6 +64,7 @@ const CODEX_FP = {
   primary: "openai-codex/gpt-5.5",
   reference: "zai/glm-5.2",
   synthesis: { enabled: true, modelRef: "openai-codex/gpt-5.5", routePreset: "cliproxyapi-codex", route: "openai-codex/gpt-5.5" },
+  doneGate: false,
   proposers: [
     { id: "glm52", enabled: undefined, modelRef: undefined, routePreset: undefined, route: "zai/glm-5.2", when: undefined },
     { id: "gpt55", enabled: undefined, modelRef: "openai-codex/gpt-5.5", routePreset: "cliproxyapi-codex", route: "openai-codex/gpt-5.5", when: undefined },
@@ -163,6 +166,29 @@ describe("alias registry", () => {
     assert.deepEqual(fingerprint(id), CODEX_FP);
     assert.deepEqual(buildDefaultAliasMap()[id], { mode: "auto", checkpointScopes: { initial: false, drift: false, failure: true } });
     assert.ok(GSD_MOA_MODELS.find((model) => model.id === id));
+  });
+
+  it("registers done-gate and GLM single aliases", () => {
+    const doneGate = applyModelPreset(structuredClone(DEFAULT_CONFIG), "gpt55-cliproxycodex-donegate");
+    assert.equal(doneGate.primary.provider, "openai-codex");
+    assert.equal(doneGate.doneGate.enabled, true);
+    assert.equal(buildDefaultAliasMap()["gpt55-cliproxycodex-donegate"]?.mode, "single");
+
+    const rescueDoneGate = applyModelPreset(structuredClone(DEFAULT_CONFIG), "gpt55-cliproxycodex-glm52-rescue-donegate");
+    assert.equal(rescueDoneGate.primary.provider, "openai-codex");
+    assert.equal(rescueDoneGate.doneGate.enabled, true);
+    assert.deepEqual(buildDefaultAliasMap()["gpt55-cliproxycodex-glm52-rescue-donegate"], { mode: "auto", checkpointScopes: { initial: false, drift: false, failure: true } });
+
+    const glmSingle = applyModelPreset(structuredClone(DEFAULT_CONFIG), "glm52-zai-single");
+    assert.equal(glmSingle.primary.provider, "zai");
+    assert.equal(glmSingle.primary.model, "glm-5.2");
+    assert.equal(glmSingle.doneGate.enabled, false);
+    assert.equal(buildDefaultAliasMap()["glm52-zai-single"]?.mode, "single");
+    assert.ok(GSD_MOA_MODELS.find((model) => model.id === "glm52-zai-single"));
+  });
+
+  it("keeps existing aliases done-gate disabled by default", () => {
+    for (const id of CURRENT_ALIAS_IDS) assert.equal(applyModelPreset(structuredClone(DEFAULT_CONFIG), id).doneGate.enabled, false, id);
   });
 
   it("registers the Hermes-style no-synthesis alias with initial-only checkpoints", () => {

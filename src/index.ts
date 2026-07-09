@@ -44,10 +44,10 @@ export { buildProposerContext, buildSynthesisContext, runFullMoa, selectPortfoli
 export { GSD_MOA_MODELS, GSD_MOA_MODEL_IDS } from "./models.js";
 export { chooseAction, chooseMode, stripMoaMarkers } from "./policy.js";
 export { applyModelPreset } from "./presets.js";
-export { ALIAS_PRESETS, applyAliasPreset, buildDefaultAliasMap, buildProviderModelConfigs, modelCardFromPrimaryRoute, providerModelConfigForAliasConfig, providerModelConfigForEntry } from "./registry.js";
+export { ALIAS_PRESETS, applyAliasPreset, applyDoneGatePreset, applyGlmZaiSinglePreset, buildDefaultAliasMap, buildProviderModelConfigs, modelCardFromPrimaryRoute, providerModelConfigForAliasConfig, providerModelConfigForEntry } from "./registry.js";
 export type { AliasPresetEntry, BuiltinAliasId } from "./registry.js";
 export { streamGsdMoa } from "./stream.js";
 export { computeTimeState } from "./time.js";
 export { createTraceRecorder } from "./trace.js";
 export { PROVIDER_ID } from "./types.js";
-export type { AsyncAdvisorConfig, CheckpointPolicyConfig, CheckpointScope, DefaultReasoningEffort, FullMoaFailure, FullMoaProposal, FullMoaResult, GsdMoaConfig, ModelRef, MoaAction, MoaMode, PolicyDecision, PortfolioDecision, ReasoningEffort, ReferenceWhenConfig, RescuePolicyConfig, TimeAwareConfig, TimeState, TraceConfig, UpstreamRoute } from "./types.js";
+export type { AsyncAdvisorConfig, CheckpointPolicyConfig, CheckpointScope, DefaultReasoningEffort, DoneGateConfig, FullMoaFailure, FullMoaProposal, FullMoaResult, GsdMoaConfig, ModelRef, MoaAction, MoaMode, PolicyDecision, PortfolioDecision, ReasoningEffort, ReferenceWhenConfig, RescuePolicyConfig, TimeAwareConfig, TimeState, TraceConfig, UpstreamRoute } from "./types.js";

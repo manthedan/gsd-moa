@@ -174,7 +174,7 @@ function extractImportantLines(raw: string): string[] {
   return selected.slice(0, 12).map((line) => line.length > 240 ? `${line.slice(0, 237)}...` : line);
 }
 
-function detectFailureSignals(raw: string, isError: boolean): string[] {
+export function detectFailureSignals(raw: string, isError: boolean): string[] {
   const signals: string[] = [];
   if (isError) signals.push("tool-result-error");
   const patterns: Array<[RegExp, string]> = [

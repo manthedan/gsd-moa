@@ -202,6 +202,18 @@ export function applyInitialOnlyCheckpointPreset(config: GsdMoaConfig): GsdMoaCo
   return cfg;
 }
 
+export function applyDoneGatePreset(config: GsdMoaConfig): GsdMoaConfig {
+  const cfg = structuredClone(config);
+  cfg.doneGate.enabled = true;
+  return cfg;
+}
+
+export function applyGlmZaiSinglePreset(config: GsdMoaConfig): GsdMoaConfig {
+  const cfg = structuredClone(config);
+  cfg.primary = glmPrimaryRoute(cfg);
+  return cfg;
+}
+
 export function applyGlmDriverCodexReferencePreset(config: GsdMoaConfig, options: { synthesis: boolean }): GsdMoaConfig {
   const cfg = applyCliproxyCodexPreset(config);
   cfg.primary = glmPrimaryRoute(cfg);
@@ -357,6 +369,7 @@ const CLIPROXY_CODEX_THEN_GEMINI = composeAliasPreset(applyCliproxyCodexPreset, 
 const CLIPROXY_CODEX_THEN_CLAUDE_OPUS = composeAliasPreset(applyCliproxyCodexPreset, applyUnconditionalClaudeOpusPreset);
 const CLIPROXY_CODEX_THEN_NO_SYNTHESIS = composeAliasPreset(applyCliproxyCodexPreset, applyNoSynthesisPreset);
 const CLIPROXY_CODEX_THEN_GLM_ONLY_NO_SYNTHESIS = composeAliasPreset(applyCliproxyCodexPreset, applyNoSynthesisPreset, applyGlmOnlyReferencePreset);
+const CLIPROXY_CODEX_THEN_DONE_GATE = composeAliasPreset(applyCliproxyCodexPreset, applyDoneGatePreset);
 const CLIPROXY_CODEX_HERMES_FULL = composeAliasPreset(applyCliproxyCodexPreset, applyNoSynthesisPreset, applyInitialOnlyCheckpointPreset);
 
 export const ALIAS_PRESETS = [
@@ -370,15 +383,18 @@ export const ALIAS_PRESETS = [
   { id: "gpt55-gemini35flash-auto", name: "GSD MoA: GPT-5.5 + Gemini 3.5 Flash (Auto)", mode: "auto", apply: applyGeminiReferencePreset },
   { id: "gpt55-glm52-gemini35flash-full", name: "GSD MoA: GPT-5.5 + GLM-5.2 + Gemini 3.5 Flash (Full MoA)", mode: "full_moa", apply: applyUnconditionalGeminiPreset },
   { id: "gpt55-cliproxycodex-single", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex (Single)", mode: "single", apply: applyCliproxyCodexPreset },
+  { id: "gpt55-cliproxycodex-donegate", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex (Single + Done Gate)", mode: "single", apply: CLIPROXY_CODEX_THEN_DONE_GATE },
   { id: "gpt55-cliproxycodex-advisor", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (Advisor)", mode: "advisor", apply: applyCliproxyCodexPreset },
   { id: "gpt55-cliproxycodex-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (Full MoA)", mode: "full_moa", apply: applyCliproxyCodexPreset },
   { id: "gpt55-cliproxycodex-auto", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (Auto)", mode: "auto", apply: applyCliproxyCodexPreset },
   { id: "gpt55-cliproxycodex-glm52-rescue", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (Rescue)", mode: "auto", apply: applyCliproxyCodexPreset, checkpointScopes: { initial: false, drift: false, failure: true } },
+  { id: "gpt55-cliproxycodex-glm52-rescue-donegate", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (Rescue + Done Gate)", mode: "auto", apply: CLIPROXY_CODEX_THEN_DONE_GATE, checkpointScopes: { initial: false, drift: false, failure: true } },
   { id: "gpt55-cliproxycodex-glm52-nosynth-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 refs (No Synth)", mode: "full_moa", apply: CLIPROXY_CODEX_THEN_NO_SYNTHESIS },
   { id: "gpt55-cliproxycodex-glm52only-nosynth-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2-only refs (No Synth)", mode: "full_moa", apply: CLIPROXY_CODEX_THEN_GLM_ONLY_NO_SYNTHESIS },
   { id: "gpt55-cliproxycodex-glm52-hermes-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 refs (Hermes-style Full MoA)", mode: "full_moa", apply: CLIPROXY_CODEX_HERMES_FULL },
   { id: "gpt55-cliproxycodex-glm52-gemini35flash-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 + Gemini Flash (Full MoA)", mode: "full_moa", apply: CLIPROXY_CODEX_THEN_GEMINI },
   { id: "gpt55-cliproxycodex-glm52-claudeopus48-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 + Claude Opus 4.8 (Full MoA)", mode: "full_moa", apply: CLIPROXY_CODEX_THEN_CLAUDE_OPUS },
+  { id: "glm52-zai-single", name: "GSD MoA: GLM-5.2 via Z.ai (Single)", mode: "single", apply: applyGlmZaiSinglePreset },
   { id: "glm52-zai-gpt55-cliproxycodex-full", name: "GSD MoA: GLM-5.2 driver + GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 refs (Full MoA)", mode: "full_moa", apply: (config: GsdMoaConfig) => applyGlmDriverCodexReferencePreset(config, { synthesis: true }) },
   { id: "glm52-zai-gpt55-cliproxycodex-nosynth-full", name: "GSD MoA: GLM-5.2 driver + GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 refs (No Synth)", mode: "full_moa", apply: (config: GsdMoaConfig) => applyGlmDriverCodexReferencePreset(config, { synthesis: false }) },
 ] as const satisfies readonly AliasPresetEntry[];
