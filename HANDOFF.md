@@ -1,6 +1,16 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench experiments
 
-Last updated: 2026-07-06 (F2 arm DONE — read in `docs/TERMINAL-BENCH-RESULTS.md` top section).
+Last updated: 2026-07-08 (Roadmap v2 adopted; M1 done-gate implemented and smoked).
+
+## ROADMAP V2 ADOPTED 2026-07-08 (`81406ce`) — plan of record is the v2 section of `docs/MOA-VALUE-ROADMAP.md`
+
+Reconciled with an external strategy review. Thesis: single strong actor does most work; MoA is a sparse typed reviewer/rescue at high-leverage points. Sequence: **M1** mechanical done-gate (done, below) → **M2** diversity oracle (`glm52-zai-single` arm + existing s2-single/droid data → oracle/all-fail/complementarity read; gates all further MoA spend) → **M3** GSD-typed checkpoints in the omp harness (design doc after M1 arm) → **M4** scoped closed-loop review-before-done (only if M2 shows reviewer complementarity). F1 parked; rescue stays on where aliased.
+
+## M1 DONE-GATE: IMPLEMENTED + SMOKED 2026-07-08 (`f3344ca`), ARM NOT YET RUN
+
+Deterministic provider-side gate (no advisor spend): tool-loop finalization + filesModified + no verifier evidence in whole session → one-shot verify-or-justify note + single primary retry; in-process ledger cap (maxPerTask 1, injected notes don't persist — F2 lesson). Default off. Aliases: `gpt55-cliproxycodex-donegate`, `gpt55-cliproxycodex-glm52-rescue-donegate`, `glm52-zai-single` (Z.ai direct, for M2). Env: `GSD_MOA_DONE_GATE{,_MAX_PER_TASK,_MIN_REMAINING_MS}`. Diagnostics `doneGate{armed,fired,armReason/suppressedReason,filesModified,verifierRan,lastVerifierPassed,commandsRun,firstStopReason}` emitted whenever enabled → aggregator can compute verifier-run-before-done rate + fire rate. Codex-implemented from Claude spec (1 review fix: verifier evidence restricted to command-like tools — written file contents containing "pytest"/"validate" must not suppress the gate). 144/144 tests, `npm run check` green. **Live smokes passed:** `glm52-zai-single` → OK via Z.ai; `gpt55-cliproxycodex-donegate` fresh turn suppressed (`not-tool-loop-continuation`); forced write-without-verify session → `armed:true, fired:true`, 2 primary calls in innerCalls, model explicitly justified (escape hatch b). Laptop CLIProxy is UP again on 8318 (serves gpt-5.5). src-only commit — no bundle rebuild needed.
+
+**Next (yukon free): M1 arm** — `gpt55-cliproxycodex-donegate` vs s2-single, passable four k≥5 + torch k≥3, standard config; then M2 arm `glm52-zai-single`. Aggregator: extend the scratch `aggregate-integrity.ts` to print `doneGate` fields before the arm read.
 
 ## F2 ARM: DONE 2026-07-06 18:04 PT — 11/20 (55%), integrity-clean, yukon slot FREE
 
