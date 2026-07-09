@@ -18,12 +18,12 @@ function cfg(enabled = true): GsdMoaConfig {
   return config;
 }
 
-function continuation(): Context {
+function continuation(toolCallId = "c1", toolTimestamp = 3): Context {
   return {
     messages: [
       { role: "user", content: "task", timestamp: 1 },
       { role: "assistant", content: [], api: "openai-completions", provider: "p", model: "m", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "toolUse", timestamp: 2 } as any,
-      { role: "toolResult", toolName: "bash", toolCallId: "c1", content: [{ type: "text", text: "created f.py" }], isError: false, timestamp: 3 } as any,
+      { role: "toolResult", toolName: "bash", toolCallId, content: [{ type: "text", text: "created f.py" }], isError: false, timestamp: toolTimestamp } as any,
     ],
   };
 }
@@ -54,5 +54,24 @@ describe("done gate", () => {
     assert.deepEqual(readDoneGateLedger(key1), { count: 1 });
     resetDoneGateLedger();
     assert.equal(readDoneGateLedger(key1), undefined);
+  });
+
+  it("separates repeated same-prompt sessions by tool-loop identity", () => {
+    const key1 = doneGateLedgerKey("alias", continuation("c1", 3));
+    const key2 = doneGateLedgerKey("alias", continuation("c2", 3));
+    const key3 = doneGateLedgerKey("alias", continuation("c1", 4));
+    assert.notEqual(key1, key2);
+    assert.notEqual(key1, key3);
+  });
+
+  it("keys the ledger to the current user turn", () => {
+    const firstTask = continuation("c1", 3);
+    const secondTask: Context = { messages: [
+      ...firstTask.messages,
+      { role: "user", content: "task", timestamp: 4 },
+      { role: "assistant", content: [], api: "openai-completions", provider: "p", model: "m", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "toolUse", timestamp: 5 } as any,
+      { role: "toolResult", toolName: "bash", toolCallId: "c2", content: [{ type: "text", text: "created f.py" }], isError: false, timestamp: 6 } as any,
+    ] };
+    assert.notEqual(doneGateLedgerKey("alias", firstTask), doneGateLedgerKey("alias", secondTask));
   });
 });

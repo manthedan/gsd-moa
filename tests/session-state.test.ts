@@ -40,6 +40,33 @@ describe("session state summary", () => {
     assert.equal(summary.commandsRun, 1);
   });
 
+  it("does not infer file modifications from arbitrary read-only output", () => {
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("c1", "bash", { command: "rg updated README.md" }),
+      toolResult("c1", "bash", "README.md: updated docs", false),
+    ]));
+    assert.equal(summary.filesModified, false);
+    assert.deepEqual(summary.modifiedFiles, []);
+  });
+
+  it("detects file modifications from shell-run code", () => {
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("c1", "bash", { command: "python3 - <<'PY'\nfrom pathlib import Path\nPath('f.py').write_text('print(1)')\nPY" }),
+      toolResult("c1", "bash", "created f.py", false),
+    ]));
+    assert.equal(summary.filesModified, true);
+    assert.ok(summary.modifiedFiles.includes("f.py"));
+  });
+
+  it("detects file modifications from shell apply_patch helpers", () => {
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("c1", "bash", { command: "apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: f.py\n@@\n-x\n+y\n*** End Patch\nPATCH" }),
+      toolResult("c1", "bash", "Done!", false),
+    ]));
+    assert.equal(summary.filesModified, true);
+    assert.ok(summary.modifiedFiles.includes("f.py"));
+  });
+
   it("detects clean py_compile verifier results", () => {
     const summary = buildSessionStateSummary(ctx([
       assistantTool("c1", "bash", { command: "python3 -m py_compile f.py" }),
@@ -57,6 +84,32 @@ describe("session state summary", () => {
     ]));
     assert.equal(summary.verifierRan, true);
     assert.equal(summary.lastVerifierPassed, false);
+  });
+
+  it("does not count inspection commands mentioning verifier files or keywords", () => {
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("c1", "bash", { command: "echo x > f.py" }),
+      toolResult("c1", "bash", "created f.py", false),
+      assistantTool("c2", "bash", { command: "cat scripts/validate.py && rg verify docs" }),
+      toolResult("c2", "bash", "validate.py mentions verify", false),
+    ]));
+    assert.equal(summary.filesModified, true);
+    assert.equal(summary.verifierRan, false);
+    assert.deepEqual(summary.verifierEvidence, []);
+  });
+
+  it("detects verifier calls inside interpreter heredocs", () => {
+    const command = "python3 - <<'PY'\nimport py_compile\npy_compile.compile('f.py', doraise=True)\nPY";
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("c1", "bash", { command: "echo x > f.py" }),
+      toolResult("c1", "bash", "created f.py", false),
+      assistantTool("c2", "bash", { command }),
+      toolResult("c2", "bash", "", false),
+    ]));
+    assert.equal(summary.filesModified, true);
+    assert.equal(summary.verifierRan, true);
+    assert.equal(summary.lastVerifierPassed, true);
+    assert.deepEqual(summary.verifierEvidence, [command]);
   });
 
   it("counts executing a modified artifact as verification", () => {
@@ -78,6 +131,76 @@ describe("session state summary", () => {
       toolResult("c1", "write", "created tests/test_f.py", false),
     ]));
     assert.equal(summary.filesModified, true);
+    assert.equal(summary.verifierRan, false);
+    assert.deepEqual(summary.verifierEvidence, []);
+  });
+
+  it("does not count verifier keywords inside shell-written file contents", () => {
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("c1", "bash", { command: "cat > tests/test_f.py <<'PY'\nimport pytest\n\ndef test_f():\n    validate()\nPY" }),
+      toolResult("c1", "bash", "created tests/test_f.py", false),
+    ]));
+    assert.equal(summary.filesModified, true);
+    assert.equal(summary.verifierRan, false);
+    assert.deepEqual(summary.verifierEvidence, []);
+  });
+
+  it("still detects verifier commands after shell-written file contents", () => {
+    const command = "cat > tests/test_f.py <<'PY'\nimport pytest\nPY\npytest tests";
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("c1", "bash", { command }),
+      toolResult("c1", "bash", "1 passed", false),
+    ]));
+    assert.equal(summary.filesModified, true);
+    assert.equal(summary.verifierRan, true);
+    assert.equal(summary.lastVerifierPassed, true);
+    assert.deepEqual(summary.verifierEvidence, [command]);
+  });
+
+  it("still detects verifier commands after same-line shell writes", () => {
+    const command = "echo 'print(1)' > f.py && python3 -m py_compile f.py";
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("c1", "bash", { command }),
+      toolResult("c1", "bash", "", false),
+    ]));
+    assert.equal(summary.filesModified, true);
+    assert.equal(summary.verifierRan, true);
+    assert.equal(summary.lastVerifierPassed, true);
+    assert.deepEqual(summary.verifierEvidence, [command]);
+  });
+
+  it("does not count verifier keywords inside eval-written file contents", () => {
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("c1", "eval", { code: "await Bun.write('tests/test_f.py', 'import pytest\\ndef test_f(): validate()')" }),
+      toolResult("c1", "eval", "created tests/test_f.py", false),
+    ]));
+    assert.equal(summary.filesModified, true);
+    assert.equal(summary.verifierRan, false);
+    assert.deepEqual(summary.verifierEvidence, []);
+  });
+
+  it("detects explicit verifier subprocesses inside eval tools", () => {
+    const command = "import subprocess\nsubprocess.run(['pytest', 'tests'], check=True)";
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("c1", "eval", { code: command }),
+      toolResult("c1", "eval", "1 passed", false),
+    ]));
+    assert.equal(summary.verifierRan, true);
+    assert.equal(summary.lastVerifierPassed, true);
+    assert.deepEqual(summary.verifierEvidence, [command]);
+  });
+
+  it("scopes modifications and verifiers to the latest user turn", () => {
+    const summary = buildSessionStateSummary({ messages: [
+      { role: "user", content: "first task", timestamp: 0 },
+      assistantTool("v1", "bash", { command: "pytest tests" }),
+      toolResult("v1", "bash", "1 passed", false),
+      { role: "user", content: "second task", timestamp: 3 },
+      assistantTool("w1", "bash", { command: "echo x > f.py" }),
+      toolResult("w1", "bash", "created f.py", false),
+    ] });
+    assert.equal(summary.filesModified, true);
+    assert.deepEqual(summary.modifiedFiles, ["f.py"]);
     assert.equal(summary.verifierRan, false);
     assert.deepEqual(summary.verifierEvidence, []);
   });

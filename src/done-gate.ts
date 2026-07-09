@@ -22,9 +22,38 @@ You are finishing after modifying files, but no verification has been observed i
 (b) if verification is genuinely impossible in this environment, state in one line why, then finish.`;
 
 export function doneGateLedgerKey(aliasId: string, context: Context): string {
-  const firstUser = context.messages.find((message) => message.role === "user");
-  const firstUserMessageRawText = firstUser ? rawMessageText(firstUser) : "";
-  return createHash("sha256").update(`${aliasId}|${firstUserMessageRawText}`).digest("hex");
+  const userIndex = latestUserIndex(context);
+  const currentUser = userIndex >= 0 ? context.messages[userIndex] : undefined;
+  const currentUserMessageRawText = currentUser?.role === "user" ? rawMessageText(currentUser) : "";
+  return createHash("sha256")
+    .update(`${aliasId}|${currentUserMessageRawText}|${sessionDiscriminator(context, userIndex)}`)
+    .digest("hex");
+}
+
+function sessionDiscriminator(context: Context, userIndex = latestUserIndex(context)): string {
+  const currentTurnMessages = context.messages.slice(userIndex + 1);
+
+  for (const message of currentTurnMessages) {
+    if (message.role === "toolResult") return `tool:${message.toolName}:${message.toolCallId}:${message.timestamp ?? ""}`;
+  }
+
+  for (const message of currentTurnMessages) {
+    if (message.role !== "assistant") continue;
+    for (const item of message.content) {
+      const typed = item as { type?: unknown; id?: unknown; name?: unknown };
+      if (typed.type === "toolCall" || typed.type === "tool-call") {
+        return `call:${typeof typed.name === "string" ? typed.name : ""}:${typeof typed.id === "string" ? typed.id : ""}:${message.timestamp ?? ""}`;
+      }
+    }
+  }
+
+  const currentUser = userIndex >= 0 ? context.messages[userIndex] : undefined;
+  const currentTimestamp = currentUser?.timestamp ?? "";
+  return `fresh:${currentTimestamp}:${context.messages.length}`;
+}
+
+function latestUserIndex(context: Context): number {
+  return context.messages.reduce((latest, message, index) => message.role === "user" ? index : latest, -1);
 }
 
 export function readDoneGateLedger(key: string): DoneGateLedgerEntry | undefined {
