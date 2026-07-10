@@ -332,4 +332,4 @@ npm run check
 - [x] `TypedCheckpoint` config/types and deterministic transition function implemented
 - [x] Strategy note and one-shot verify-failure advisor integrated
 - [x] Diagnostics and tracked aggregation extended by checkpoint type
-- [ ] Unit and dual-runtime validation complete; live smoke and first controlled arm pending
+- [ ] Unit, dual-runtime, rebuilt-bundle, and live-smoke validation complete; first controlled arm pending

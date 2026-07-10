@@ -137,7 +137,7 @@ Gates M4 and any cross-model portfolio work. Oracle headroom high but realized M
 
 ## M3 — GSD-typed checkpoints inside the TB harness (the strategic pivot)
 
-Implement GSD-style plan / implement / verify / review phases as **typed checkpoints in the omp harness**, staying on the execution-graded TB substrate — not a second framework with custom benchmarks. MoA becomes eligible only at checkpoint boundaries (strategy selection, post-verify-failure root-cause, review-before-done), each with its own trigger, budget, and ledger. **Prototype status:** the Phase 11 AI-SPEC and local MVP are implemented: a zero-call deterministic strategy contract, one tool-less GLM diagnosis after a failed verifier, and the existing mechanical done gate. Live typed-alias smoke and a same-commit controlled arm remain. Custom GSD micro-benchmarks come later, derived from trace-mined failure modes (50–100 clean trials first).
+Implement GSD-style plan / implement / verify / review phases as **typed checkpoints in the omp harness**, staying on the execution-graded TB substrate — not a second framework with custom benchmarks. MoA becomes eligible only at checkpoint boundaries (strategy selection, post-verify-failure root-cause, review-before-done), each with its own trigger, budget, and ledger. **Prototype status:** the Phase 11 AI-SPEC and local MVP are implemented: a zero-call deterministic strategy contract, one tool-less GLM diagnosis after a failed verifier, and the existing mechanical done gate. The rebuilt Yukon OMP bundle passed the live typed-alias smoke; a same-commit controlled arm remains. Custom GSD micro-benchmarks come later, derived from trace-mined failure modes (50–100 clean trials first).
 
 ## M4 — Scoped review-before-done (PARKED; the only F4 survivor)
 
@@ -152,7 +152,7 @@ pass rate · integrity-clean pass rate · tokens/pass · wall/pass · priced cos
 ```
 done        M1 implementation + same-commit control arm; M2 GLM single arm + oracle read
 now         commit audit hardening → rebuild Yukon bundle → live smoke → tracked reaggregation
-then        M3 typed-checkpoint design/eval contract + deterministic prototype DONE → live smoke → controlled arm
+then        M3 design + prototype + live smoke DONE → same-commit controlled arm
 parked      M4 unless semantic-risk reviewer evidence overturns the M2/F4 negative signal
 re-gate     after each arm, per decision rules above
 ```

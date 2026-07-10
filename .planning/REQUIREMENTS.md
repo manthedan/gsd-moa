@@ -89,7 +89,7 @@ Requirements for completing full MoA before the testing/proof milestone, then pr
 - [x] **M3-04**: Explicit routing markers and time-reserve suppression take precedence over automatic typed advice.
 - [x] **M3-05**: Diagnostics and the tracked Terminal-Bench aggregator distinguish typed checkpoint type, status, event count, trial count, and suppression reason.
 - [x] **M3-06**: Typed references preserve the single-writer boundary and all existing failed/cancelled usage accounting.
-- [ ] **M3-07**: The rebuilt Yukon runtime passes a live typed-alias smoke.
+- [x] **M3-07**: The rebuilt Yukon runtime passes a live typed-alias smoke.
 - [ ] **M3-08**: A same-commit controlled M3 arm reports trigger precision, recovery/adoption, wall time, pass rate, and integrity.
 
 ## v2 Requirements
@@ -167,14 +167,14 @@ Deferred portability work.
 | M3-04 | Phase 11 | Complete |
 | M3-05 | Phase 11 | Complete |
 | M3-06 | Phase 11 | Complete |
-| M3-07 | Phase 11 | Pending |
+| M3-07 | Phase 11 | Complete |
 | M3-08 | Phase 11 | Pending |
 
 **Coverage:**
 
 - v1 requirements: 27 total, complete
 - v1.1 requirements: 14 total, 10 complete and 4 retained as historical proof-suite work
-- v1.2 M3 requirements: 8 total, 6 complete and 2 pending live evaluation
+- v1.2 M3 requirements: 8 total, 7 complete and 1 pending controlled evaluation
 - Unmapped: 0 ✓
 
 ---

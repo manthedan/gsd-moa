@@ -1,6 +1,10 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench experiments
 
-Last updated: 2026-07-09 (M1/M2/control arms DONE + read; audit hardening complete and final autoreview clean; not committed; M3 next).
+Last updated: 2026-07-10 (M3 typed-checkpoint prototype committed, synced to Yukon, rebuilt-bundle smoke passed; controlled arm next).
+
+## M3 TYPED CHECKPOINTS: IMPLEMENTED + LIVE SMOKE PASSED 2026-07-10
+
+Committed on `main` as `559da68` (`feat: add M3 typed checkpoints`) after dual-runtime validation (**229/229 OMP and 229/229 Pi**), `git diff --check`, and package dry-run. The dedicated `gpt55-cliproxycodex-glm52-typed-donegate` alias adds one zero-call deterministic strategy contract, one tool-less GLM diagnosis after a causally attributable failed verifier, and the existing mechanical pre-done gate. Checkpoint/reference ledgers have in-flight reservations; typed evidence omits raw verifier output and command arguments at the cross-provider boundary; tracked aggregation reports checkpoint events/trials/suppressions and structured-output validity. Yukon checkout is `559da68`; `.proof/omp-runtime.tar` was rebuilt (SHA-256 `e96d08d30d784a302cd44f6a0692e36426df37f2aeadbd99608660c6c6a372a1`). Live OMP/proxy smoke returned `OK`; trace `/tmp/m3-typed-smoke-traces/2026-07-10T06-05-00-673Z-aspac3ol.json` records `strategy:fired`, single GPT-5.5 primary, effort high, and no reference call. **Next:** same-commit M3 treatment versus rescue+done-gate control, then review every fire and update M3-08.
 
 ## M1 + M2 + CONTROL ARMS: DONE 2026-07-09 — full three-way read in `docs/TERMINAL-BENCH-RESULTS.md` (top)
 

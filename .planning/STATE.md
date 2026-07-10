@@ -5,10 +5,10 @@ milestone_name: Sparse MoA Value Evaluation
 current_phase: 11
 current_phase_name: GSD-Typed Checkpoints
 status: in_progress
-stopped_at: M3 design and local prototype complete; live typed-alias smoke and controlled arm pending
+stopped_at: M3 prototype committed and Yukon typed-alias smoke passed; controlled arm pending
 last_updated: "2026-07-09T00:00:00.000Z"
 last_activity: 2026-07-09
-last_activity_desc: Completed M3 AI design contract and local typed-checkpoint prototype after syncing hardened runtime
+last_activity_desc: Committed M3 typed checkpoints, rebuilt the Yukon OMP bundle, and passed the live typed-alias smoke
 progress:
   total_phases: 4
   completed_phases: 2
@@ -32,7 +32,7 @@ See `.planning/PROJECT.md`, `.planning/ROADMAP.md`, and the authoritative detail
 - M1 done-gate: complete — 13/23 vs same-commit single control 11/23; mechanism validated, directional but not statistically conclusive.
 - M2 diversity oracle: complete — GLM-5.2 single 7/23, slower, with no complementary wins over GPT-5.5 on the evaluated slice.
 - Audit hardening and M3 prototype validation: complete locally — 229/229 tests pass in each runtime; `git diff --check` and package dry-run pass.
-- M3: active — AI/design contract and deterministic prototype are implemented locally; live typed-alias smoke and controlled arm remain.
+- M3: active — design, implementation, dual-runtime validation, rebuilt Yukon bundle, and live typed-alias smoke are complete; controlled arm remains.
 - M4: parked — no broad reviewer/model-diversity justification from M2.
 
 ## Decisions
@@ -51,8 +51,8 @@ See `.planning/PROJECT.md`, `.planning/ROADMAP.md`, and the authoritative detail
 1. Commit and sync the audit hardening.
 2. Rebuild the Yukon runtime bundle and run a live OMP/proxy smoke because dependency versions changed.
 3. Reaggregate M1/M2 artifacts with the tracked aggregator; keep the original arm commit pinned in comparisons.
-4. Run the live M3 typed-alias smoke against the rebuilt bundle.
-5. Run a same-commit controlled M3 arm against rescue+done-gate and review every first-arm trigger.
+4. Prepare the same-commit M3 treatment/control manifests from `559da68`.
+5. Run the controlled M3 arm against rescue+done-gate and review every first-arm trigger.
 
 ## Concerns
 
