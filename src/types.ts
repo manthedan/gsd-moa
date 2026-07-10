@@ -310,6 +310,7 @@ export interface MoaRunDetails {
     suppressed?: string;
   };
   benchmarkIntegrity?: boolean;
+  unattributedAsyncUsage?: Usage;
   asyncAdvisor?: {
     status: "fired" | "pending" | "injected" | "failed";
     ageMs?: number;
@@ -325,6 +326,7 @@ export interface MoaRunDetails {
     lastVerifierPassed?: boolean;
     commandsRun: number;
     firstStopReason?: string;
+    postGateBehavior?: "verification-requested" | "justified" | "ignored" | "incomplete" | "error";
   };
   innerCalls: InnerCallDetails[];
   portfolio?: PortfolioDecision[];

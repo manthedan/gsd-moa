@@ -1,19 +1,19 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Full MoA Build-out and Dogfood Evaluation
-current_phase: 7
-current_phase_name: Realistic Evaluation Task Suite and Rubric
+milestone: v1.2
+milestone_name: Sparse MoA Value Evaluation
+current_phase: 11
+current_phase_name: GSD-Typed Checkpoints
 status: in_progress
-stopped_at: First Harbor Terminal-Bench A/B proof completed on fix-git; ready for broader medium/hard evals and auto tuning
-last_updated: "2026-06-28T05:25:00.000Z"
-last_activity: 2026-06-28
-last_activity_desc: Installed Harbor, passed oracle smoke, and ran single vs full_moa on terminal-bench/fix-git
+stopped_at: M1 and M2 complete; audit hardening validated; M3 design/prototype next
+last_updated: "2026-07-09T00:00:00.000Z"
+last_activity: 2026-07-09
+last_activity_desc: Completed M1/M2 arms and project-wide hardening; final dual-runtime checks and autoreview are clean
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 9
-  completed_plans: 4
+  total_plans: 4
+  completed_plans: 2
   percent: 50
 ---
 
@@ -21,74 +21,43 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-27)
+See `.planning/PROJECT.md`, `.planning/ROADMAP.md`, and the authoritative detailed roadmap at `docs/MOA-VALUE-ROADMAP.md`.
 
-**Core value:** Give GSD/Pi a normal-looking model provider that adds second-model/reference-model judgment only when it is worth the latency/cost, while preserving safe single-writer tool execution.
-**Current focus:** v1.1 — Full MoA Build-out and Dogfood Evaluation
+**Core value:** Keep one strong terminal actor as the writer and spend second-model judgment only at sparse, high-leverage checkpoints.
+
+**Current focus:** Roadmap v2 M3 — design and prototype typed plan/implement/verify/review checkpoints inside the OMP/Terminal-Bench harness.
 
 ## Current Position
 
-Phase: 7 of 8 (Realistic Evaluation Task Suite and Rubric)
-Plan: First live A/B sample complete
-Status: In progress
-Last activity: 2026-06-28 — Harbor oracle smoke plus single/full_moa fix-git comparison completed
+- M1 done-gate: complete — 13/23 vs same-commit single control 11/23; mechanism validated, directional but not statistically conclusive.
+- M2 diversity oracle: complete — GLM-5.2 single 7/23, slower, with no complementary wins over GPT-5.5 on the evaluated slice.
+- Audit hardening: complete locally — final Codex autoreview clean; 199/199 tests pass in each runtime.
+- M3: active — AI/design contract, deterministic typed checkpoint prototype, and controlled arm remain.
+- M4: parked — no broad reviewer/model-diversity justification from M2.
 
-Progress: [█████░░░░░] 50%
+## Decisions
 
-## Performance Metrics
+- Harness quality has higher demonstrated leverage than broad MoA.
+- Mechanical done-gate stays enabled in future experiment aliases so evidence accumulates without a dedicated expensive arm.
+- Rescue advice remains sparse and capped; scheduled checkpoint re-advice is not the default thesis.
+- GLM actor/model-mix ablations are stopped unless a new same-harness complementarity signal appears.
+- Droid remains a harness control, not a model-diversity sample.
+- Oracle advantage bounds routing among unchanged answers; it does not mathematically bound synthesis or review.
+- Private/subscription routes without configured prices report cost as `unpriced`; use tokens/pass and wall/pass for the default economic read.
+- Only the final actor receives tools.
 
-**Velocity:**
+## Pending
 
-- Total plans completed: 1 in current milestone
-- Average duration: -
-- Total execution time: -
+1. Commit and sync the audit hardening.
+2. Rebuild the Yukon runtime bundle and run a live OMP/proxy smoke because dependency versions changed.
+3. Reaggregate M1/M2 artifacts with the tracked aggregator; keep the original arm commit pinned in comparisons.
+4. Produce the M3 typed-checkpoint design/evaluation contract and prototype.
+5. Run a controlled M3 arm; optionally use rescue+done-gate as the low-cost control combination.
 
-**By Phase:**
+## Concerns
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 5 | 1/1 | - | - |
-| 6 | 3/3 | - | - |
-| 7 | 0/2 | - | - |
-| 8 | 0/3 | - | - |
-
-**Recent Trend:**
-
-- Last 5 plans: Phase 5 full MoA build-out complete; Phase 6 trace/proof harness complete; first Terminal-Bench A/B smoke complete
-- Trend: Initial evidence suggests full_moa adds latency/cost without benefit on easy tasks; needs harder review/debug samples
-
-*Updated after each plan completion*
-
-## Accumulated Context
-
-### Decisions
-
-Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
-
-- v1.0 shipped the provider prototype and archived phases 1–4.
-- Use Factory Droid's local GPT-5.5 Codex proxy for primary calls when appropriate.
-- Use Z.ai Coding Plan GLM-5.2 plus Factory GPT-5.5 as full-MoA reference models; use GPT-5.5 for synthesis and final acting by default.
-- Implement full MoA before testing based on expert review; testing now compares `single`, `advisor`, and `full_moa`.
-- Preserve single-writer invariant: only final GPT gets tools.
-
-### Pending Todos
-
-- Run a medium/hard Terminal-Bench review/debug sample where proposal diversity may matter.
-- Define the human usefulness rubric for Terminal-Bench plus GSD skill tasks.
-- Tune `auto` to avoid full_moa on easy tool-loop tasks unless the prompt merits it.
-
-### Blockers/Concerns
-
-- Live proof runs require Factory proxy availability and valid `FACTORY_GPT_API_KEY` / `ZAI_API_KEY`.
-- Full MoA has higher latency/cost; proof needs judge whether quality justifies it.
-- Need avoid benchmark theater; evidence should support a human decision about usefulness.
-- Harbor custom agent now mounts/copies the repo into the task container and installs Node 24; local runs still require Factory proxy availability from Docker via `host.docker.internal`.
-- Full-MoA tool-loop traces showed first-turn live reference/synthesis calls and later cache hits; consider skipping advisory reruns after tool results or including tool-result state in cache policy.
-- Full-MoA design shifted away from architect/reviewer/implementer role prompts toward Hermes/OpenRouter-style reference-model fusion: same sanitized prompt to GLM-5.2 and GPT-5.5, GPT-5.5 synthesis, GPT-5.5 final tool-capable actor.
-- After `configure-git-webserver` still failed by answering instead of acting, aligned closer to Hermes where safe: reference models are private advisors rather than answer writers, synthesis is an execution memo, final guidance uses Hermes-style “answer or call tools as needed” framing, private context remains privileged rather than user-authored, and a short non-private execution note is appended when tools are present.
-- Terminal-Bench known-failure A/B suite now has a tracked summary in `docs/TERMINAL-BENCH-RESULTS.md`; notable one-trial MoA wins are `torch-tensor-parallelism` and `overfull-hbox`, while many long build/science tasks still fail or time out for both modes.
-
-## Notes
-
-v1.0 archive lives in `.planning/milestones/`.
+- Live runs require valid proxy routes and credentials.
+- Benchmark arms must use the tracked aggregator; `/tmp` scripts are not authoritative.
+- M1's original classifier missed R-workflow verification; targeted R support is being added before reaggregation.
+- The hardened done-gate semantics differ from arm commit `e3d0d98` (failed writes and compound/heredoc behavior), so cross-arm reports must pin commits.
+- Nine moderate OpenTelemetry advisories remain transitively owned by OMP; npm's suggested remediation is an incompatible downgrade.

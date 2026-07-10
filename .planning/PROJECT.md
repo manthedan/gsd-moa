@@ -1,5 +1,7 @@
 # GSD MoA Pi Provider
 
+> **Current direction (2026-07-09):** Roadmap v2 in [`docs/MOA-VALUE-ROADMAP.md`](../docs/MOA-VALUE-ROADMAP.md) supersedes the v1.1 milestone narrative below. The thesis is now harness-first: one strong terminal actor does most work; MoA is a sparse typed reviewer/rescue at high-leverage checkpoints. M1 and M2 are complete; M3 GSD-typed checkpoint design and prototyping is the active track, while M4 is parked.
+
 ## What This Is
 
 A prototype Pi extension/package that adds a `gsd-moa` model provider implementing a Hermes-inspired MoA/advisor/router facade for agentic coding workflows. Upstream Pi and Pi-derived GSD harnesses see normal model IDs like `gsd-moa/gpt55-glm52-auto`, while the provider decides whether to call GPT-5.5 directly, first obtain tool-less GLM-5.2 advisory feedback, or run a tool-less reference-model full-MoA layer before the final GPT-5.5 acting call.

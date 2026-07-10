@@ -9,7 +9,7 @@ import {
   type Context,
   type Model,
 } from "../src/pi-compat.js";
-import { asyncAdvisorPendingCount, resetAsyncAdvisor } from "../src/async-advisor.ts";
+import { asyncAdvisorPendingCount, asyncAdvisorUnattributedUsage, resetAsyncAdvisor } from "../src/async-advisor.ts";
 import { DEFAULT_CONFIG } from "../src/config.ts";
 import { streamGsdMoa } from "../src/stream.ts";
 import type { GsdMoaConfig } from "../src/types.ts";
@@ -74,10 +74,10 @@ function cfg(enabled: boolean): GsdMoaConfig {
   return config;
 }
 
-function driftContext(): Context {
+function driftContext(timestamp = 1): Context {
   return {
     messages: [
-      { role: "user", content: "continue", timestamp: 1 },
+      { role: "user", content: "continue", timestamp },
       { role: "toolResult", toolName: "Bash", toolCallId: "c1", content: [{ type: "text", text: "done 1" }], timestamp: 2 } as any,
       { role: "toolResult", toolName: "Bash", toolCallId: "c2", content: [{ type: "text", text: "done 2" }], timestamp: 3 } as any,
       { role: "toolResult", toolName: "Bash", toolCallId: "c3", content: [{ type: "text", text: "done 3" }], timestamp: 4 } as any,
@@ -131,6 +131,326 @@ describe("async advisor", () => {
     assert.equal(completeCalls, 2);
     assert.match(JSON.stringify(primaryContexts[2].messages), /advice-1/);
     assert.match(JSON.stringify(primaryContexts[2].messages), /gsd-moa advisor guidance/);
+  });
+
+  it("keeps repeated prompts in separate sessions isolated", async () => {
+    const waits = [deferred<AssistantMessage>(), deferred<AssistantMessage>()];
+    let completeCalls = 0;
+    const upstream: UpstreamClient = {
+      async complete() { return waits[completeCalls++].promise; },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+
+    const first = await collect(streamGsdMoa(model(), driftContext(1), { sessionId: "session-one" }, { config: cfg(true), upstream }));
+    const second = await collect(streamGsdMoa(model(), driftContext(1), { sessionId: "session-two" }, { config: cfg(true), upstream }));
+    assert.equal(diagnostics(first).asyncAdvisor.status, "fired");
+    assert.equal(diagnostics(second).asyncAdvisor.status, "fired");
+    assert.equal(completeCalls, 2);
+    assert.equal(asyncAdvisorPendingCount(), 2);
+  });
+
+  it("keeps task identity stable across agent-attributed compaction summaries", async () => {
+    const config = cfg(true);
+    const upstream: UpstreamClient = {
+      async complete(seenModel) { return message(seenModel, "pre-compaction advice"); },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+    await collect(streamGsdMoa(model(), driftContext(1), { sessionId: "compacted" }, { config, upstream }));
+    const compacted = driftContext(99);
+    Object.assign(compacted.messages[0]!, {
+      content: "Another language model started to solve this problem and produced a summary of its thinking process.\n\n<summary>compaction summary</summary>",
+      attribution: "agent",
+    });
+    const resumed = await collect(streamGsdMoa(model(), compacted, { sessionId: "compacted" }, { config, upstream }));
+    assert.equal(diagnostics(resumed).asyncAdvisor.status, "injected");
+  });
+
+  it("retains compacted task identity while async state is still live", async () => {
+    const config = cfg(true);
+    const upstream: UpstreamClient = {
+      async complete(seenModel) { return message(seenModel, "retained advice"); },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+    await collect(streamGsdMoa(model(), driftContext(1), { sessionId: "retained" }, { config, upstream }));
+    for (let index = 0; index < 65; index++) {
+      await collect(streamGsdMoa(model(), driftContext(index + 10), { sessionId: `identity-${index}` }, { config, upstream }));
+    }
+    const compacted = driftContext(999);
+    Object.assign(compacted.messages[0]!, {
+      content: "The conversation history before this point was compacted into the following summary:\n\n<summary>summary</summary>",
+    });
+    const resumed = await collect(streamGsdMoa(model(), compacted, { sessionId: "retained" }, { config, upstream }));
+    assert.equal(diagnostics(resumed).asyncAdvisor.status, "injected");
+  });
+
+  it("keeps different tasks within one host session isolated", async () => {
+    const config = cfg(true);
+    const upstream: UpstreamClient = {
+      async complete(seenModel) { return message(seenModel, "task-a advice"); },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+
+    await collect(streamGsdMoa(model(), driftContext(1), { sessionId: "shared-host" }, { config, upstream }));
+    const taskBContext = driftContext(99);
+    Object.assign(taskBContext.messages[0]!, { attribution: "agent" });
+    const taskB = await collect(streamGsdMoa(model(), taskBContext, { sessionId: "shared-host" }, { config, upstream }));
+    assert.equal(diagnostics(taskB).asyncAdvisor.status, "fired");
+  });
+
+  it("keeps new tasks isolated when the host omits a session id", async () => {
+    const config = cfg(true);
+    const upstream: UpstreamClient = {
+      async complete(seenModel) { return message(seenModel, "old-task advice"); },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+    await collect(streamGsdMoa(model(), driftContext(1), undefined, { config, upstream }));
+    const nextTask = driftContext(1);
+    nextTask.messages.push(
+      { role: "user", content: "a genuinely new task", timestamp: 10 },
+      { role: "toolResult", toolName: "Bash", toolCallId: "n1", content: [{ type: "text", text: "done" }], timestamp: 11 } as any,
+      { role: "toolResult", toolName: "Bash", toolCallId: "n2", content: [{ type: "text", text: "done" }], timestamp: 12 } as any,
+      { role: "toolResult", toolName: "Bash", toolCallId: "n3", content: [{ type: "text", text: "done" }], timestamp: 13 } as any,
+    );
+    const next = await collect(streamGsdMoa(model(), nextTask, undefined, { config, upstream }));
+    assert.equal(diagnostics(next).asyncAdvisor.status, "fired");
+  });
+
+  it("aborts the oldest background request when the pending cap is exceeded", async () => {
+    let aborted = 0;
+    const upstream: UpstreamClient = {
+      async complete(_model, _context, options) {
+        return new Promise<AssistantMessage>((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => {
+            aborted += 1;
+            reject(new Error("aborted"));
+          }, { once: true });
+        });
+      },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+
+    for (let index = 0; index < 65; index += 1) {
+      await collect(streamGsdMoa(model(), driftContext(index + 1), undefined, { config: cfg(true), upstream }));
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(asyncAdvisorPendingCount(), 64);
+    assert.equal(aborted, 1);
+  });
+
+  it("preserves settled advice evicted by the capacity cap", async () => {
+    let completeCalls = 0;
+    const config = cfg(true);
+    const upstream: UpstreamClient = {
+      async complete(seenModel) {
+        completeCalls += 1;
+        return message(seenModel, `advice-${completeCalls}`);
+      },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+
+    for (let index = 0; index < 65; index++) {
+      await collect(streamGsdMoa(model(), driftContext(index + 1), { sessionId: `settled-${index}` }, { config, upstream }));
+    }
+    const resumed = await collect(streamGsdMoa(model(), driftContext(1), { sessionId: "settled-0" }, { config, upstream }));
+    assert.equal(diagnostics(resumed).asyncAdvisor.status, "injected");
+  });
+
+  it("surfaces compact usage accounting when the eviction queue rolls over", async () => {
+    const config = cfg(true);
+    const upstream: UpstreamClient = {
+      async complete(seenModel) { return message(seenModel, "advice"); },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+    for (let index = 0; index < 140; index++) {
+      await collect(streamGsdMoa(model(), driftContext(index + 1), { sessionId: `rollover-${index}` }, { config, upstream }));
+    }
+    const unrelated = await collect(streamGsdMoa(model(), driftContext(999), { sessionId: "unrelated" }, { config, upstream }));
+    assert.equal(diagnostics(unrelated).asyncAdvisor.status, "fired");
+    const resumed = await collect(streamGsdMoa(model(), driftContext(1), { sessionId: "rollover-0" }, { config, upstream }));
+    const details = diagnostics(resumed);
+    assert.match(details.asyncAdvisor.error, /global capacity cap/);
+    assert.ok(details.innerCalls.find((call: any) => call.model === "evicted-async-advisor")?.usage?.totalTokens > 0);
+  });
+
+  it("bounds per-session rollover accounting and retains a process-level total", async () => {
+    const config = cfg(true);
+    const upstream: UpstreamClient = {
+      async complete(seenModel) { return message(seenModel, "advice"); },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+    for (let index = 0; index < 220; index++) {
+      await collect(streamGsdMoa(model(), driftContext(index + 1), { sessionId: `bounded-${index}` }, { config, upstream }));
+    }
+    assert.ok((asyncAdvisorUnattributedUsage()?.totalTokens ?? 0) > 0);
+    const evidence = await collect(streamGsdMoa(model(), driftContext(999), { sessionId: "unattributed-evidence" }, { config, upstream }));
+    assert.ok((diagnostics(evidence).unattributedAsyncUsage?.totalTokens ?? 0) > 0);
+  });
+
+  it("ignores rolled-off completions from before a reset", async () => {
+    const config = cfg(true);
+    const resolvers: Array<(value: AssistantMessage) => void> = [];
+    let firstModel: Model<Api> | undefined;
+    const upstream: UpstreamClient = {
+      complete(seenModel) {
+        firstModel ??= seenModel;
+        return new Promise((resolve) => resolvers.push(resolve));
+      },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+    for (let index = 0; index < 129; index++) {
+      await collect(streamGsdMoa(model(), driftContext(index + 1), { sessionId: `reset-${index}` }, { config, upstream }));
+    }
+    resetAsyncAdvisor();
+    resolvers[0]?.(message(firstModel!, "late advice"));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(asyncAdvisorUnattributedUsage(), undefined);
+  });
+
+  it("does not inject expired settled advice from the eviction queue", async () => {
+    const config = cfg(true);
+    config.asyncAdvisor.maxPendingMs = 1;
+    const upstream: UpstreamClient = {
+      async complete(seenModel) { return message(seenModel, "old advice"); },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+
+    for (let index = 0; index < 65; index++) {
+      await collect(streamGsdMoa(model(), driftContext(index + 1), { sessionId: `stale-cap-${index}` }, { config, upstream }));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const resumed = await collect(streamGsdMoa(model(), driftContext(1), { sessionId: "stale-cap-0" }, { config, upstream }));
+    assert.equal(diagnostics(resumed).asyncAdvisor.status, "failed");
+    assert.match(diagnostics(resumed).asyncAdvisor.error, /expired/);
+  });
+
+  it("sweeps in-flight advisors using each entry's own timeout", async () => {
+    const signals = new Map<string, AbortSignal>();
+    const longConfig = cfg(true);
+    longConfig.asyncAdvisor.maxPendingMs = 10_000;
+    const shortConfig = cfg(true);
+    shortConfig.asyncAdvisor.maxPendingMs = 1;
+    const upstream: UpstreamClient = {
+      complete(_model, _context, options) {
+        const sessionId = options?.sessionId ?? "missing";
+        if (options?.signal) signals.set(sessionId, options.signal);
+        return new Promise(() => undefined);
+      },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+
+    await collect(streamGsdMoa(model(), driftContext(), { sessionId: "long" }, { config: longConfig, upstream }));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await collect(streamGsdMoa(model(), driftContext(), { sessionId: "short" }, { config: shortConfig, upstream }));
+    assert.equal(signals.get("long")?.aborted, false);
+  });
+
+  it("does not sweep settled advice when another session becomes active", async () => {
+    let completeCalls = 0;
+    const config = cfg(true);
+    config.asyncAdvisor.maxPendingMs = 100;
+    const upstream: UpstreamClient = {
+      async complete(seenModel) {
+        completeCalls += 1;
+        return message(seenModel, `advice-${completeCalls}`);
+      },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+
+    await collect(streamGsdMoa(model(), driftContext(), { sessionId: "session-a" }, { config, upstream }));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await collect(streamGsdMoa(model(), driftContext(), { sessionId: "session-b" }, { config, upstream }));
+    const resumed = await collect(streamGsdMoa(model(), driftContext(), { sessionId: "session-a" }, { config, upstream }));
+    assert.equal(diagnostics(resumed).asyncAdvisor.status, "injected");
+  });
+
+  it("does not inject settled advice after its retention window", async () => {
+    const config = cfg(true);
+    config.asyncAdvisor.maxPendingMs = 1;
+    let completeCalls = 0;
+    const upstream: UpstreamClient = {
+      async complete(seenModel) {
+        completeCalls += 1;
+        return message(seenModel, `advice-${completeCalls}`);
+      },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+
+    await collect(streamGsdMoa(model(), driftContext(), { sessionId: "stale" }, { config, upstream }));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const resumed = await collect(streamGsdMoa(model(), driftContext(), { sessionId: "stale" }, { config, upstream }));
+    const details = diagnostics(resumed);
+    assert.equal(details.asyncAdvisor.status, "failed");
+    assert.match(details.asyncAdvisor.error, /expired/);
+    assert.equal(details.guidanceInjected, false);
+    assert.equal(details.innerCalls[0].usage.totalTokens, 2);
+  });
+
+  it("accounts for but does not inject advice that settled after its pending deadline", async () => {
+    const wait = deferred<AssistantMessage>();
+    const config = cfg(true);
+    config.asyncAdvisor.maxPendingMs = 1;
+    let completeCalls = 0;
+    const upstream: UpstreamClient = {
+      complete(seenModel) {
+        completeCalls += 1;
+        return completeCalls === 1 ? wait.promise : new Promise(() => undefined);
+      },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+
+    await collect(streamGsdMoa(model(), driftContext(), { sessionId: "late-success" }, { config, upstream }));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    wait.resolve(message(model(), "late advice"));
+    await new Promise((resolve) => setImmediate(resolve));
+    const resumed = await collect(streamGsdMoa(model(), driftContext(), { sessionId: "late-success" }, { config, upstream }));
+    const details = diagnostics(resumed);
+    assert.equal(details.asyncAdvisor.status, "failed");
+    assert.match(details.asyncAdvisor.error, /expired/);
+    assert.equal(details.guidanceInjected, false);
+    assert.equal(details.innerCalls[0].usage.totalTokens, 2);
+  });
+
+  it("retains usage from in-flight advisors aborted by expiry", async () => {
+    const config = cfg(true);
+    config.asyncAdvisor.maxPendingMs = 1;
+    let completeCalls = 0;
+    const upstream: UpstreamClient = {
+      complete(seenModel, _context, options) {
+        completeCalls += 1;
+        if (completeCalls > 1) return new Promise(() => undefined);
+        return new Promise((resolve) => options?.signal?.addEventListener("abort", () => {
+          resolve({ ...message(seenModel, ""), stopReason: "aborted" });
+        }, { once: true }));
+      },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+
+    await collect(streamGsdMoa(model(), driftContext(), { sessionId: "expiry" }, { config, upstream }));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await collect(streamGsdMoa(model(), driftContext(), { sessionId: "expiry" }, { config, upstream }));
+    await new Promise((resolve) => setImmediate(resolve));
+    const resumed = await collect(streamGsdMoa(model(), driftContext(), { sessionId: "expiry" }, { config, upstream }));
+    const details = diagnostics(resumed);
+    assert.equal(details.asyncAdvisor.status, "failed");
+    assert.equal(details.innerCalls[0].usage.totalTokens, 2);
+  });
+
+  it("reports settled failures even after the pending timeout", async () => {
+    const waits = [deferred<AssistantMessage>(), deferred<AssistantMessage>()];
+    let completeCalls = 0;
+    const config = cfg(true);
+    config.asyncAdvisor.maxPendingMs = 1;
+    const upstream: UpstreamClient = {
+      async complete() { return waits[completeCalls++].promise; },
+      stream(seenModel) { return streamText(seenModel, "primary"); },
+    };
+
+    await collect(streamGsdMoa(model(), driftContext(), undefined, { config, upstream }));
+    waits[0].reject(new Error("settled failure"));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const events = await collect(streamGsdMoa(model(), driftContext(), undefined, { config, upstream }));
+    assert.equal(diagnostics(events).asyncAdvisor.status, "failed");
+    assert.match(diagnostics(events).asyncAdvisor.error, /settled failure/);
   });
 
   it("surfaces a failed background advisor once, clears it, and fires a fresh run", async () => {

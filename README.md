@@ -284,7 +284,7 @@ or run:
 npm run proof:pi
 ```
 
-Trace files are written to the configured trace directory.
+Trace files are written to the configured trace directory with owner-only file permissions. When contexts or outputs are enabled they can still contain sensitive task data: redaction is best-effort, so keep the trace directory private and do not enable full traces for untrusted secret-bearing prompts. Private/subscription routes ship with zero price metadata; reports label those totals `unpriced` rather than treating them as free.
 
 ## Docs
 

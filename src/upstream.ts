@@ -86,6 +86,62 @@ export function resolveEffortForRoute(route: UpstreamRoute, options: SimpleStrea
   return defaultEffort;
 }
 
+export function generationOptionsForRoute(route: UpstreamRoute, options?: SimpleStreamOptions, defaultEffort: DefaultReasoningEffort = "high"): SimpleStreamOptions {
+  const resolvedEffort = resolveEffortForRoute(route, options, defaultEffort);
+  const { reasoning: _callerReasoning, ...rest } = options ?? {};
+  return {
+    ...rest,
+    ...(resolvedEffort === "none" ? { reasoning: undefined, omitReasoningEffort: true } : {}),
+    ...(resolvedEffort !== undefined && resolvedEffort !== "none" ? { reasoning: resolvedEffort as SimpleStreamOptions["reasoning"] } : {}),
+    ...(route.temperature !== undefined ? { temperature: route.temperature } : {}),
+  } as SimpleStreamOptions;
+}
+
+export function generationControlsForCache(options: SimpleStreamOptions): Record<string, unknown> {
+  const excluded = new Set([
+    "apiKey", "signal", "providerSessionState", "onPayload", "onResponse", "onSseEvent",
+    "providerRetryWait", "fetch", "execHandlers", "cursorExecHandlers", "cursorOnToolResult",
+  ]);
+  const controls: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(options).sort(([left], [right]) => left.localeCompare(right))) {
+    if (excluded.has(key)) continue;
+    const normalized = cacheOptionValue(value, new WeakSet<object>());
+    if (normalized !== undefined) controls[key] = normalized;
+  }
+  return controls;
+}
+
+function cacheOptionValue(value: unknown, seen: WeakSet<object>): unknown {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "undefined" || typeof value === "function" || typeof value === "symbol") return undefined;
+  if (typeof value !== "object") return String(value);
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  let normalized: unknown;
+  if (Array.isArray(value)) {
+    normalized = value.map((item) => cacheOptionValue(item, seen));
+  } else if (value instanceof Date) {
+    normalized = value.toISOString();
+  } else if (value instanceof Map) {
+    normalized = [...value.entries()]
+      .map(([key, item]) => [String(key), cacheOptionValue(item, seen)] as const)
+      .sort(([left], [right]) => left.localeCompare(right));
+  } else if (value instanceof Set) {
+    normalized = [...value].map((item) => cacheOptionValue(item, seen)).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  } else {
+    const record = value as Record<string, unknown>;
+    normalized = Object.fromEntries(
+      Object.keys(record).sort().flatMap((key) => {
+        const item = cacheOptionValue(record[key], seen);
+        return item === undefined ? [] : [[key, item]];
+      }),
+    );
+  }
+  seen.delete(value);
+  return normalized;
+}
+
 export function effortForTrace(options: SimpleStreamOptions | undefined): string | undefined {
   if (!options) return undefined;
   const maybeOmit = options as SimpleStreamOptions & { omitReasoningEffort?: boolean };

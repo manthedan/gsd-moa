@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { Context, Usage, UserMessage } from "./pi-compat.js";
+import { getRuntime, type Context, type SimpleStreamOptions, type Usage, type UserMessage } from "./pi-compat.js";
 import { assistantText, messageText } from "./context.js";
-import type { GsdMoaConfig } from "./types.js";
+import type { GsdMoaConfig, UpstreamRoute } from "./types.js";
+import { effortForTrace, generationControlsForCache, generationOptionsForRoute, resolveConfigValue, routeToModel } from "./upstream.js";
 
 interface CacheEnvelope {
   version: 1;
@@ -31,19 +32,32 @@ export type AdvisorCacheResult = AdvisorCacheHit | AdvisorCacheMiss;
 export interface ReferenceCacheControls {
   effort?: unknown;
   maxTokens?: unknown;
+  temperature?: unknown;
+  generation?: unknown;
 }
 
 export function advisorCacheKey(config: GsdMoaConfig, context: Context, controls?: ReferenceCacheControls): string {
-  return referenceCacheKey(config, context, config.reference, "advisor", config.prompts.advisorVersion, {
-    ...defaultAdvisorCacheControls(config),
-    ...controls,
-  });
+  const defaults = defaultAdvisorCacheControls(config);
+  const merged = { ...defaults, ...controls };
+  if (controls && controls.generation === undefined) {
+    const generation = { ...(defaults.generation as Record<string, unknown>) };
+    if (controls.effort !== undefined) {
+      delete generation.reasoning;
+      delete generation.omitReasoningEffort;
+      if (controls.effort === "none") generation.omitReasoningEffort = true;
+      else if (controls.effort !== "inherit") generation.reasoning = controls.effort;
+    }
+    if (controls.maxTokens !== undefined) generation.maxTokens = controls.maxTokens;
+    if (controls.temperature !== undefined) generation.temperature = controls.temperature;
+    merged.generation = generation;
+  }
+  return referenceCacheKey(config, context, config.reference, "advisor", config.prompts.advisorVersion, merged);
 }
 
 export function referenceCacheKey(
   config: GsdMoaConfig,
   context: Context,
-  route: Pick<GsdMoaConfig["reference"], "provider" | "model" | "api" | "baseUrl">,
+  route: UpstreamRoute,
   scope: string,
   promptVersion: string,
   controls?: ReferenceCacheControls,
@@ -51,16 +65,16 @@ export function referenceCacheKey(
   const payload = {
     promptVersion,
     scope,
-    reference: {
-      provider: route.provider,
-      model: route.model,
-      api: route.api,
-      baseUrl: route.baseUrl,
-    },
+    // Hash the complete non-secret model/request identity. Compatibility flags,
+    // feature headers, capabilities, and future serializable route fields can all
+    // change provider behavior even when provider/model names stay constant.
+    reference: effectiveRouteForCache(route),
     taskDigest: normalizeContext(context),
     controls: {
       ...(controls && controls.effort !== undefined ? { effort: controls.effort } : {}),
       ...(controls && controls.maxTokens !== undefined ? { maxTokens: controls.maxTokens } : {}),
+      ...(controls && controls.temperature !== undefined ? { temperature: controls.temperature } : {}),
+      ...(controls && controls.generation !== undefined ? { generation: controls.generation } : {}),
     },
     auto: config.auto,
   };
@@ -74,7 +88,7 @@ export function readAdvisorCache(config: GsdMoaConfig, context: Context, cwd = p
 export function readReferenceCache(
   config: GsdMoaConfig,
   context: Context,
-  route: Pick<GsdMoaConfig["reference"], "provider" | "model" | "api" | "baseUrl">,
+  route: UpstreamRoute,
   scope: string,
   cwd = process.cwd(),
 ): AdvisorCacheResult {
@@ -107,7 +121,7 @@ export function writeAdvisorCache(
 ): void {
   if (!config.cache.enabled || !text.trim()) return;
   const path = cachePath(config, key, cwd);
-  mkdirSync(resolve(cwd, config.cache.dir), { recursive: true });
+  mkdirSync(resolve(cwd, config.cache.dir), { recursive: true, mode: 0o700 });
   const envelope: CacheEnvelope = {
     version: 1,
     createdAt: Date.now(),
@@ -115,30 +129,57 @@ export function writeAdvisorCache(
     text,
     usage,
   };
-  writeFileSync(path, JSON.stringify(envelope, null, 2));
+  const temporaryPath = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  try {
+    writeFileSync(temporaryPath, JSON.stringify(envelope, null, 2), { mode: 0o600 });
+    renameSync(temporaryPath, path);
+  } finally {
+    if (existsSync(temporaryPath)) unlinkCacheFile(temporaryPath);
+  }
 }
 
-function defaultAdvisorCacheControls(config: GsdMoaConfig): ReferenceCacheControls {
-  const effort = resolveDefaultCacheEffort(config);
+function effectiveRouteForCache(route: UpstreamRoute): Record<string, unknown> {
+  const resolvedModel = routeToModel(route);
+  const configuredHeaders = resolveRouteHeaders(route.headers);
+  const resolvedHeaders = resolveRouteHeaders(resolvedModel.headers as Record<string, string> | undefined);
   return {
-    ...(effort !== undefined ? { effort } : {}),
-    ...(config.referenceMaxTokens !== undefined ? { maxTokens: config.referenceMaxTokens } : {}),
+    runtime: getRuntime(),
+    configured: generationControlsForCache({
+      ...route,
+      ...(route.headers ? { headers: configuredHeaders } : {}),
+    } as unknown as SimpleStreamOptions),
+    model: generationControlsForCache({
+      ...resolvedModel,
+      ...(resolvedModel.headers ? { headers: resolvedHeaders } : {}),
+    } as unknown as SimpleStreamOptions),
   };
 }
 
-function resolveDefaultCacheEffort(config: GsdMoaConfig): string | undefined {
-  if (config.reference.effort !== undefined) return config.reference.effort;
-  const envEffort = parseEnvEffort(process.env.GSD_MOA_EFFORT);
-  if (envEffort === "inherit") return undefined;
-  if (envEffort !== undefined) return envEffort;
-  if (config.defaultEffort === "inherit") return undefined;
-  return config.defaultEffort;
+function resolveRouteHeaders(headers: Record<string, string> | undefined): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers ?? {}).map(([key, value]) => [key, resolveConfigValue(value, `route header ${key}`) ?? ""]),
+  );
 }
 
-function parseEnvEffort(value: string | undefined): string | "inherit" | undefined {
-  if (value === undefined) return undefined;
-  if (["minimal", "low", "medium", "high", "xhigh", "none", "inherit"].includes(value)) return value;
-  throw new Error("GSD_MOA_EFFORT must be one of: minimal, low, medium, high, xhigh, none, inherit");
+function defaultAdvisorCacheControls(config: GsdMoaConfig): ReferenceCacheControls {
+  const inheritedMaxTokens = routeToModel(config.reference).maxTokens;
+  const effective: SimpleStreamOptions = {
+    ...generationOptionsForRoute(config.reference, undefined, config.defaultEffort),
+    ...(config.referenceMaxTokens !== undefined
+      ? { maxTokens: config.referenceMaxTokens }
+      : config.reference.maxTokens !== undefined
+        ? { maxTokens: config.reference.maxTokens }
+        : typeof inheritedMaxTokens === "number"
+          ? { maxTokens: inheritedMaxTokens }
+          : {}),
+  };
+  const effort = effortForTrace(effective);
+  return {
+    ...(effort !== undefined ? { effort } : {}),
+    ...(effective.maxTokens !== undefined ? { maxTokens: effective.maxTokens } : {}),
+    ...(effective.temperature !== undefined ? { temperature: effective.temperature } : {}),
+    generation: generationControlsForCache(effective),
+  };
 }
 
 function cachePath(config: GsdMoaConfig, key: string, cwd: string): string {
@@ -158,26 +199,37 @@ function normalizeUserMessage(message: UserMessage): string {
   return message.content.map((item) => {
     if (item.type === "text") return item.text;
     if (item.type === "image") {
-      const data = "data" in item ? String(item.data) : "";
-      const digest = createHash("sha256").update(data).digest("hex").slice(0, 24);
-      return `[image:${item.mimeType ?? "unknown"}:${digest}]`;
+      const { data: rawData, ...metadata } = item as typeof item & { data?: unknown };
+      const digest = createHash("sha256").update(String(rawData ?? "")).digest("hex").slice(0, 24);
+      const normalizedMetadata = generationControlsForCache(metadata as unknown as SimpleStreamOptions);
+      return `[image:${JSON.stringify({ ...normalizedMetadata, digest })}]`;
     }
     return "[content]";
   }).join("\n");
 }
 
 function normalizeContext(context: Context): string {
-  return [context.systemPrompt ? `system:${context.systemPrompt}` : "", context.messages
-    .slice(-12)
-    .map((msg) => {
-      if (msg.role === "user") return `user:${normalizeUserMessage(msg)}`;
-      if (msg.role === "assistant") return `assistant:${assistantText(msg)}`;
-      if (msg.role === "developer") return `developer:${typeof msg.content === "string" ? msg.content : msg.content.map((c) => (c.type === "text" ? c.text : "[image]")).join("\n")}`;
-      return `tool:${msg.toolName}:${msg.content.map((c) => (c.type === "text" ? c.text : "[image]")).join("\n")}`;
-    })
-    .join("\n---\n")]
-    .filter(Boolean)
-    .join("\n===\n")
-    .replace(/\s+/g, " ")
-    .trim();
+  // Cache identity must be lossless for model-visible text. Truncating history or
+  // collapsing whitespace can alias different tasks (especially indentation-
+  // sensitive code) and return guidance generated for another conversation.
+  return JSON.stringify({
+    systemPrompt: context.systemPrompt ?? null,
+    messages: context.messages.map((msg) => {
+      if (msg.role === "user") return { role: msg.role, content: normalizeUserMessage(msg) };
+      if (msg.role === "assistant") return { role: msg.role, content: assistantText(msg) };
+      if (msg.role === "developer") {
+        return {
+          role: msg.role,
+          content: typeof msg.content === "string"
+            ? msg.content
+            : msg.content.map((item) => item.type === "text" ? item.text : "[image]").join("\n"),
+        };
+      }
+      return {
+        role: msg.role,
+        toolName: msg.toolName,
+        content: msg.content.map((item) => item.type === "text" ? item.text : "[image]").join("\n"),
+      };
+    }),
+  });
 }

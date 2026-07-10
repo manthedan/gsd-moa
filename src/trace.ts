@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type {
   AssistantMessage,
@@ -83,6 +83,8 @@ class JsonTraceRecorder implements TraceRecorder {
   readonly filePath: string;
   private readonly data: TraceFile;
   private readonly config: GsdMoaConfig;
+  private lastFlushAt = 0;
+  private checkpointTimer?: NodeJS.Timeout;
 
   constructor(config: GsdMoaConfig, model: Model<Api>, inputContext: Context, policy: PolicyDecision, action: MoaAction) {
     this.config = config;
@@ -139,7 +141,14 @@ class JsonTraceRecorder implements TraceRecorder {
 
   recordPrimaryEvent(event: AssistantMessageEvent): void {
     this.data.primaryEvents.push(compactPrimaryEvent(event, this.config.trace.includeOutputs));
-    this.flush();
+    // Delta streams can contain thousands of events. Rewriting the full growing
+    // JSON document for every delta creates quadratic synchronous I/O and changes
+    // the latency being measured. Persist at completed content/tool boundaries,
+    // plus a coarse checkpoint so a crash during one long block loses at most a
+    // bounded interval rather than the entire in-progress response.
+    const boundary = event.type === "text_end" || event.type === "thinking_end" || event.type === "toolcall_end";
+    if (boundary) this.flush();
+    else this.scheduleCheckpoint();
   }
 
   finish(message: AssistantMessage, diagnostics: unknown): void {
@@ -168,13 +177,36 @@ class JsonTraceRecorder implements TraceRecorder {
     this.flush();
   }
 
+  private scheduleCheckpoint(): void {
+    if (this.checkpointTimer) return;
+    const delayMs = Math.max(0, 10_000 - (Date.now() - this.lastFlushAt));
+    this.checkpointTimer = setTimeout(() => {
+      this.checkpointTimer = undefined;
+      this.flush();
+    }, delayMs);
+    this.checkpointTimer.unref();
+  }
+
   private flush(): void {
+    if (this.checkpointTimer) {
+      clearTimeout(this.checkpointTimer);
+      this.checkpointTimer = undefined;
+    }
+    this.lastFlushAt = Date.now();
+    const temporaryPath = `${this.filePath}.${process.pid}.tmp`;
     try {
-      mkdirSync(this.config.trace.dir, { recursive: true });
-      writeFileSync(this.filePath, `${JSON.stringify(this.data, null, 2)}\n`);
+      mkdirSync(this.config.trace.dir, { recursive: true, mode: 0o700 });
+      writeFileSync(temporaryPath, `${JSON.stringify(this.data, null, 2)}\n`, { mode: 0o600 });
+      renameSync(temporaryPath, this.filePath);
     } catch {
       // Tracing must never break the provider stream. The caller still receives
       // normal assistant events even if the trace directory is unwritable.
+    } finally {
+      try {
+        if (existsSync(temporaryPath)) rmSync(temporaryPath, { force: true });
+      } catch {
+        // Cleanup is best-effort for the same reason as trace persistence.
+      }
     }
   }
 }

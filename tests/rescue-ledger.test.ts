@@ -4,7 +4,7 @@ import type { Context } from "../src/pi-compat.js";
 import { readRescueLedger, recordRescue, rescueLedgerKey, resetRescueLedger } from "../src/rescue-ledger.ts";
 
 describe("rescue ledger", () => {
-  it("keys by alias and first raw user message", () => {
+  it("keys by alias and conversation identity", () => {
     resetRescueLedger();
     const base: Context = {
       messages: [
@@ -12,16 +12,22 @@ describe("rescue ledger", () => {
         { role: "user", content: "later message", timestamp: 2 },
       ],
     };
-    const sameFirstText: Context = {
+    const sameConversation: Context = {
       messages: [
-        { role: "user", content: "<!-- gsd-moa:full --> fix tests", timestamp: 99 },
+        { role: "user", content: "<!-- gsd-moa:full --> fix tests", timestamp: 1 },
         { role: "user", content: "different later message", timestamp: 100 },
       ],
+    };
+    const repeatedPromptInAnotherSession: Context = {
+      messages: [{ role: "user", content: "<!-- gsd-moa:full --> fix tests", timestamp: 99 }],
     };
 
     const key = rescueLedgerKey("alias-a", base);
     assert.match(key, /^[a-f0-9]{64}$/);
-    assert.equal(key, rescueLedgerKey("alias-a", sameFirstText));
+    assert.notEqual(key, rescueLedgerKey("alias-a", sameConversation));
+    assert.notEqual(key, rescueLedgerKey("alias-a", repeatedPromptInAnotherSession));
+    assert.notEqual(rescueLedgerKey("alias-a", base, "session-one"), rescueLedgerKey("alias-a", base, "session-two"));
+    assert.notEqual(rescueLedgerKey("alias-a", base, "session-one"), rescueLedgerKey("alias-a", repeatedPromptInAnotherSession, "session-one"));
     assert.notEqual(key, rescueLedgerKey("alias-b", base));
     assert.notEqual(key, rescueLedgerKey("alias-a", { messages: [{ role: "user", content: "fix build", timestamp: 1 }] }));
   });

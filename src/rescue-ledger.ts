@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Context } from "./pi-compat.js";
-import { rawMessageText } from "./context.js";
+import { conversationIdentity } from "./context.js";
 
 export interface RescueLedgerEntry {
   count: number;
@@ -10,10 +10,8 @@ export interface RescueLedgerEntry {
 const MAX_RESCUE_LEDGER_ENTRIES = 64;
 const rescueLedger = new Map<string, RescueLedgerEntry>();
 
-export function rescueLedgerKey(aliasId: string, context: Context): string {
-  const firstUser = context.messages.find((message) => message.role === "user");
-  const firstUserMessageRawText = firstUser ? rawMessageText(firstUser) : "";
-  return createHash("sha256").update(`${aliasId}|${firstUserMessageRawText}`).digest("hex");
+export function rescueLedgerKey(aliasId: string, context: Context, sessionId?: string): string {
+  return createHash("sha256").update(`${aliasId}|${conversationIdentity(context, sessionId)}`).digest("hex");
 }
 
 export function readRescueLedger(key: string): RescueLedgerEntry | undefined {

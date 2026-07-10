@@ -1,6 +1,14 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench experiments
 
-Last updated: 2026-07-08 (Roadmap v2 adopted; M1 done-gate implemented, smoked, autoreview-hardened, and merged to main).
+Last updated: 2026-07-09 (M1/M2/control arms DONE + read; audit hardening complete and final autoreview clean; not committed; M3 next).
+
+## M1 + M2 + CONTROL ARMS: DONE 2026-07-09 — full three-way read in `docs/TERMINAL-BENCH-RESULTS.md` (top)
+
+All three arms ran on yukon at committed `e3d0d98` (user-directed launch; unaffected by the local uncommitted hardening below). **M1 done-gate 13/23 · same-commit single control 11/23 · GLM-5.2 single 7/23; all integrity-clean.** Gate mechanism validated live (fires only where verification absent, real post-fire verification in traces, ledger/time-floor correct, zero wall tax); +3 on passable four concentrated where fires were universal (mcmc 5/5 vs 3/5); not significant at this k — CONTINUE, gate on in future arms. GLM actor: zero complementarity (strict subset of GPT coverage, clock-bound). **Control torch 1/3 = our first-ever torch pass** ⇒ torch approach-shaped, not model-shaped; M4 stays parked; **M3 (GSD-typed checkpoints) is the main track.** Artifacts: `jobs/m1-donegate`, `jobs/m1c-single-control`, `jobs/m2-glm-single`. Yukon checkout switched to `main` (`e3d0d98`), slot FREE. Note: arm results were aggregated with the /tmp scratch aggregator (done-gate columns); the tracked `scripts/aggregate-tb-results.ts` gained equivalent support in the local hardening below — reconcile on commit.
+
+## LOCAL AUDIT HARDENING 2026-07-09 — DIRTY WORKTREE (arms already ran from committed code; safe)
+
+Project-wide audit fixes are implemented, the final Codex autoreview is clean, and `npm run check` passes in both runtimes (199/199 each). Key changes: trace persistence no longer rewrites the full file per token delta; cache identity is lossless across full context/code whitespace and effective generation controls; failed advisor/proposer/synthesis calls retain diagnostics and usage; rescue/async ledgers separate repeated prompts across sessions and async state is bounded; failed and partial writes no longer corrupt done-gate state; auto keywords use Unicode-aware token boundaries and phrase inflections; the tracked TB aggregator reports done-gate trial/event metrics and distinguishes post-gate verification pass/fail/unknown. OMP dependencies updated to 16.3.12 and Earendil Pi to 0.80.3. Nine moderate transitive OpenTelemetry advisories remain upstream; npm proposes an incompatible OMP downgrade, so do not force-fix. **Next:** rerun checks, commit, sync Yukon, rebuild the runtime bundle, run a live OMP/proxy smoke, and reaggregate M1/M2 with the tracked script. Then begin M3 typed-checkpoint design/prototyping. **The next Yukon arm requires a runtime bundle rebuild** because package.json/lock changed and the tar carries node_modules; also note the done-gate semantics delta vs arm commit `e3d0d98`, so pin commits in cross-arm comparisons.
 
 ## MERGED TO MAIN 2026-07-08 — `15387ea` on origin/main AND yukon/oh-my-pi-port (user-pushed)
 

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { TBENCH_INTEGRITY_PATTERNS, aggregateTbResults, renderMarkdown, scanTrialIntegrity } from "../scripts/aggregate-tb-results.ts";
+import { TBENCH_INTEGRITY_PATTERNS, aggregateTbResults, parseMoaTelemetry, renderMarkdown, scanTrialIntegrity } from "../scripts/aggregate-tb-results.ts";
 
 const fixtureDir = join(process.cwd(), "tests", "fixtures", "tb-jobs");
 
@@ -47,7 +47,21 @@ describe("Terminal-Bench results aggregation", () => {
     assert.equal(group.moa.cacheLookups, 1);
     assert.equal(group.moa.combinedUsage.input, 15);
     assert.equal(group.moa.combinedUsage.output, 26);
-    assert.equal(group.moa.combinedUsage.cost, 0.03);
+    assert.equal(group.moa.combinedUsage.cost, 0.02);
+    assert.equal(group.moa.pricedInnerCalls, 1);
+    assert.equal(group.moa.unpricedInnerCalls, 1);
+    assert.equal(group.moa.doneGateEvents, 1);
+    assert.equal(group.moa.doneGateTrials, 1);
+    assert.equal(group.moa.doneGateModifiedTrials, 1);
+    assert.equal(group.moa.doneGateVerifierRunTrials, 0);
+    assert.equal(group.moa.doneGateFireTrials, 1);
+    assert.equal(group.moa.doneGateArmed, 1);
+    assert.equal(group.moa.doneGateFired, 1);
+    assert.equal(group.moa.doneGateModifiedTurns, 1);
+    assert.equal(group.moa.doneGateVerifierPassTrials, 0);
+    assert.equal(group.moa.doneGateVerifierFailureTrials, 0);
+    assert.equal(group.moa.doneGatePostBehavior["verification-requested"], 1);
+    assert.equal(group.moa.doneGateOutcomes["verification-requested"], 1);
     assert.equal(group.time.toolMeanMs, 7000);
     assert.equal(group.time.referenceMeanMs, 10000);
     assert.equal(group.time.modelOtherMeanMs, 62000);
@@ -64,12 +78,125 @@ describe("Terminal-Bench results aggregation", () => {
     assert.match(markdown, /model-a/);
     assert.match(markdown, /matrix-e1-single/);
     assert.match(markdown, /Time tool\/refΣ\/non-tool/);
+    assert.match(markdown, /Done gate/);
+    assert.match(markdown, /1\/3 trials fired; 0\/3 trials verified/);
+    assert.match(markdown, /partial \$0\.0200/);
+    assert.match(markdown, /pricing coverage \{priced calls: 1, unpriced calls: 1\}/);
+    assert.match(markdown, /done gate \{trials: 1, modified trials: 1, fire trials: 1, verifier-run trials: 0, verifier-pass trials: 0, verifier-failure trials: 0, armed events: 1, fired events: 1, outcomes: verification-requested: 1, post snapshots: verification-requested: 1\}/);
     assert.match(markdown, /Integrity/);
     assert.match(markdown, /tainted: 1/);
     assert.match(markdown, /integrity: 1 tainted 3 unknown \(1 would-pass zeroed\) \{laude-institute\/terminal-bench: 1, tbench\.ai: 1\}/);
     assert.match(markdown, /integrity: 1 unknown/);
     assert.match(markdown, /efforts \{primary: unset, proposer: unset\}/);
     assert.match(markdown, /Voids/);
+  });
+
+  it("does not combine unrelated verifier-only and modified snapshots", () => {
+    const trialDir = makeTempTrial();
+    try {
+      const diagnostic = (doneGate: Record<string, unknown>) => ({
+        type: "message_end",
+        message: { diagnostics: [{ type: "gsd-moa.details", details: { doneGate, innerCalls: [] } }] },
+      });
+      writeAgentFile(trialDir, "pi-gsd-moa/pi-output.jsonl", [
+        JSON.stringify(diagnostic({ armed: false, fired: false, filesModified: false, verifierRan: true, lastVerifierPassed: true })),
+        JSON.stringify(diagnostic({ armed: true, fired: true, filesModified: true, verifierRan: false, postGateBehavior: "ignored" })),
+      ].join("\n"));
+      const telemetry = parseMoaTelemetry(trialDir);
+      assert.equal(telemetry.doneGateTrials, 1);
+      assert.equal(telemetry.doneGateModifiedTrials, 1);
+      assert.equal(telemetry.doneGateVerifierRunTrials, 0);
+      assert.equal(telemetry.doneGateOutcomes.ignored, 1);
+    } finally {
+      rmSync(trialDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps post-fire verification out of the pre-done verifier metric", () => {
+    const trialDir = makeTempTrial();
+    try {
+      const diagnostic = (doneGate: Record<string, unknown>) => ({
+        type: "message_end",
+        message: { diagnostics: [{ type: "gsd-moa.details", details: { doneGate, innerCalls: [] } }] },
+      });
+      writeAgentFile(trialDir, "pi-gsd-moa/pi-output.jsonl", [
+        JSON.stringify(diagnostic({ armed: true, fired: true, filesModified: true, verifierRan: false })),
+        JSON.stringify(diagnostic({ armed: false, fired: false, filesModified: true, verifierRan: true, lastVerifierPassed: true })),
+      ].join("\n"));
+      const telemetry = parseMoaTelemetry(trialDir);
+      assert.equal(telemetry.doneGateVerifierRunTrials, 0);
+      assert.equal(telemetry.doneGateVerifierPassTrials, 0);
+      assert.equal(telemetry.doneGateOutcomes.verified, 1);
+    } finally {
+      rmSync(trialDir, { recursive: true, force: true });
+    }
+  });
+
+  it("distinguishes failed and unknown post-fire verification outcomes", () => {
+    for (const [lastVerifierPassed, expected] of [[false, "verification-failed"], [undefined, "verification-unknown"]] as const) {
+      const trialDir = makeTempTrial();
+      try {
+        const diagnostic = (doneGate: Record<string, unknown>) => ({
+          type: "message_end",
+          message: { diagnostics: [{ type: "gsd-moa.details", details: { doneGate, innerCalls: [] } }] },
+        });
+        writeAgentFile(trialDir, "pi-gsd-moa/pi-output.jsonl", [
+          JSON.stringify(diagnostic({ armed: true, fired: true, filesModified: true, verifierRan: false })),
+          JSON.stringify(diagnostic({ armed: false, fired: false, filesModified: true, verifierRan: true, ...(lastVerifierPassed === undefined ? {} : { lastVerifierPassed }) })),
+        ].join("\n"));
+        const telemetry = parseMoaTelemetry(trialDir);
+        assert.equal(telemetry.doneGateOutcomes[expected], 1);
+        assert.equal(telemetry.doneGateOutcomes.verified, undefined);
+      } finally {
+        rmSync(trialDir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("does not carry verifier evidence across later mutations", () => {
+    const trialDir = makeTempTrial();
+    try {
+      const diagnostic = (doneGate: Record<string, unknown>) => ({
+        type: "message_end",
+        message: { diagnostics: [{ type: "gsd-moa.details", details: { doneGate, innerCalls: [] } }] },
+      });
+      writeAgentFile(trialDir, "pi-gsd-moa/pi-output.jsonl", [
+        JSON.stringify(diagnostic({ armed: false, fired: false, filesModified: true, verifierRan: true, lastVerifierPassed: true })),
+        JSON.stringify(diagnostic({ armed: true, fired: true, filesModified: true, verifierRan: false, postGateBehavior: "verification-requested" })),
+        JSON.stringify(diagnostic({ armed: false, fired: false, filesModified: true, verifierRan: true, lastVerifierPassed: true })),
+        JSON.stringify(diagnostic({ armed: false, fired: false, filesModified: true, verifierRan: false })),
+      ].join("\n"));
+      const telemetry = parseMoaTelemetry(trialDir);
+      assert.equal(telemetry.doneGateVerifierRunTrials, 0);
+      assert.equal(telemetry.doneGateVerifierPassTrials, 0);
+      assert.equal(telemetry.doneGateOutcomes.verified, undefined);
+      assert.equal(telemetry.doneGateOutcomes["verification-requested"], 1);
+    } finally {
+      rmSync(trialDir, { recursive: true, force: true });
+    }
+  });
+
+  it("counts cumulative verifier snapshots once per trial", () => {
+    const trialDir = makeTempTrial();
+    try {
+      const diagnostic = {
+        type: "gsd-moa.details",
+        details: {
+          doneGate: { armed: false, fired: false, filesModified: true, verifierRan: true, lastVerifierPassed: true },
+          innerCalls: [],
+        },
+      };
+      writeAgentFile(trialDir, "pi-gsd-moa/pi-output.jsonl", [
+        JSON.stringify({ type: "message_end", message: { diagnostics: [diagnostic] } }),
+        JSON.stringify({ type: "message_end", message: { diagnostics: [diagnostic] } }),
+      ].join("\n"));
+      const telemetry = parseMoaTelemetry(trialDir);
+      assert.equal(telemetry.doneGateEvents, 2);
+      assert.equal(telemetry.doneGateVerifierRunTrials, 1);
+      assert.equal(telemetry.doneGateVerifierPassTrials, 1);
+    } finally {
+      rmSync(trialDir, { recursive: true, force: true });
+    }
   });
 
   it("scans clean Droid stream-jsonl logs when Pi logs are absent", () => {

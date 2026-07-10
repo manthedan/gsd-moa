@@ -1,5 +1,39 @@
 # Terminal-Bench Evidence Snapshot
 
+## M1 done-gate + M2 diversity oracle — three-way read (2026-07-09)
+
+**Three arms at `e3d0d98`, passable four k=5 + torch k=3 (23 trials each), standard config, all integrity-clean.** M1 = `gpt55-cliproxycodex-donegate` (mechanical done-gate, `f3344ca`+`15387ea`); m1c = `gpt55-cliproxycodex-single` (same-commit/same-k attribution control); M2 = `glm52-zai-single` (GLM-5.2 as sole actor, diversity-oracle arm).
+
+| Task | m1c single control | **M1 done-gate** | M2 GLM-5.2 single | gate fires (fired-trials) |
+|---|---:|---:|---:|---:|
+| extract-elf | 3/5 | 4/5 | 2/5 | 0/5 |
+| mcmc-sampling-stan | 3/5 | **5/5** | 3/5 | 5/5 |
+| gcode-to-text | 0/5 | 1/5 | 0/5 | 4/5 |
+| overfull-hbox | 4/5 | 3/5 | 2/5 | 3/5 |
+| torch-tensor-parallelism | **1/3** | 0/3 | 0/3 | 1/3 |
+| **Total** | 11/23 (47.8%) | **13/23 (56.5%)** | 7/23 (30.4%) | 13/23 trials fired |
+| Passable four | 10/20 (50%) | **13/20 (65%)** | 7/20 (35%) | — |
+
+**M1 gate read — mechanism fully validated; pass effect directional, not conclusive:**
+
+- **The gate behaves task-appropriately.** Silent where the actor self-verifies (extract-elf: 0 fires, final-verifier-ran 5/5); fires where verification is absent (mcmc 5/5 trials, gcode 4/5, overfull 3/5); ledger cap holds after each fire (no gate spam); time-floor correctly suppressed 8 near-ceiling turns on overfull; one retry per fire, always accepted. Zero wall-time tax vs control (11.1m vs 11.7m mean).
+- **Post-fire behavior is genuine verification, not boilerplate.** Sampled fired mcmc trace: the retry response runs real domain checks (rstan version, output-file existence, finite posterior means, analysis.R parameter audit). The aggregator's `verified-after-fire 0/5` on mcmc is a **classifier blind spot** (R-workflow checks don't match the verifier regex) — backlog: widen `VERIFIER_RE` for R/multi-language workflows before trusting that column.
+- **Pass effect: +3 on the passable four (65% vs 50%), concentrated exactly where fires were universal** (mcmc +2 with 5/5 fires; the control lost one mcmc to ceiling-cancel and one to agent-exit). Overfull cuts the other way (−1). Fisher on 13/20 vs 10/20 ≈ p 0.34 — per power discipline, not a detectable aggregate lift; but the roadmap's continue rule asked for material fire rate + real post-gate verification, and both are demonstrated. **Decision: gate stays on for future arms (it's free); graduation into default aliases waits for accumulated k.**
+- **Torch stays gate-immune as predicted**: gate fired, verification ran (`py_compile`-class, verified-after-fire 1/1), still 0/3 — compile checks can't catch tensor-parallel semantics. Matches the F4-replay conclusion: torch-class needs semantic review (M4), not mechanical verification.
+
+**M2 oracle read — GLM-5.2 adds no actor-diversity headroom:**
+
+- **7/23 (30.4%), passes a strict subset of GPT-5.5's coverage** — nothing GLM passed that GPT-5.5 arms fail. Pairwise complementarity ≈ 0 on this slice.
+- **Clock-bound**: 18.0m mean wall vs 11-12m for GPT arms; 8/23 cancellations (4/5 on overfull). GLM as actor is slower AND weaker in our harness.
+- **Cost-frontier note**: the inverted thesis (cheap GLM actor + expensive judgment) is not supported at these numbers — the actor gap is too large for advisory patching.
+- **Torch all-fail is broken — by the control, not by diversity: m1c torch 1/3 is our first torch pass ever** (integrity-clean). Oracle headroom on torch exists within our harness with GPT-5.5 single alone (Droid 2/3 same model). Torch is winnable; the lever is approach quality (and possibly M4 semantic review), not model portfolio.
+
+**Consequences for Roadmap v2:** M1 CONTINUE (gate on in future arms, k accumulates); M2 answers the gate question for M4 — **cross-model reviewer must justify itself against zero actor-complementarity evidence**, so M4 remains parked unless a scoped replay on the semantic-risk slice shows reviewer-side catch value (F4 think-mode data is the only support); M3 (GSD-typed checkpoints) is now the main track. Next arm candidates: rescue+donegate combo (both mechanisms cheap and validated), or M3 checkpoint prototype arm.
+
+Artifacts: `jobs/m1-donegate`, `jobs/m1c-single-control`, `jobs/m2-glm-single` (yukon). Aggregator with done-gate columns: `/tmp/aggregate-integrity.ts` (yukon; `done-gate:` lines in group details).
+
+---
+
 ## F2 rescue-triggered advice — first arm (2026-07-06)
 
 **Arm: `gpt55-cliproxycodex-glm52-rescue` (single + stuck-triggered advisor, `01eaa5f`), passable four, k=5, standard config, post-H1: 11/20 (55%), integrity-clean.** Per-task vs s2-single (k=3, pre-H1):

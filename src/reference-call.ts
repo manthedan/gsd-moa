@@ -4,7 +4,7 @@ import { assistantText } from "./context.js";
 import type { TraceRecorder, TraceReferenceCall } from "./trace.js";
 import { referenceBudgetMs } from "./time.js";
 import type { GsdMoaConfig, TimeState, UpstreamRoute } from "./types.js";
-import { effortForTrace, resolveEffortForRoute, routeToModel, streamOptionsForRoute, type UpstreamClient } from "./upstream.js";
+import { effortForTrace, generationControlsForCache, generationOptionsForRoute, routeToModel, streamOptionsForRoute, type UpstreamClient } from "./upstream.js";
 
 export interface ReferenceCallMetadata {
   role: TraceReferenceCall["role"];
@@ -46,9 +46,14 @@ export async function runReferenceCall(
   timeState?: TimeState,
 ): Promise<ReferenceCallResult> {
   const startedAt = Date.now();
-  const cacheControls = referenceCacheControlsForRoute(config, route, metadata, options);
+  const referenceOptions = withoutProviderSessionState(options);
+  const cacheControls = referenceCacheControlsForRoute(config, route, metadata, referenceOptions);
   const key = referenceCacheKey(config, context, route, metadata.cacheScope, metadata.promptVersion, cacheControls);
-  const cache = readCacheByKey(config, key, process.cwd());
+  // Payload transforms are executable and have no stable identity. Reusing a
+  // cached response would skip the transform and may return guidance for a
+  // different effective prompt.
+  const cacheSafe = referenceOptions?.onPayload === undefined && referenceOptions?.fetch === undefined;
+  const cache = cacheSafe ? readCacheByKey(config, key, process.cwd()) : { hit: false as const, key, path: "" };
   const traceBase = {
     role: metadata.role,
     id: metadata.id,
@@ -80,7 +85,7 @@ export async function runReferenceCall(
     };
   }
 
-  const { options: callOptions, effectiveTimeoutMs, timeoutSignal } = referenceStreamOptionsForRoute(config, route, metadata, options, timeState);
+  const { options: callOptions, effectiveTimeoutMs, timeoutSignal } = referenceStreamOptionsForRoute(config, route, metadata, referenceOptions, timeState);
   const model = routeToModel(route);
   let message: AssistantMessage;
   try {
@@ -119,7 +124,14 @@ export async function runReferenceCall(
   }
 
   const text = classification.text;
-  if (text) writeAdvisorCache(config, key, text, message.usage);
+  if (text && cacheSafe) {
+    try {
+      writeAdvisorCache(config, key, text, message.usage);
+    } catch {
+      // Cache persistence is best-effort. The provider call already completed;
+      // never discard its output or billed usage because local storage failed.
+    }
+  }
   trace?.recordReferenceCall({
     ...traceBase,
     message,
@@ -139,21 +151,50 @@ export async function runReferenceCall(
 }
 
 function referenceCacheControlsForRoute(config: GsdMoaConfig, route: UpstreamRoute, metadata: ReferenceCallMetadata, options?: SimpleStreamOptions) {
-  const effort = resolveEffortForRoute(route, options, config.defaultEffort);
-  const maxTokens = referenceMaxTokensForMetadata(config, metadata);
+  const referenceMaxTokens = referenceMaxTokensForMetadata(config, metadata);
+  const inheritedMaxTokens = options?.maxTokens ?? routeToModel(route).maxTokens;
+  const effectiveOptions: SimpleStreamOptions = {
+    ...generationOptionsForRoute(route, options, config.defaultEffort),
+    ...(referenceMaxTokens !== undefined
+      ? { maxTokens: referenceMaxTokens }
+      : typeof inheritedMaxTokens === "number"
+        ? { maxTokens: inheritedMaxTokens }
+        : {}),
+  };
+  const effort = effortForTrace(effectiveOptions);
   return {
     ...(effort !== undefined ? { effort } : {}),
-    ...(maxTokens !== undefined ? { maxTokens } : {}),
+    ...(effectiveOptions.maxTokens !== undefined ? { maxTokens: effectiveOptions.maxTokens } : {}),
+    ...(effectiveOptions.temperature !== undefined ? { temperature: effectiveOptions.temperature } : {}),
+    generation: generationControlsForCache(effectiveOptions),
   };
+}
+
+function withoutProviderSessionState(options?: SimpleStreamOptions): SimpleStreamOptions | undefined {
+  if (!options) return undefined;
+  const {
+    providerSessionState: _providerSessionState,
+    previousInteractionId: _previousInteractionId,
+    ...stateless
+  } = options;
+  return stateless;
 }
 
 function referenceMaxTokensForMetadata(config: GsdMoaConfig, metadata: ReferenceCallMetadata): number | undefined {
   return metadata.role === "synthesizer" ? undefined : metadata.maxTokens ?? config.referenceMaxTokens;
 }
 
-function referenceStreamOptionsForRoute(config: GsdMoaConfig, route: UpstreamRoute, metadata: ReferenceCallMetadata, options?: SimpleStreamOptions, timeState?: TimeState): { options: SimpleStreamOptions; effectiveTimeoutMs: number; timeoutSignal: AbortSignal } {
+function effectiveReferenceCallOptions(config: GsdMoaConfig, route: UpstreamRoute, metadata: ReferenceCallMetadata, options?: SimpleStreamOptions): SimpleStreamOptions {
   const base = streamOptionsForRoute(route, options, config.defaultEffort);
   const referenceMaxTokens = referenceMaxTokensForMetadata(config, metadata);
+  return {
+    ...base,
+    ...(referenceMaxTokens !== undefined ? { maxTokens: referenceMaxTokens } : {}),
+  };
+}
+
+function referenceStreamOptionsForRoute(config: GsdMoaConfig, route: UpstreamRoute, metadata: ReferenceCallMetadata, options?: SimpleStreamOptions, timeState?: TimeState): { options: SimpleStreamOptions; effectiveTimeoutMs: number; timeoutSignal: AbortSignal } {
+  const base = effectiveReferenceCallOptions(config, route, metadata, options);
   const timeBudgetMs = referenceBudgetMs(config.timeAware, timeState);
   const effectiveTimeoutMs = timeBudgetMs === undefined
     ? config.referenceTimeoutMs
@@ -163,7 +204,6 @@ function referenceStreamOptionsForRoute(config: GsdMoaConfig, route: UpstreamRou
   return {
     options: {
       ...base,
-      ...(referenceMaxTokens !== undefined ? { maxTokens: referenceMaxTokens } : {}),
       signal: signals.length === 1 ? signals[0] : AbortSignal.any(signals),
     },
     effectiveTimeoutMs,
@@ -173,6 +213,7 @@ function referenceStreamOptionsForRoute(config: GsdMoaConfig, route: UpstreamRou
 
 function classifyReferenceMessage(metadata: ReferenceCallMetadata, message: AssistantMessage, text: string, effectiveTimeoutMs: number): { ok: true; text: string } | { ok: false; message: string } {
   if (message.stopReason === "aborted") return { ok: false, message: timeoutFailureMessage(effectiveTimeoutMs) };
+  if (message.stopReason === "error") return { ok: false, message: message.errorMessage?.trim() || "reference provider returned an error" };
   if (message.stopReason === "length" && metadata.role !== "synthesizer") {
     if (text.length < 500) return { ok: false, message: "hit token limit" };
     return { ok: true, text: `${text}\n\n[advisory truncated at token limit]` };

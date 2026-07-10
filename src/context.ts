@@ -15,6 +15,73 @@ export function latestUserText(context: Context, preserveMarkers = false): strin
   return "";
 }
 
+const sessionTaskIdentities = new Map<string, string>();
+
+function isCompactionSummary(message: Message): boolean {
+  if (message.role !== "user") return false;
+  if (message.synthetic === true) return true;
+  const text = rawMessageText(message).trimStart();
+  return text.startsWith("The conversation history before this point was compacted into the following summary:")
+    || text.startsWith("Another language model started to solve this problem and produced a summary of its thinking process.");
+}
+
+/** Stable-enough identity for one in-process conversation across tool turns. */
+export function conversationIdentity(context: Context, sessionId?: string): string {
+  if (sessionId) {
+    const latestUser = [...context.messages].reverse().find((message) =>
+      message.role === "user"
+      && !isCompactionSummary(message),
+    );
+    if (latestUser?.role === "user") {
+      // Keep stable task identity without retaining full code-bearing prompts in
+      // this process-global cache.
+      const taskIdentity = `${latestUser.timestamp}|${createHash("sha256").update(rawMessageText(latestUser)).digest("hex")}`;
+      sessionTaskIdentities.delete(sessionId);
+      sessionTaskIdentities.set(sessionId, taskIdentity);
+      // This cache outlives and exceeds the combined keyed capacity of the async
+      // advisor and rescue stores, so compaction cannot orphan otherwise-live state.
+      while (sessionTaskIdentities.size > 512) sessionTaskIdentities.delete(sessionTaskIdentities.keys().next().value!);
+      return `session:${sessionId}|task:${taskIdentity}`;
+    }
+    return `session:${sessionId}|task:${sessionTaskIdentities.get(sessionId) ?? "unknown"}`;
+  }
+  let taskUserIndex = -1;
+  for (let index = context.messages.length - 1; index >= 0; index -= 1) {
+    const message = context.messages[index];
+    if (message?.role === "user" && !isCompactionSummary(message)) {
+      taskUserIndex = index;
+      break;
+    }
+  }
+  if (taskUserIndex < 0) {
+    for (let index = context.messages.length - 1; index >= 0; index -= 1) {
+      if (context.messages[index]?.role === "user") {
+        taskUserIndex = index;
+        break;
+      }
+    }
+  }
+  const taskUser = taskUserIndex >= 0 ? context.messages[taskUserIndex] : undefined;
+  const text = taskUser?.role === "user" ? rawMessageText(taskUser) : "";
+  let toolIdentity = "";
+  for (const message of context.messages.slice(taskUserIndex + 1)) {
+    if (message.role === "toolResult") {
+      toolIdentity = `${message.toolName}:${message.toolCallId}`;
+      break;
+    }
+    if (message.role !== "assistant") continue;
+    const call = message.content.find((item) => {
+      const type = (item as { type?: unknown }).type;
+      return type === "toolCall" || type === "tool-call";
+    }) as { id?: unknown; name?: unknown } | undefined;
+    if (call) {
+      toolIdentity = `${typeof call.name === "string" ? call.name : ""}:${typeof call.id === "string" ? call.id : ""}`;
+      break;
+    }
+  }
+  return `${taskUser?.timestamp ?? ""}|${text}|${toolIdentity}`;
+}
+
 export function hasRecentToolResults(context: Context): boolean {
   return context.messages.slice(-4).some((m) => m.role === "toolResult");
 }

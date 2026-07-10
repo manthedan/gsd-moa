@@ -82,6 +82,14 @@ export interface MoaEventSummary {
   };
   innerCalls: InnerCallSummary[];
   combinedUsage?: UsageSummary;
+  doneGate?: {
+    armed: boolean;
+    fired: boolean;
+    filesModified: boolean;
+    verifierRan: boolean;
+    lastVerifierPassed?: boolean;
+    postGateBehavior?: string;
+  };
 }
 
 export interface MoaAggregate {
@@ -98,6 +106,20 @@ export interface MoaAggregate {
   combinedUsage: UsageSummary;
   innerCallsByRoleModel: CountMap;
   effortsByRole: Record<string, CountMap>;
+  doneGateEvents: number;
+  doneGateTrials: number;
+  doneGateModifiedTrials: number;
+  doneGateVerifierRunTrials: number;
+  doneGateVerifierPassTrials: number;
+  doneGateVerifierFailureTrials: number;
+  doneGateFireTrials: number;
+  doneGateModifiedTurns: number;
+  doneGateArmed: number;
+  doneGateFired: number;
+  doneGatePostBehavior: CountMap;
+  doneGateOutcomes: CountMap;
+  pricedInnerCalls: number;
+  unpricedInnerCalls: number;
 }
 
 export interface TrialRecord {
@@ -204,6 +226,20 @@ function emptyMoaAggregate(): MoaAggregate {
     combinedUsage: emptyUsage(),
     innerCallsByRoleModel: {},
     effortsByRole: {},
+    doneGateEvents: 0,
+    doneGateTrials: 0,
+    doneGateModifiedTrials: 0,
+    doneGateVerifierRunTrials: 0,
+    doneGateVerifierPassTrials: 0,
+    doneGateVerifierFailureTrials: 0,
+    doneGateFireTrials: 0,
+    doneGateModifiedTurns: 0,
+    doneGateArmed: 0,
+    doneGateFired: 0,
+    doneGatePostBehavior: {},
+    doneGateOutcomes: {},
+    pricedInnerCalls: 0,
+    unpricedInnerCalls: 0,
   };
 }
 
@@ -541,7 +577,18 @@ function applyMoaEvent(aggregate: MoaAggregate, event: MoaEventSummary): void {
     aggregate.combinedUsageTurns += 1;
     addUsage(aggregate.combinedUsage, event.combinedUsage);
   }
+  if (event.doneGate) {
+    aggregate.doneGateEvents += 1;
+    if (event.doneGate.filesModified) aggregate.doneGateModifiedTurns += 1;
+    if (event.doneGate.armed) aggregate.doneGateArmed += 1;
+    if (event.doneGate.fired) aggregate.doneGateFired += 1;
+    if (event.doneGate.postGateBehavior) increment(aggregate.doneGatePostBehavior, event.doneGate.postGateBehavior);
+  }
   for (const call of event.innerCalls) {
+    if (call.usage && (call.usage.totalTokens ?? 0) > 0) {
+      if ((call.usage.cost ?? 0) > 0) aggregate.pricedInnerCalls += 1;
+      else aggregate.unpricedInnerCalls += 1;
+    }
     const role = call.role ?? "unknown-role";
     const key = [role, call.provider ?? "unknown-provider", call.model ?? "unknown-model"].join("/");
     increment(aggregate.innerCallsByRoleModel, key);
@@ -555,6 +602,7 @@ function moaEventFromDiagnostic(diagnostic: unknown): MoaEventSummary | null {
   if (!diag || diag.type !== "gsd-moa.details") return null;
   const details = asRecord(diag.details) ?? diag;
   const timeAware = asRecord(details.timeAware);
+  const doneGate = asRecord(details.doneGate);
   const combinedUsage = usageFrom(details.combinedUsage);
 
   return {
@@ -574,6 +622,16 @@ function moaEventFromDiagnostic(diagnostic: unknown): MoaEventSummary | null {
     } : {}),
     innerCalls: summarizeInnerCalls(details.innerCalls),
     ...(combinedUsage ? { combinedUsage } : {}),
+    ...(doneGate ? {
+      doneGate: {
+        armed: booleanValue(doneGate.armed) ?? false,
+        fired: booleanValue(doneGate.fired) ?? false,
+        filesModified: booleanValue(doneGate.filesModified) ?? false,
+        verifierRan: booleanValue(doneGate.verifierRan) ?? false,
+        ...(booleanValue(doneGate.lastVerifierPassed) !== undefined ? { lastVerifierPassed: booleanValue(doneGate.lastVerifierPassed) } : {}),
+        ...(firstString(doneGate.postGateBehavior) ? { postGateBehavior: firstString(doneGate.postGateBehavior) } : {}),
+      },
+    } : {}),
   };
 }
 
@@ -677,6 +735,38 @@ export function parseMoaTelemetry(trialDir: string): MoaAggregate & { eventSumma
     }
   }
 
+  const trialDoneGateEvents = aggregate.eventSummaries.flatMap((summary) => summary.doneGate ? [summary.doneGate] : []);
+  if (trialDoneGateEvents.length) {
+    aggregate.doneGateTrials = 1;
+    const modifiedTrial = trialDoneGateEvents.some((gate) => gate.filesModified);
+    if (modifiedTrial) aggregate.doneGateModifiedTrials = 1;
+    const firedIndex = trialDoneGateEvents.findIndex((gate) => gate.fired);
+    // The fired snapshot still describes pre-retry state. Use the final modified
+    // snapshot, not any historical verifier=true snapshot: verification becomes
+    // stale when a later mutation occurs.
+    const preFireEvents = firedIndex >= 0 ? trialDoneGateEvents.slice(0, firedIndex + 1) : trialDoneGateEvents;
+    const finalPreFireState = [...preFireEvents].reverse().find((gate) => gate.filesModified);
+    if (finalPreFireState?.verifierRan) {
+      aggregate.doneGateVerifierRunTrials = 1;
+      if (finalPreFireState.lastVerifierPassed === true) aggregate.doneGateVerifierPassTrials = 1;
+      if (finalPreFireState.lastVerifierPassed === false) aggregate.doneGateVerifierFailureTrials = 1;
+    }
+    if (firedIndex >= 0) {
+      aggregate.doneGateFireTrials = 1;
+      const postFireEvents = trialDoneGateEvents.slice(firedIndex);
+      const finalPostFireState = [...postFireEvents].reverse().find((gate) => gate.filesModified);
+      const postBehavior = [...postFireEvents].reverse().find((gate) => gate.postGateBehavior)?.postGateBehavior;
+      const outcome = finalPostFireState?.verifierRan
+        ? finalPostFireState.lastVerifierPassed === true
+          ? "verified"
+          : finalPostFireState.lastVerifierPassed === false
+            ? "verification-failed"
+            : "verification-unknown"
+        : postBehavior ?? "unknown";
+      increment(aggregate.doneGateOutcomes, outcome);
+    }
+  }
+
   const turnSpanMs = firstMessageTs !== null && lastMessageEndTs !== null && lastMessageEndTs >= firstMessageTs
     ? lastMessageEndTs - firstMessageTs
     : null;
@@ -760,6 +850,18 @@ function mergeMoa(target: MoaAggregate, source: MoaAggregate): void {
   target.synthesisFailureCount += source.synthesisFailureCount;
   target.timeAwareSuppressions += source.timeAwareSuppressions;
   target.combinedUsageTurns += source.combinedUsageTurns;
+  target.doneGateEvents += source.doneGateEvents;
+  target.doneGateTrials += source.doneGateTrials;
+  target.doneGateModifiedTrials += source.doneGateModifiedTrials;
+  target.doneGateVerifierRunTrials += source.doneGateVerifierRunTrials;
+  target.doneGateVerifierPassTrials += source.doneGateVerifierPassTrials;
+  target.doneGateVerifierFailureTrials += source.doneGateVerifierFailureTrials;
+  target.doneGateFireTrials += source.doneGateFireTrials;
+  target.doneGateModifiedTurns += source.doneGateModifiedTurns;
+  target.doneGateArmed += source.doneGateArmed;
+  target.doneGateFired += source.doneGateFired;
+  target.pricedInnerCalls += source.pricedInnerCalls;
+  target.unpricedInnerCalls += source.unpricedInnerCalls;
   addUsage(target.combinedUsage, source.combinedUsage);
 
   for (const [key, value] of Object.entries(source.checkpointRuns)) increment(target.checkpointRuns, key, value);
@@ -767,6 +869,8 @@ function mergeMoa(target: MoaAggregate, source: MoaAggregate): void {
   for (const [key, value] of Object.entries(source.synthesisFailures)) increment(target.synthesisFailures, key, value);
   for (const [key, value] of Object.entries(source.timeAwareSuppressionPhases)) increment(target.timeAwareSuppressionPhases, key, value);
   for (const [key, value] of Object.entries(source.innerCallsByRoleModel)) increment(target.innerCallsByRoleModel, key, value);
+  for (const [key, value] of Object.entries(source.doneGatePostBehavior)) increment(target.doneGatePostBehavior, key, value);
+  for (const [key, value] of Object.entries(source.doneGateOutcomes)) increment(target.doneGateOutcomes, key, value);
   for (const [role, efforts] of Object.entries(source.effortsByRole)) {
     target.effortsByRole[role] ??= {};
     for (const [effort, value] of Object.entries(efforts)) increment(target.effortsByRole[role], effort, value);
@@ -896,9 +1000,14 @@ function formatNumber(value: number): string {
   return Math.round(value).toLocaleString("en-US");
 }
 
-function formatCost(value: number, hasUsage: boolean): string {
-  if (!hasUsage) return "n/a";
-  if (value === 0) return "$0";
+function formatCost(group: GroupAggregate): string {
+  if (!group.moa.combinedUsageTurns) return "n/a";
+  const value = group.moa.combinedUsage.cost;
+  // Built-in private/subscription routes intentionally have zero price metadata;
+  // zero therefore means unpriced, not free. Mixed priced/unpriced calls expose
+  // only a lower bound and must not be presented as a complete total.
+  if (group.moa.unpricedInnerCalls > 0) return value > 0 ? `partial $${value.toFixed(4)}` : "unpriced";
+  if (value === 0) return "unpriced";
   return `$${value.toFixed(4)}`;
 }
 
@@ -935,12 +1044,21 @@ function formatUsage(group: GroupAggregate): string {
   return `${formatNumber(group.moa.combinedUsage.input)}/${formatNumber(group.moa.combinedUsage.output)}`;
 }
 
+function formatDoneGate(group: GroupAggregate): string {
+  const gate = group.moa;
+  if (!gate.doneGateEvents) return "n/a";
+  return `${gate.doneGateFireTrials}/${group.trials} trials fired; ${gate.doneGateVerifierRunTrials}/${group.trials} trials verified`;
+}
+
 function groupDetails(group: GroupAggregate): string[] {
   const parts: string[] = [];
   if (Object.keys(group.voidReasons).length) parts.push(`voids {${formatCounts(group.voidReasons)}}`);
   if (Object.keys(group.moa.guidanceSkipped).length) parts.push(`skips {${formatCounts(group.moa.guidanceSkipped)}}`);
   if (group.moa.synthesisFailureCount) parts.push(`synthesis failures {${formatCounts(group.moa.synthesisFailures)}}`);
   if (group.moa.timeAwareSuppressions) parts.push(`time-aware suppressions {${formatCounts(group.moa.timeAwareSuppressionPhases)}}`);
+  if (group.moa.doneGateEvents) {
+    parts.push(`done gate {trials: ${group.moa.doneGateTrials}, modified trials: ${group.moa.doneGateModifiedTrials}, fire trials: ${group.moa.doneGateFireTrials}, verifier-run trials: ${group.moa.doneGateVerifierRunTrials}, verifier-pass trials: ${group.moa.doneGateVerifierPassTrials}, verifier-failure trials: ${group.moa.doneGateVerifierFailureTrials}, armed events: ${group.moa.doneGateArmed}, fired events: ${group.moa.doneGateFired}, outcomes: ${formatCounts(group.moa.doneGateOutcomes)}, post snapshots: ${formatCounts(group.moa.doneGatePostBehavior)}}`);
+  }
   if (group.integrity.tainted || group.integrity.unknown) {
     const segments = [
       group.integrity.tainted ? `${group.integrity.tainted} tainted` : undefined,
@@ -952,13 +1070,14 @@ function groupDetails(group: GroupAggregate): string[] {
   }
   if (Object.keys(group.moa.innerCallsByRoleModel).length) parts.push(`inner calls {${formatCounts(group.moa.innerCallsByRoleModel)}}`);
   if (Object.keys(group.moa.effortsByRole).length) parts.push(`efforts {${formatEffortsByRole(group.moa.effortsByRole)}}`);
+  if (group.moa.pricedInnerCalls || group.moa.unpricedInnerCalls) parts.push(`pricing coverage {priced calls: ${group.moa.pricedInnerCalls}, unpriced calls: ${group.moa.unpricedInnerCalls}}`);
   return parts;
 }
 
 function tableForGroups(groups: GroupAggregate[]): string[] {
   const lines = [
-    "| Model alias | Label | Trials | Voids | Passes | Pass rate | Integrity | Exceptions | Wall mean/max | Time tool/refΣ/non-tool | Checkpoints | Cache hit | Tokens in/out | Cost | Suppressions |",
-    "|---|---|---:|---:|---:|---:|---|---|---:|---:|---|---:|---:|---:|---:|",
+    "| Model alias | Label | Trials | Voids | Passes | Pass rate | Integrity | Exceptions | Wall mean/max | Time tool/refΣ/non-tool | Checkpoints | Done gate | Cache hit | Tokens in/out | Cost | Suppressions |",
+    "|---|---|---:|---:|---:|---:|---|---|---:|---:|---|---|---:|---:|---:|---:|",
   ];
   for (const group of groups) {
     lines.push([
@@ -973,9 +1092,10 @@ function tableForGroups(groups: GroupAggregate[]): string[] {
       `${formatMs(group.wallTimeMs.meanMs)} / ${formatMs(group.wallTimeMs.maxMs)}`,
       formatTimeBreakdown(group),
       formatCounts(group.moa.checkpointRuns),
+      formatDoneGate(group),
       formatCache(group),
       formatUsage(group),
-      formatCost(group.moa.combinedUsage.cost, group.moa.combinedUsageTurns > 0),
+      formatCost(group),
       group.moa.timeAwareSuppressions,
     ].join(" | ") + " |");
   }

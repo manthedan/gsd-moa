@@ -13,6 +13,7 @@ import {
   type Model,
 } from "../src/pi-compat.js";
 import { DEFAULT_CONFIG } from "../src/config.ts";
+import { FullMoaError, runFullMoa } from "../src/moa.ts";
 import { streamGsdMoa } from "../src/stream.ts";
 import type { GsdMoaConfig } from "../src/types.ts";
 import type { UpstreamClient } from "../src/upstream.ts";
@@ -425,7 +426,9 @@ describe("full MoA orchestration", () => {
       assert.equal(done.type, "done");
       const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
       assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 2);
-      assert.equal(details.innerCalls.some((call: any) => call.role === "synthesizer"), false);
+      const failedSynthesis = details.innerCalls.find((call: any) => call.role === "synthesizer");
+      assert.ok(failedSynthesis);
+      assert.equal(failedSynthesis.error, "synthesis down");
       assert.equal(details.synthesisFailedReason, "synthesis down");
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -447,6 +450,24 @@ describe("full MoA orchestration", () => {
         },
       };
 
+      await assert.rejects(
+        runFullMoa(cfg, context, {
+          requestedMode: "full_moa",
+          mode: "full_moa",
+          reason: "test",
+          strippedText: "deep review",
+          markers: ["<!-- gsd-moa:full -->"],
+        }, upstream),
+        (error: unknown) => {
+          assert.ok(error instanceof FullMoaError);
+          assert.match(error.message, /all full_moa proposers failed/);
+          assert.equal(error.result.proposals.length, 0);
+          assert.equal(error.result.innerCalls.length, 2);
+          assert.equal(error.result.usage?.totalTokens ?? 0, 0);
+          return true;
+        },
+      );
+
       const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), context, undefined, { config: cfg, upstream }));
       const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
       assert.equal(done.type, "done");
@@ -454,8 +475,79 @@ describe("full MoA orchestration", () => {
       const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
       assert.equal(details.mode, "single");
       assert.equal(details.guidanceInjected, false);
+      assert.equal(details.cacheHit, false);
       assert.match(details.guidanceSkippedReason, /full_moa failed:/);
-      assert.equal(details.innerCalls.filter((call: any) => call.role !== "primary").length, 0);
+      const failedReferences = details.innerCalls.filter((call: any) => call.role === "proposer");
+      assert.equal(failedReferences.length, 2);
+      assert.ok(failedReferences.every((call: any) => call.error === "reference outage"));
+      assert.equal(details.referenceFailures.length, 2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not fall back to the primary when caller cancellation aborts synthesis", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    try {
+      const controller = new AbortController();
+      let completeCalls = 0;
+      let primaryCalls = 0;
+      const upstream: UpstreamClient = {
+        async complete(seenModel) {
+          completeCalls += 1;
+          if (completeCalls === 3) {
+            controller.abort(new Error("cancelled synthesis"));
+            throw new Error("cancelled synthesis");
+          }
+          return message(seenModel, `proposal-${completeCalls}`, usage(1, 1));
+        },
+        stream(seenModel) {
+          primaryCalls += 1;
+          return streamText(seenModel, "should not run", usage(1, 1));
+        },
+      };
+      const context: Context = { messages: [{ role: "user", content: "<!-- gsd-moa:full --> deep review", timestamp: 1 }] };
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), context, { signal: controller.signal }, { config: cfg, upstream }));
+      const error = events.at(-1) as Extract<AssistantMessageEvent, { type: "error" }>;
+      assert.equal(error.type, "error");
+      assert.equal(error.reason, "aborted");
+      assert.equal(primaryCalls, 0);
+      assert.equal(error.error.usage.totalTokens, 4);
+      const details = error.error.diagnostics?.find((item) => item.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not fall back to the primary after caller cancellation aborts all proposers", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    try {
+      const controller = new AbortController();
+      let completeCalls = 0;
+      let primaryCalls = 0;
+      const upstream: UpstreamClient = {
+        async complete(seenModel) {
+          completeCalls += 1;
+          if (completeCalls === 2) controller.abort(new Error("cancelled"));
+          return { ...message(seenModel, "", usage(1, 1)), stopReason: "aborted", errorMessage: "cancelled" };
+        },
+        stream(seenModel) {
+          primaryCalls += 1;
+          return streamText(seenModel, "should not run", usage(1, 1));
+        },
+      };
+      const context: Context = { messages: [{ role: "user", content: "<!-- gsd-moa:full --> deep review", timestamp: 1 }] };
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-full"), context, { signal: controller.signal }, { config: cfg, upstream }));
+      const error = events.at(-1) as Extract<AssistantMessageEvent, { type: "error" }>;
+      assert.equal(error.type, "error");
+      assert.equal(error.reason, "aborted");
+      assert.equal(primaryCalls, 0);
+      assert.equal(error.error.usage.totalTokens, 4);
+      const details = error.error.diagnostics?.find((item) => item.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.innerCalls.filter((call: any) => call.role === "proposer").length, 2);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

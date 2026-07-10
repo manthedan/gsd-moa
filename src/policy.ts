@@ -4,15 +4,13 @@ import type { AliasMode, CheckpointScopesConfig, GsdMoaConfig, MoaAction, MoaMod
 const ADVISOR_MARKERS = ["<!-- gsd-moa:advisor -->", "<!-- gsd-moa:on -->"];
 const FULL_MOA_MARKERS = ["<!-- gsd-moa:full -->", "<!-- gsd-moa:full_moa -->"];
 const SINGLE_MARKERS = ["<!-- gsd-moa:single -->", "<!-- gsd-moa:off -->"];
-const ALL_MARKERS = [...ADVISOR_MARKERS, ...FULL_MOA_MARKERS, ...SINGLE_MARKERS];
 
 export function stripMoaMarkers(text: string): { text: string; markers: string[] } {
   const markers: string[] = [];
-  let stripped = text;
-  for (const marker of ALL_MARKERS) {
-    if (stripped.includes(marker)) markers.push(marker);
-    stripped = stripped.split(marker).join("");
-  }
+  const stripped = text.replace(/<!--\s*gsd-moa:(advisor|on|full|full_moa|single|off)\s*-->/gi, (_match, mode: string) => {
+    markers.push(`<!-- gsd-moa:${mode.toLowerCase()} -->`);
+    return "";
+  });
   return { text: stripped.trim(), markers };
 }
 
@@ -43,10 +41,10 @@ export function chooseMode(config: GsdMoaConfig, input: PolicyInput): PolicyDeci
   if (input.hasToolResults) return decision(requestedMode, "single", "tool-loop continuation", strippedText, markers);
 
   const normalized = strippedText.toLowerCase();
-  const singleHit = config.auto.singleKeywords.find((kw) => normalized.includes(kw.toLowerCase()));
+  const singleHit = findKeyword(normalized, config.auto.singleKeywords);
   if (singleHit) return decision(requestedMode, "single", `single keyword: ${singleHit}`, strippedText, markers);
 
-  const fullMoaHit = config.auto.fullMoaKeywords.find((kw) => normalized.includes(kw.toLowerCase()));
+  const fullMoaHit = findKeyword(normalized, config.auto.fullMoaKeywords);
   if (fullMoaHit && config.fullMoa.enabled) {
     return decision(requestedMode, "full_moa", `full MoA keyword: ${fullMoaHit}`, strippedText, markers);
   }
@@ -54,7 +52,7 @@ export function chooseMode(config: GsdMoaConfig, input: PolicyInput): PolicyDeci
     return decision(requestedMode, "advisor", `full MoA keyword: ${fullMoaHit}; fullMoa disabled, advisor fallback`, strippedText, markers);
   }
 
-  const advisorHit = config.auto.advisorKeywords.find((kw) => normalized.includes(kw.toLowerCase()));
+  const advisorHit = findKeyword(normalized, config.auto.advisorKeywords);
   if (advisorHit) return decision(requestedMode, "advisor", `advisor keyword: ${advisorHit}`, strippedText, markers);
 
   return decision(requestedMode, config.auto.defaultMode, "auto default", strippedText, markers);
@@ -159,6 +157,45 @@ function shouldSuppressForReserve(config: GsdMoaConfig, input: PolicyInput): boo
   if (!input.timeState) return false;
   if (!hasReferenceTimeBudget(config.timeAware, input.timeState)) return true;
   return false;
+}
+
+const KEYWORD_INFLECTIONS: Record<string, string[]> = {
+  plan: ["plan", "plans", "planned", "planning"],
+  review: ["review", "reviews", "reviewed", "reviewing"],
+  audit: ["audit", "audits", "audited", "auditing"],
+  verify: ["verify", "verifies", "verified", "verifying", "verification"],
+  debug: ["debug", "debugs", "debugged", "debugging"],
+  format: ["format", "formats", "formatted", "formatting"],
+  rename: ["rename", "renames", "renamed", "renaming"],
+  edit: ["edit", "edits", "edited", "editing"],
+  critique: ["critique", "critiques", "critiqued", "critiquing"],
+  model: ["model", "models", "modeled", "modelled", "modeling", "modelling"],
+  requirement: ["requirement", "requirements"],
+  requirements: ["requirement", "requirements"],
+  architecture: ["architecture", "architectures"],
+  milestone: ["milestone", "milestones"],
+  typo: ["typo", "typos"],
+};
+
+function findKeyword(text: string, keywords: string[]): string | undefined {
+  return keywords.find((keyword) => {
+    const normalized = keyword.trim().toLowerCase();
+    if (!normalized) return false;
+    const words = normalized.split(/\s+/);
+    const finalWord = words.pop()!;
+    const prefix = words.length
+      ? `${words.map((word) => escapeRegex(word)).join("\\s+")}\\s+`
+      : "";
+    const variants = KEYWORD_INFLECTIONS[finalWord] ?? [finalWord];
+    const alternatives = variants
+      .sort((left, right) => right.length - left.length)
+      .map(escapeRegex);
+    return new RegExp(`(?<![\\p{L}\\p{N}_])${prefix}(?:${alternatives.join("|")})(?![\\p{L}\\p{N}_])`, "iu").test(text);
+  });
+}
+
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function decision(

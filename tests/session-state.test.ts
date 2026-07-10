@@ -40,6 +40,139 @@ describe("session state summary", () => {
     assert.equal(summary.commandsRun, 1);
   });
 
+  it("does not count failed mutation calls as file modifications", () => {
+    const editFailure = buildSessionStateSummary(ctx([
+      assistantTool("c1", "write", { path: "src/a.ts", content: "x" }),
+      toolResult("c1", "write", "EACCES: permission denied", true),
+    ]));
+    assert.equal(editFailure.filesModified, false);
+    assert.deepEqual(editFailure.modifiedFiles, []);
+
+    const partialWriteFailure = buildSessionStateSummary(ctx([
+      assistantTool("c1b", "write", { path: "src/a.ts", content: "x" }),
+      toolResult("c1b", "write", "Successfully replaced text in src/a.ts; failed to update src/b.ts", true),
+    ]));
+    assert.equal(partialWriteFailure.filesModified, true);
+    assert.deepEqual(partialWriteFailure.modifiedFiles, ["src/a.ts"]);
+
+    const resolvedPartialFailure = buildSessionStateSummary(ctx([
+      assistantTool("resolved-partial", "write", { path: "src/a.ts", content: "x" }),
+      toolResult("resolved-partial", "write", "Resolved conflicts across src/a.ts; failed src/b.ts", true),
+    ]));
+    assert.equal(resolvedPartialFailure.filesModified, true);
+
+    for (const failureText of ["file was not modified", "could not be saved", "no files were updated", "Nothing was modified", "0 files updated", "File was modified since it was last read"]) {
+      const negatedWrite = buildSessionStateSummary(ctx([
+        assistantTool(`negated-${failureText}`, "write", { path: "src/a.ts", content: "x" }),
+        toolResult(`negated-${failureText}`, "write", failureText, true),
+      ]));
+      assert.equal(negatedWrite.filesModified, false, failureText);
+    }
+
+    const shellFailure = buildSessionStateSummary(ctx([
+      assistantTool("c2", "bash", { command: "echo x > f.py" }),
+      toolResult("c2", "bash", "permission denied", true),
+    ]));
+    assert.equal(shellFailure.filesModified, false);
+    assert.deepEqual(shellFailure.modifiedFiles, []);
+
+    const heredocWriteFailure = buildSessionStateSummary(ctx([
+      assistantTool("c2-heredoc", "bash", { command: "cat > /protected/a.ts <<'EOF'\nconst x = 1;\nEOF" }),
+      toolResult("c2-heredoc", "bash", "/protected/a.ts: Permission denied", true),
+    ]));
+    assert.equal(heredocWriteFailure.filesModified, false);
+
+    const failedFirstMutation = buildSessionStateSummary(ctx([
+      assistantTool("c2b", "bash", { command: "cp missing.txt out.txt && npm test" }),
+      toolResult("c2b", "bash", "cp: missing.txt: No such file or directory", true),
+    ]));
+    assert.equal(failedFirstMutation.filesModified, false);
+
+    const failedCompoundRedirection = buildSessionStateSummary(ctx([
+      assistantTool("c2c", "bash", { command: "echo x > /protected/a.txt && npm test" }),
+      toolResult("c2c", "bash", "bash: /protected/a.txt: Permission denied", true),
+    ]));
+    assert.equal(failedCompoundRedirection.filesModified, false);
+
+    const partialShellFailure = buildSessionStateSummary(ctx([
+      assistantTool("c3", "bash", { command: "echo x > partial.py; cat missing.txt" }),
+      toolResult("c3", "bash", "cat: missing.txt: No such file or directory", true),
+    ]));
+    assert.equal(partialShellFailure.filesModified, true);
+    assert.ok(partialShellFailure.modifiedFiles.includes("partial.py"));
+
+    const multiTargetPartialFailure = buildSessionStateSummary(ctx([
+      assistantTool("c3b", "bash", { command: "echo x > a.py; echo y > /protected/b.py" }),
+      toolResult("c3b", "bash", "/protected/b.py: Permission denied", true),
+    ]));
+    assert.equal(multiTargetPartialFailure.filesModified, true);
+    assert.ok(multiTargetPartialFailure.modifiedFiles.includes("a.py"));
+
+    const failedThenContinuedMutation = buildSessionStateSummary(ctx([
+      assistantTool("c3c", "bash", { command: "touch /protected/a.txt; touch b.txt; exit 1" }),
+      toolResult("c3c", "bash", "touch: /protected/a.txt: Permission denied", true),
+    ]));
+    assert.equal(failedThenContinuedMutation.filesModified, true);
+    assert.ok(failedThenContinuedMutation.modifiedFiles.includes("b.txt"));
+
+    const laterAndFailure = buildSessionStateSummary(ctx([
+      assistantTool("c3d", "bash", { command: "echo x > a.txt && chmod 000 a.txt && cat a.txt" }),
+      toolResult("c3d", "bash", "cat: a.txt: Permission denied", true),
+    ]));
+    assert.equal(laterAndFailure.filesModified, true);
+    assert.ok(laterAndFailure.modifiedFiles.includes("a.txt"));
+
+    const rejectedPatch = buildSessionStateSummary(ctx([
+      assistantTool("c4", "bash", { command: "apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: rejected.py\n@@\n-x\n+y\n*** End Patch\nPATCH" }),
+      toolResult("c4", "bash", "Invalid Context: could not find -x", true),
+    ]));
+    assert.equal(rejectedPatch.filesModified, false);
+
+    for (const failureText of ["Hunk #1 FAILED at 3", "Failed to find expected lines in rejected.py"]) {
+      const standardPatchFailure = buildSessionStateSummary(ctx([
+        assistantTool(`patch-${failureText}`, "bash", { command: "apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: rejected.py\n@@\n-x\n+y\n*** End Patch\nPATCH" }),
+        toolResult(`patch-${failureText}`, "bash", failureText, true),
+      ]));
+      assert.equal(standardPatchFailure.filesModified, false, failureText);
+    }
+
+    const partialPatch = buildSessionStateSummary(ctx([
+      assistantTool("partial-patch", "bash", { command: "patch -p0 <<'PATCH'\n--- a.py\n+++ a.py\nPATCH" }),
+      toolResult("partial-patch", "bash", "Hunk #1 succeeded\nHunk #2 FAILED", true),
+    ]));
+    assert.equal(partialPatch.filesModified, true);
+
+    const fullyRejectedPatch = buildSessionStateSummary(ctx([
+      assistantTool("rejected-plain-patch", "bash", { command: "patch -p0 < change.patch" }),
+      toolResult("rejected-plain-patch", "bash", "0 out of 1 hunk applied", true),
+    ]));
+    assert.equal(fullyRejectedPatch.filesModified, false);
+
+    const rejectedMkdir = buildSessionStateSummary(ctx([
+      assistantTool("c5", "bash", { command: "mkdir /protected/x && cd /protected/x" }),
+      toolResult("c5", "bash", "mkdir: cannot create directory '/protected/x': Permission denied", true),
+    ]));
+    assert.equal(rejectedMkdir.filesModified, false);
+
+    for (const failureText of [
+      "error: pathspec 'missing' did not match any file(s) known to git",
+      "fatal: not a git repository (or any of the parent directories): .git",
+    ]) {
+      const failedCheckout = buildSessionStateSummary(ctx([
+        assistantTool(`git-${failureText}`, "bash", { command: "git checkout missing" }),
+        toolResult(`git-${failureText}`, "bash", failureText, true),
+      ]));
+      assert.equal(failedCheckout.filesModified, false, failureText);
+    }
+
+    const partialTouch = buildSessionStateSummary(ctx([
+      assistantTool("c6", "bash", { command: "touch created.txt /protected/denied.txt" }),
+      toolResult("c6", "bash", "/protected/denied.txt: Permission denied", true),
+    ]));
+    assert.equal(partialTouch.filesModified, true);
+    assert.ok(partialTouch.modifiedFiles.includes("created.txt"));
+  });
+
   it("does not infer file modifications from arbitrary read-only output", () => {
     const summary = buildSessionStateSummary(ctx([
       assistantTool("c1", "bash", { command: "rg updated README.md" }),
@@ -125,6 +258,24 @@ describe("session state summary", () => {
     assert.deepEqual(summary.verifierEvidence, ["python3 f.py"]);
   });
 
+  it("detects R workflow verification", () => {
+    const scriptRun = buildSessionStateSummary(ctx([
+      assistantTool("r1", "bash", { command: "printf 'stopifnot(TRUE)' > analysis.R" }),
+      toolResult("r1", "bash", "created analysis.R", false),
+      assistantTool("r2", "bash", { command: "Rscript analysis.R" }),
+      toolResult("r2", "bash", "", false),
+    ]));
+    assert.equal(scriptRun.verifierRan, true);
+    assert.equal(scriptRun.lastVerifierPassed, true);
+
+    const packageCheck = buildSessionStateSummary(ctx([
+      assistantTool("r3", "bash", { command: "R CMD check ." }),
+      toolResult("r3", "bash", "Status: OK", false),
+    ]));
+    assert.equal(packageCheck.verifierRan, true);
+    assert.equal(packageCheck.lastVerifierPassed, true);
+  });
+
   it("does not count verifier keywords inside written file contents", () => {
     const summary = buildSessionStateSummary(ctx([
       assistantTool("c1", "write", { path: "tests/test_f.py", content: "import pytest\n\ndef test_f():\n    validate()\n" }),
@@ -203,6 +354,41 @@ describe("session state summary", () => {
     assert.deepEqual(summary.modifiedFiles, ["f.py"]);
     assert.equal(summary.verifierRan, false);
     assert.deepEqual(summary.verifierEvidence, []);
+  });
+
+  it("does not count a general verifier that ran before the final mutation", () => {
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("test-first", "bash", { command: "npm test" }),
+      toolResult("test-first", "bash", "all tests passed"),
+      assistantTool("write-later", "write", { path: "a.ts", content: "changed" }),
+      toolResult("write-later", "write", "wrote a.ts"),
+    ]));
+    assert.equal(summary.filesModified, true);
+    assert.equal(summary.verifierRan, false);
+  });
+
+  it("does not count verification that occurred before the relevant mutation", () => {
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("run-first", "bash", { command: "node a.ts" }),
+      toolResult("run-first", "bash", "ok"),
+      assistantTool("write-later", "write", { path: "a.ts", content: "changed" }),
+      toolResult("write-later", "write", "wrote a.ts"),
+    ]));
+    assert.equal(summary.filesModified, true);
+    assert.equal(summary.verifierRan, false);
+  });
+
+  it("does not verify a successful mutation by executing a failed target", () => {
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("a-write", "write", { path: "a.ts", content: "ok" }),
+      toolResult("a-write", "write", "wrote a.ts"),
+      assistantTool("b-write", "write", { path: "b.ts", content: "bad" }),
+      toolResult("b-write", "write", "permission denied", true),
+      assistantTool("b-run", "bash", { command: "node b.ts" }),
+      toolResult("b-run", "bash", "ran b.ts"),
+    ]));
+    assert.deepEqual(summary.modifiedFiles, ["a.ts"]);
+    assert.equal(summary.verifierRan, false);
   });
 
   it("keeps read-only sessions false", () => {

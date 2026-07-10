@@ -35,12 +35,12 @@ export default function gsdMoaExtension(pi: ExtensionAPI) {
 }
 
 export { runAdvisor, buildAdvisorContext } from "./advisor.js";
-export { resetAsyncAdvisor } from "./async-advisor.js";
+export { asyncAdvisorUnattributedUsage, resetAsyncAdvisor } from "./async-advisor.js";
 export { advisorCacheKey, readAdvisorCache, writeAdvisorCache } from "./cache.js";
 export { loadConfig, mergeUpstreamRoute, parseModelRef, resetConfigCache, resolveProposerRoute, resolveSynthesisRoute, validateConfig } from "./config.js";
 export { countAdvisorInjections, sanitizeReferenceContext, withAdvisorGuidance, withFullMoaGuidance } from "./context.js";
 export { getRuntime, resetRuntimeCache } from "./pi-compat.js";
-export { buildProposerContext, buildSynthesisContext, runFullMoa, selectPortfolio } from "./moa.js";
+export { buildProposerContext, buildSynthesisContext, FullMoaError, runFullMoa, selectPortfolio } from "./moa.js";
 export { GSD_MOA_MODELS, GSD_MOA_MODEL_IDS } from "./models.js";
 export { chooseAction, chooseMode, stripMoaMarkers } from "./policy.js";
 export { applyModelPreset } from "./presets.js";

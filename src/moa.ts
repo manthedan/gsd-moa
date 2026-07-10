@@ -20,6 +20,13 @@ import type {
 import type { UpstreamClient } from "./upstream.js";
 import { addUsage } from "./usage.js";
 
+export class FullMoaError extends Error {
+  constructor(message: string, readonly result: FullMoaResult) {
+    super(message);
+    this.name = "FullMoaError";
+  }
+}
+
 export async function runFullMoa(
   config: GsdMoaConfig,
   context: Context,
@@ -57,22 +64,36 @@ export async function runFullMoa(
     const failure = failedById.get(decision.id);
     return failure ? { ...decision, selected: true, reason: `failed: ${failure}` } : decision;
   });
-  if (proposals.length === 0) throw new Error(`all full_moa proposers failed: ${failures.map((failure) => failure.message).join("; ")}`);
-
   let synthesis: NonNullable<FullMoaResult["synthesis"]> | undefined;
   let synthesisError: string | undefined;
-  if (config.fullMoa.synthesis.enabled) {
+  let synthesisFailure: InnerCallDetails | undefined;
+  if (proposals.length > 0 && config.fullMoa.synthesis.enabled && !options?.signal?.aborted) {
     try {
       synthesis = await runSynthesis(config, context, policy, proposals, failures, upstream, options, trace, observationSummary, timeState);
     } catch (error) {
+      // Return already-settled proposer and synthesizer accounting even when the
+      // caller cancelled. The streaming layer will propagate cancellation after
+      // retaining this partial full-MoA result.
       synthesisError = safeErrorMessage(error);
       synthesis = undefined;
+      if (error instanceof ReferenceCallError) {
+        synthesisFailure = {
+          role: "synthesizer",
+          provider: error.details.provider,
+          model: error.details.model,
+          usage: error.details.usage,
+          cacheHit: error.details.cacheHit,
+          durationMs: error.details.durationMs,
+          effort: error.details.effort,
+          error: synthesisError,
+        };
+      }
     }
   }
 
   const guidance = formatReferenceBundle(proposals, failures, synthesis?.text);
   const failedCalls = failures.filter((failure) => failure.provider && failure.model);
-  const usage = addUsage(...proposals.map((proposal) => proposal.usage), ...failedCalls.map((failure) => failure.usage), synthesis?.usage);
+  const usage = addUsage(...proposals.map((proposal) => proposal.usage), ...failedCalls.map((failure) => failure.usage), synthesis?.usage, synthesisFailure?.usage);
   const innerCalls: InnerCallDetails[] = [
     ...proposals.map((proposal) => ({
       role: "proposer" as const,
@@ -110,9 +131,14 @@ export async function runFullMoa(
           effort: synthesis.effort,
         }]
       : []),
+    ...(synthesisFailure ? [synthesisFailure] : []),
   ];
 
-  return { proposals, failures, synthesis, synthesisError, guidance, usage, innerCalls, portfolio: finalPortfolio };
+  const result = { proposals, failures, synthesis, synthesisError, guidance, usage, innerCalls, portfolio: finalPortfolio };
+  if (proposals.length === 0) {
+    throw new FullMoaError(`all full_moa proposers failed: ${failures.map((failure) => failure.message).join("; ")}`, result);
+  }
+  return result;
 }
 
 async function runProposer(

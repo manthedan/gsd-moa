@@ -9,18 +9,19 @@ import {
   type SimpleStreamOptions,
 } from "./pi-compat.js";
 import { runAdvisor } from "./advisor.js";
-import { maybeUseAsyncAdvisor, type AsyncAdvisorDecision } from "./async-advisor.js";
+import { asyncAdvisorUnattributedUsage, maybeUseAsyncAdvisor, type AsyncAdvisorDecision } from "./async-advisor.js";
 import { loadConfig } from "./config.js";
-import { buildToolObservationSummary, countAdvisorInjections, isToolLoopContinuation, latestMessageHasMoaMarker, latestUserText, redactSensitiveText, stripMarkersFromContext, withAdvisorGuidance, withBenchmarkIntegrityNote, withFullMoaGuidance, withTimeAwarenessNote } from "./context.js";
-import { runFullMoa } from "./moa.js";
+import { assistantText, buildToolObservationSummary, countAdvisorInjections, isToolLoopContinuation, latestMessageHasMoaMarker, latestUserText, redactSensitiveText, stripMarkersFromContext, withAdvisorGuidance, withBenchmarkIntegrityNote, withFullMoaGuidance, withTimeAwarenessNote } from "./context.js";
+import { FullMoaError, runFullMoa } from "./moa.js";
 import { chooseAction, chooseMode } from "./policy.js";
+import { ReferenceCallError } from "./reference-call.js";
 import { applyModelPreset } from "./presets.js";
 import { doneGateLedgerKey, readDoneGateLedger, recordDoneGateFire, shouldArmDoneGate, withDoneGateNote } from "./done-gate.js";
 import { readRescueLedger, recordRescue, rescueLedgerKey } from "./rescue-ledger.js";
-import { buildSessionStateSummary, type SessionStateSummary } from "./session-state.js";
+import { assistantRequestsVerifier, buildSessionStateSummary, type SessionStateSummary } from "./session-state.js";
 import { timeEnvFromProcess, computeTimeState } from "./time.js";
 import { createTraceRecorder } from "./trace.js";
-import type { AdvisorResult, FullMoaResult, GsdMoaConfig, MoaAction, MoaRunDetails, PolicyInput, TimeState } from "./types.js";
+import type { AdvisorResult, FullMoaResult, GsdMoaConfig, InnerCallDetails, MoaAction, MoaRunDetails, PolicyInput, TimeState } from "./types.js";
 import { effortForTrace, routeToModel, streamOptionsForRoute, type UpstreamClient, compatUpstreamClient } from "./upstream.js";
 import { addUsage } from "./usage.js";
 
@@ -39,6 +40,7 @@ interface DoneGateRunDiagnostic {
   lastVerifierPassed?: boolean;
   commandsRun: number;
   firstStopReason?: string;
+  postGateBehavior?: "verification-requested" | "justified" | "ignored" | "incomplete" | "error";
 }
 
 export function assembleMoaPolicyInput(
@@ -46,11 +48,12 @@ export function assembleMoaPolicyInput(
   aliasId: string,
   context: Context,
   timeState?: TimeState,
+  sessionId?: string,
 ): PolicyInput {
   const contextIsToolLoopContinuation = isToolLoopContinuation(context);
   const recentToolSummary = contextIsToolLoopContinuation ? buildToolObservationSummary(context, config.checkpoint.maxToolResults) : undefined;
   const contextInjections = countAdvisorInjections(context);
-  const ledgerEntry = readRescueLedger(rescueLedgerKey(aliasId, context));
+  const ledgerEntry = readRescueLedger(rescueLedgerKey(aliasId, context, sessionId));
   const ledgerToolResultsSinceLast = ledgerEntry
     ? Math.max(0, (recentToolSummary?.totalToolResultCount ?? 0) - ledgerEntry.totalToolResultsAtLast)
     : Number.MAX_SAFE_INTEGER;
@@ -79,14 +82,15 @@ export function streamGsdMoa(
 
   (async () => {
     let trace: ReturnType<typeof createTraceRecorder>;
+    let buildTerminalError: ((error: unknown, aborted: boolean) => AssistantMessage) | undefined;
     try {
       const config = applyModelPreset(deps.config ?? loadConfig(), model.id);
       const upstream = deps.upstream ?? compatUpstreamClient;
       const timeState = computeTimeState(config.timeAware, timeEnvFromProcess(), Date.now());
-      const policyInput = assembleMoaPolicyInput(config, model.id, context, timeState);
+      const policyInput = assembleMoaPolicyInput(config, model.id, context, timeState, options?.sessionId);
       const contextIsToolLoopContinuation = Boolean(policyInput.hasToolResults);
       const recentToolSummary = policyInput.recentToolSummary;
-      const rescueKey = rescueLedgerKey(model.id, context);
+      const rescueKey = rescueLedgerKey(model.id, context, options?.sessionId);
       const requestedPolicy = chooseMode(config, policyInput);
       const action = chooseAction(config, requestedPolicy, policyInput);
       const policy = action.kind === "run"
@@ -102,6 +106,36 @@ export function streamGsdMoa(
       let guidanceInjected: boolean | undefined;
       let guidanceSkippedReason: string | undefined;
       let asyncAdvisor: AsyncAdvisorDecision | undefined;
+      const failedReferenceCalls: InnerCallDetails[] = [];
+      let doneGateDetails: DoneGateRunDiagnostic | undefined;
+      let primaryEffort: string | undefined;
+      let primaryStarted = false;
+      let priorPrimaryUsageForError: AssistantMessage["usage"] | undefined;
+      // Install terminal accounting before reference calls and primary route setup:
+      // cancellation or configuration failures after billed inner work must retain it.
+      buildTerminalError = (error, aborted) => {
+        const errorMessage = makeErrorMessage(model, error, aborted);
+        const primaryUsage = errorMessage.usage;
+        if (doneGateDetails?.fired) doneGateDetails = { ...doneGateDetails, postGateBehavior: "error" };
+        const combinedUsage = addUsage(
+          advisor?.usage,
+          fullMoa?.usage,
+          ...failedReferenceCalls.map((call) => call.usage),
+          priorPrimaryUsageForError,
+          primaryUsage,
+        );
+        errorMessage.usage = combinedUsage;
+        const diagnostic = moaDiagnostic(
+          config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage,
+          primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState,
+          asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails, failedReferenceCalls,
+          priorPrimaryUsageForError,
+          primaryStarted,
+        );
+        errorMessage.diagnostics = [...(errorMessage.diagnostics ?? []), diagnostic];
+        trace?.finishError(errorMessage, diagnostic.details);
+        return errorMessage;
+      };
       if (action.kind === "run" && action.mode === "advisor") {
         asyncAdvisor = maybeUseAsyncAdvisor(config, model, context, policy, action, upstream, options, timeState);
         if (asyncAdvisor) {
@@ -114,6 +148,7 @@ export function streamGsdMoa(
             guidanceSkippedReason = asyncAdvisor.status === "failed"
               ? `async advisor failed: ${asyncAdvisor.error ?? "unknown error"}`
               : `async advisor ${asyncAdvisor.status}`;
+            if (asyncAdvisor.failureDetails) failedReferenceCalls.push(referenceFailureCall(asyncAdvisor.failureDetails, "reference", asyncAdvisor.error));
             diagnosticPolicy = { ...policy, mode: "single", reason: guidanceSkippedReason };
           }
         } else {
@@ -122,6 +157,7 @@ export function streamGsdMoa(
             guidanceInjected = true;
             finalContext = withAdvisorGuidance(primaryContext, advisor.text, policy);
           } catch (error) {
+            if (error instanceof ReferenceCallError) failedReferenceCalls.push(referenceFailureCall(error.details, "reference", safeErrorMessage(error)));
             if (options?.signal?.aborted) throw error;
             trace?.recordReferenceLayerFailure("advisor", error);
             guidanceInjected = false;
@@ -132,9 +168,19 @@ export function streamGsdMoa(
       } else if (action.kind === "run" && action.mode === "full_moa") {
         try {
           fullMoa = await runFullMoa(config, context, policy, upstream, options, trace, action.observationSummary, timeState);
-          guidanceInjected = true;
-          finalContext = withFullMoaGuidance(primaryContext, fullMoa, policy);
+          if (options?.signal?.aborted) {
+            throw options.signal.reason instanceof Error ? options.signal.reason : new Error("full_moa aborted");
+          }
+          if (fullMoa.proposals.length > 0) {
+            guidanceInjected = true;
+            finalContext = withFullMoaGuidance(primaryContext, fullMoa, policy);
+          } else {
+            guidanceInjected = false;
+            guidanceSkippedReason = `full_moa failed: all proposers failed: ${fullMoa.failures.map((failure) => failure.message).join("; ")}`;
+            diagnosticPolicy = { ...policy, mode: "single", reason: guidanceSkippedReason };
+          }
         } catch (error) {
+          if (error instanceof FullMoaError) fullMoa = error.result;
           if (options?.signal?.aborted) throw error;
           trace?.recordReferenceLayerFailure("full_moa", error);
           guidanceInjected = false;
@@ -158,13 +204,14 @@ export function streamGsdMoa(
       const doneGateDecision = sessionState && doneGateKey
         ? shouldArmDoneGate(config, context, sessionState, readDoneGateLedger(doneGateKey)?.count ?? 0, timeState)
         : undefined;
-      let doneGateDetails = doneGateDecision && sessionState ? doneGateDiagnostic(doneGateDecision.armed, false, doneGateDecision.reason, sessionState) : undefined;
+      doneGateDetails = doneGateDecision && sessionState ? doneGateDiagnostic(doneGateDecision.armed, false, doneGateDecision.reason, sessionState) : undefined;
 
       trace?.recordFinalContext(finalContext);
       const primaryModel = routeToModel(config.primary);
       const primaryOptions = streamOptionsForRoute(config.primary, options, config.defaultEffort);
-      const primaryEffort = effortForTrace(primaryOptions);
+      primaryEffort = effortForTrace(primaryOptions);
       trace?.recordPrimaryCall({ route: config.primary, effort: primaryEffort, startedAt: Date.now() });
+      primaryStarted = true;
       const inner = upstream.stream(primaryModel, finalContext, primaryOptions);
 
       if (!doneGateDecision?.armed) {
@@ -172,9 +219,9 @@ export function streamGsdMoa(
           trace?.recordPrimaryEvent(event);
           if (event.type === "done") {
             const primaryUsage = event.message.usage;
-            const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
+            const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, ...failedReferenceCalls.map((call) => call.usage), primaryUsage);
             event.message.usage = combinedUsage;
-            const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails);
+            const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails, failedReferenceCalls);
             event.message.diagnostics = [
               ...(event.message.diagnostics ?? []),
               diagnostic,
@@ -182,9 +229,9 @@ export function streamGsdMoa(
             trace?.finish(event.message, diagnostic.details);
           } else if (event.type === "error") {
             const primaryUsage = event.error.usage;
-            const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
+            const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, ...failedReferenceCalls.map((call) => call.usage), primaryUsage);
             event.error.usage = combinedUsage;
-            const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails);
+            const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails, failedReferenceCalls);
             event.error.diagnostics = [
               ...(event.error.diagnostics ?? []),
               diagnostic,
@@ -203,10 +250,10 @@ export function streamGsdMoa(
         buffered.push(event);
         if (event.type === "error") {
           const primaryUsage = event.error.usage;
-          const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, primaryUsage);
+          const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, ...failedReferenceCalls.map((call) => call.usage), primaryUsage);
           event.error.usage = combinedUsage;
           doneGateDetails = doneGateDetails ? { ...doneGateDetails, firstStopReason: event.reason } : undefined;
-          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails);
+          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, primaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails, failedReferenceCalls);
           event.error.diagnostics = [
             ...(event.error.diagnostics ?? []),
             diagnostic,
@@ -221,9 +268,9 @@ export function streamGsdMoa(
         const firstPrimaryUsage = event.message.usage;
         doneGateDetails = doneGateDetails ? { ...doneGateDetails, firstStopReason: event.message.stopReason ?? event.reason } : undefined;
         if (assistantHasToolCalls(event.message) || event.reason !== "stop") {
-          const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, firstPrimaryUsage);
+          const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, ...failedReferenceCalls.map((call) => call.usage), firstPrimaryUsage);
           event.message.usage = combinedUsage;
-          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, firstPrimaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails);
+          const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, firstPrimaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails, failedReferenceCalls);
           event.message.diagnostics = [
             ...(event.message.diagnostics ?? []),
             diagnostic,
@@ -237,6 +284,7 @@ export function streamGsdMoa(
         if (!doneGateKey) throw new Error("done gate key missing");
         recordDoneGateFire(doneGateKey);
         doneGateDetails = doneGateDetails ? { ...doneGateDetails, fired: true } : undefined;
+        priorPrimaryUsageForError = firstPrimaryUsage;
         const retryContext = withDoneGateNote(finalContext);
         trace?.recordFinalContext(retryContext);
         trace?.recordPrimaryCall({ route: config.primary, effort: primaryEffort, startedAt: Date.now() });
@@ -245,9 +293,11 @@ export function streamGsdMoa(
           trace?.recordPrimaryEvent(retryEvent);
           if (retryEvent.type === "done") {
             const retryUsage = retryEvent.message.usage;
-            const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, firstPrimaryUsage, retryUsage);
+            const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, ...failedReferenceCalls.map((call) => call.usage), firstPrimaryUsage, retryUsage);
             retryEvent.message.usage = combinedUsage;
-            const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, retryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails, firstPrimaryUsage);
+            const postGateBehavior = classifyDoneGateRetry(retryEvent.message, retryEvent.reason, sessionState?.modifiedFiles ?? []);
+            doneGateDetails = doneGateDetails ? { ...doneGateDetails, postGateBehavior } : undefined;
+            const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, retryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails, failedReferenceCalls, firstPrimaryUsage);
             retryEvent.message.diagnostics = [
               ...(retryEvent.message.diagnostics ?? []),
               diagnostic,
@@ -255,9 +305,10 @@ export function streamGsdMoa(
             trace?.finish(retryEvent.message, diagnostic.details);
           } else if (retryEvent.type === "error") {
             const retryUsage = retryEvent.error.usage;
-            const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, firstPrimaryUsage, retryUsage);
+            const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, ...failedReferenceCalls.map((call) => call.usage), firstPrimaryUsage, retryUsage);
             retryEvent.error.usage = combinedUsage;
-            const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, retryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails, firstPrimaryUsage);
+            doneGateDetails = doneGateDetails ? { ...doneGateDetails, postGateBehavior: "error" } : undefined;
+            const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, retryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails, failedReferenceCalls, firstPrimaryUsage);
             retryEvent.error.diagnostics = [
               ...(retryEvent.error.diagnostics ?? []),
               diagnostic,
@@ -271,11 +322,13 @@ export function streamGsdMoa(
       }
       stream.end();
     } catch (error) {
-      trace?.fail(error);
+      const aborted = Boolean(options?.signal?.aborted);
+      const errorMessage = buildTerminalError?.(error, aborted) ?? makeErrorMessage(model, error, aborted);
+      if (!buildTerminalError) trace?.fail(error);
       stream.push({
         type: "error",
-        reason: options?.signal?.aborted ? "aborted" : "error",
-        error: makeErrorMessage(model, error, options?.signal?.aborted),
+        reason: aborted ? "aborted" : "error",
+        error: errorMessage,
       });
       stream.end();
     }
@@ -300,7 +353,9 @@ function moaDiagnostic(
   asyncAdvisor?: AsyncAdvisorDecision,
   advisorInjectionCount?: number,
   doneGate?: DoneGateRunDiagnostic,
+  failedReferenceCalls: InnerCallDetails[] = [],
   priorPrimaryUsage?: AssistantMessage["usage"],
+  primaryStarted = true,
 ): NonNullable<AssistantMessage["diagnostics"]>[number] {
   const timeSuppressed = timeState && action.kind === "single" && action.reason.startsWith("time reserve") ? action.reason : undefined;
   const details: MoaRunDetails & { combinedUsage: AssistantMessage["usage"]; tracePath?: string } = {
@@ -319,7 +374,7 @@ function moaDiagnostic(
       observationFilesMentioned: action.observationSummary.filesMentioned,
     } : {}),
     cacheHit: fullMoa
-      ? fullMoa.innerCalls.every((call) => call.cacheHit === true)
+      ? fullMoa.innerCalls.length > 0 && fullMoa.innerCalls.every((call) => call.cacheHit === true)
       : advisor?.cacheHit,
     guidanceInjected,
     ...(guidanceSkippedReason ? { guidanceSkippedReason } : {}),
@@ -334,6 +389,7 @@ function moaDiagnostic(
         ...(timeSuppressed ? { suppressed: timeSuppressed } : {}),
       },
     } : {}),
+    ...(asyncAdvisorUnattributedUsage() ? { unattributedAsyncUsage: asyncAdvisorUnattributedUsage() } : {}),
     ...(asyncAdvisor ? {
       asyncAdvisor: {
         status: asyncAdvisor.status,
@@ -347,14 +403,28 @@ function moaDiagnostic(
         ? [{ role: "reference" as const, provider: config.reference.provider, model: config.reference.model, usage: advisor.usage, cacheHit: advisor.cacheHit, durationMs: advisor.durationMs, effort: advisor.effort }]
         : []),
       ...(fullMoa?.innerCalls ?? []),
+      ...failedReferenceCalls,
       ...(priorPrimaryUsage ? [{ role: "primary" as const, provider: config.primary.provider, model: config.primary.model, usage: priorPrimaryUsage, effort: primaryEffort }] : []),
-      { role: "primary" as const, provider: config.primary.provider, model: config.primary.model, usage: primaryUsage, effort: primaryEffort },
+      ...(primaryStarted ? [{ role: "primary" as const, provider: config.primary.provider, model: config.primary.model, usage: primaryUsage, effort: primaryEffort }] : []),
     ],
     ...(fullMoa ? { portfolio: fullMoa.portfolio } : {}),
     combinedUsage,
     ...(tracePath ? { tracePath } : {}),
   };
   return { type: "gsd-moa.details", timestamp: Date.now(), details: details as unknown as Record<string, unknown> };
+}
+
+function referenceFailureCall(details: ReferenceCallError["details"], role: "reference" | "synthesizer", error?: string): InnerCallDetails {
+  return {
+    role,
+    provider: details.provider,
+    model: details.model,
+    usage: details.usage,
+    cacheHit: details.cacheHit,
+    durationMs: details.durationMs,
+    effort: details.effort,
+    ...(error ? { error } : {}),
+  };
 }
 
 function doneGateDiagnostic(armed: boolean, fired: boolean, reason: string, sessionState: SessionStateSummary): DoneGateRunDiagnostic {
@@ -367,6 +437,15 @@ function doneGateDiagnostic(armed: boolean, fired: boolean, reason: string, sess
     ...(sessionState.lastVerifierPassed !== undefined ? { lastVerifierPassed: sessionState.lastVerifierPassed } : {}),
     commandsRun: sessionState.commandsRun,
   };
+}
+
+function classifyDoneGateRetry(message: AssistantMessage, eventReason: string, modifiedFiles: string[]): NonNullable<DoneGateRunDiagnostic["postGateBehavior"]> {
+  if (assistantHasToolCalls(message)) return assistantRequestsVerifier(message, modifiedFiles) ? "verification-requested" : "ignored";
+  if (eventReason !== "stop" || message.stopReason !== "stop") return "incomplete";
+  const text = assistantText(message);
+  const inability = /\b(cannot|can't|unable|impossible|unavailable|not installed|missing|no access|not accessible)\b/i.test(text);
+  const verificationContext = /\b(test|tests|verify|verification|checker|execute|execution|run|environment|dependency|tool)\b/i.test(text);
+  return inability && verificationContext ? "justified" : "ignored";
 }
 
 function assistantHasToolCalls(message: AssistantMessage): boolean {

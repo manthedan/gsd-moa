@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -209,8 +209,128 @@ describe("advisor orchestration", () => {
       assert.match(details.guidanceSkippedReason, /advisor failed: advisor offline/);
       assert.match(details.guidanceSkippedReason, /REDACTED/);
       assert.doesNotMatch(details.guidanceSkippedReason, /sk-advisor-secret/);
-      assert.equal(details.innerCalls.length, 1);
-      assert.equal(details.innerCalls[0].role, "primary");
+      assert.equal(details.innerCalls.length, 2);
+      assert.equal(details.innerCalls[0].role, "reference");
+      assert.match(details.innerCalls[0].error, /REDACTED/);
+      assert.equal(details.innerCalls[1].role, "primary");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("treats terminal provider error messages as failed advisor calls", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    try {
+      const context: Context = { messages: [{ role: "user", content: "please review", timestamp: 1 }] };
+      const upstream: UpstreamClient = {
+        async complete(seenModel) {
+          return { ...message(seenModel, "", usage(4, 5)), stopReason: "error", errorMessage: "provider failed" };
+        },
+        stream(seenModel) { return streamText(seenModel, "final", usage(1, 2)); },
+      };
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      assert.equal(done.message.usage.totalTokens, 12);
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.innerCalls[0].role, "reference");
+      assert.equal(details.innerCalls[0].error, "provider failed");
+      assert.equal(details.guidanceInjected, false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves failed advisor usage when cancellation propagates", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    const controller = new AbortController();
+    try {
+      const context: Context = { messages: [{ role: "user", content: "please review", timestamp: 1 }] };
+      const upstream: UpstreamClient = {
+        async complete(seenModel) {
+          controller.abort(new Error("cancelled advisor"));
+          return { ...message(seenModel, "", usage(4, 5)), stopReason: "aborted" };
+        },
+        stream() { throw new Error("stream must not run"); },
+      };
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { signal: controller.signal }, { config: cfg, upstream }));
+      const failed = events.at(-1) as Extract<AssistantMessageEvent, { type: "error" }>;
+      assert.equal(failed.reason, "aborted");
+      assert.equal(failed.error.usage.totalTokens, 9);
+      const details = failed.error.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.innerCalls[0].role, "reference");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves advisor telemetry when the primary iterator throws", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    try {
+      const context: Context = { messages: [{ role: "user", content: "please review", timestamp: 1 }] };
+      const upstream: UpstreamClient = {
+        async complete(seenModel) { return message(seenModel, "advice", usage(4, 5)); },
+        stream() {
+          return (async function* () { throw new Error("iterator failed"); })() as unknown as AssistantMessageEventStream;
+        },
+      };
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, undefined, { config: cfg, upstream }));
+      const failed = events.at(-1) as Extract<AssistantMessageEvent, { type: "error" }>;
+      assert.equal(failed.error.usage.totalTokens, 9);
+      const details = failed.error.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.innerCalls[0].role, "reference");
+      assert.equal(details.guidanceInjected, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves advisor telemetry when primary route setup fails", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    cfg.primary.apiKey = "$GSD_MOA_TEST_MISSING_PRIMARY_KEY";
+    delete process.env.GSD_MOA_TEST_MISSING_PRIMARY_KEY;
+    try {
+      const context: Context = { messages: [{ role: "user", content: "please review", timestamp: 1 }] };
+      const upstream: UpstreamClient = {
+        async complete(seenModel) { return message(seenModel, "advice", usage(4, 5)); },
+        stream() { throw new Error("stream must not be reached"); },
+      };
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, undefined, { config: cfg, upstream }));
+      const failed = events.at(-1) as Extract<AssistantMessageEvent, { type: "error" }>;
+      assert.equal(failed.error.usage.totalTokens, 9);
+      const details = failed.error.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.innerCalls[0].role, "reference");
+      assert.equal(details.innerCalls.some((call: any) => call.role === "primary"), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("accounts for failed advisor usage and diagnostics", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    try {
+      const context: Context = { messages: [{ role: "user", content: "please review", timestamp: 1 }] };
+      const upstream: UpstreamClient = {
+        async complete(seenModel) {
+          return { ...message(seenModel, "too short", usage(4, 5)), stopReason: "length" };
+        },
+        stream(seenModel) {
+          return streamText(seenModel, "final", usage(1, 2));
+        },
+      };
+
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      assert.equal(done.message.usage.totalTokens, 12);
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      const failedReference = details.innerCalls.find((call: any) => call.role === "reference");
+      assert.ok(failedReference);
+      assert.equal(failedReference.error, "hit token limit");
+      assert.equal(failedReference.usage.totalTokens, 9);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -281,6 +401,97 @@ describe("advisor orchestration", () => {
       assert.equal(details.cacheHit, true);
       assert.equal(details.innerCalls.length, 2);
       assert.equal(details.innerCalls[0].cacheHit, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("separates advisor cache entries by effective caller temperature", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = true;
+    try {
+      const context: Context = { messages: [{ role: "user", content: "please review", timestamp: 1 }] };
+      let referenceCalls = 0;
+      const upstream: UpstreamClient = {
+        async complete(seenModel) {
+          referenceCalls += 1;
+          return message(seenModel, `advice-${referenceCalls}`, usage(1, 1));
+        },
+        stream(seenModel) { return streamText(seenModel, "final", usage(1, 1)); },
+      };
+
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { temperature: 0.1, maxTokens: 200 }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { temperature: 0.2, maxTokens: 200 }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { temperature: 0.1, maxTokens: 2000 }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { temperature: 0.1, maxTokens: 200, topP: 0.8 }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { temperature: 0.1, maxTokens: 200 }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { temperature: 0.1, maxTokens: 200, sessionId: "session-a" }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { temperature: 0.1, maxTokens: 200, sessionId: "session-b" }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { temperature: 0.1, maxTokens: 200, sessionId: "session-a" }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { temperature: 0.1, maxTokens: 200, openrouterVariant: "online" }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { temperature: 0.1, maxTokens: 200, openrouterVariant: "exacto" }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { temperature: 0.1, maxTokens: 200, openrouterVariant: "online" }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { temperature: 0.1, maxTokens: 200, disableReasoning: true, reasoning: "high" as never }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { temperature: 0.1, maxTokens: 200, disableReasoning: true, reasoning: "low" as never }, { config: cfg, upstream }));
+      assert.equal(referenceCalls, 9);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("bypasses payload transforms and custom transports while stripping provider session state", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = true;
+    try {
+      const context: Context = { messages: [{ role: "user", content: "please review", timestamp: 1 }] };
+      let referenceCalls = 0;
+      let stateControlsSeen = false;
+      const upstream: UpstreamClient = {
+        async complete(seenModel, _context, seenOptions) {
+          referenceCalls += 1;
+          assert.equal(seenOptions?.providerSessionState, undefined);
+          if (seenOptions?.useInteractionsApi === false) {
+            assert.equal(seenOptions.storeInteraction, false);
+            stateControlsSeen = true;
+          }
+          return message(seenModel, `advice-${referenceCalls}`, usage(1, 1));
+        },
+        stream(seenModel) { return streamText(seenModel, "final", usage(1, 1)); },
+      };
+      const firstTransform = (payload: unknown) => payload;
+      const secondTransform = (payload: unknown) => ({ payload });
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { onPayload: firstTransform }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { onPayload: secondTransform }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { onPayload: firstTransform }, { config: cfg, upstream }));
+      const providerSessionState = new Map();
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { providerSessionState, useInteractionsApi: false, storeInteraction: false }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { providerSessionState, useInteractionsApi: false, storeInteraction: false }, { config: cfg, upstream }));
+      const customFetch = (async () => new Response()) as typeof fetch;
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { fetch: customFetch }, { config: cfg, upstream }));
+      await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, { fetch: customFetch }, { config: cfg, upstream }));
+      assert.equal(referenceCalls, 6);
+      assert.equal(stateControlsSeen, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps completed advisor output and usage when cache persistence fails", async () => {
+    const { cfg, dir } = tempConfig();
+    const blocker = join(dir, "cache-blocker");
+    writeFileSync(blocker, "not a directory");
+    cfg.cache.dir = blocker;
+    try {
+      const context: Context = { messages: [{ role: "user", content: "please review", timestamp: 1 }] };
+      const upstream: UpstreamClient = {
+        async complete(seenModel) { return message(seenModel, "advice", usage(4, 5)); },
+        stream(seenModel) { return streamText(seenModel, "final", usage(1, 2)); },
+      };
+      const events = await collect(streamGsdMoa(model("gpt55-glm52-advisor"), context, undefined, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      assert.equal(done.message.usage.totalTokens, 12);
+      const details = done.message.diagnostics?.find((item) => item.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.guidanceInjected, true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

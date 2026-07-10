@@ -1,6 +1,15 @@
-# Roadmap: v1.1 Full MoA Build-out and Dogfood Evaluation
+# Roadmap: Sparse MoA Value Evaluation
 
-## Overview
+> **Authoritative roadmap v2 (2026-07-08):** detailed rationale, evidence, gates, and metrics live in [`docs/MOA-VALUE-ROADMAP.md`](../docs/MOA-VALUE-ROADMAP.md). The v1.1 phases below are retained as historical build-out context.
+
+## Roadmap v2 phases
+
+- [x] **Phase 9 / M1: Mechanical done-gate evaluation** — 13/23 vs same-commit single control 11/23; mechanism validated, directional lift, retained for future arms.
+- [x] **Phase 10 / M2: Same-harness model-diversity oracle** — GLM-5.2 single 7/23 with no complementary wins; broad model-mix work stopped.
+- [ ] **Phase 11 / M3: GSD-typed checkpoints** — current phase; explicit plan/implement/verify/review checkpoint contract and prototype arm in the harness.
+- [ ] **Phase 12 / M4: Scoped closed-loop review** — parked after M2; reconsider only with semantic-risk reviewer evidence.
+
+## Historical v1.1 overview
 
 Before the testing/proof milestone, `gsd-moa` should implement the full Hermes-style feature delta: tool-less reference-model fan-out, optional tool-less synthesis, and one final tool-capable acting call. After that, the proof harness should compare `single`, `advisor`, and `full_moa` on realistic Pi/GSD work.
 

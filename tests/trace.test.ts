@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -14,6 +14,7 @@ import {
 } from "../src/pi-compat.js";
 import { DEFAULT_CONFIG } from "../src/config.ts";
 import { streamGsdMoa } from "../src/stream.ts";
+import { createTraceRecorder } from "../src/trace.ts";
 import type { GsdMoaConfig } from "../src/types.ts";
 import type { UpstreamClient } from "../src/upstream.ts";
 
@@ -106,6 +107,30 @@ function tempConfig(): { cfg: GsdMoaConfig; dir: string; traceDir: string } {
 }
 
 describe("trace capture", () => {
+  it("flushes a stalled in-progress delta on the checkpoint timer", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const { cfg, dir } = tempConfig();
+    try {
+      const m = model("gpt55-glm52-single");
+      const context: Context = { messages: [{ role: "user", content: "simple", timestamp: 1 }] };
+      const recorder = createTraceRecorder(cfg, m, context, {
+        requestedMode: "single",
+        mode: "single",
+        reason: "test",
+        strippedText: "simple",
+        markers: [],
+      }, { kind: "single", reason: "test" });
+      assert.ok(recorder?.filePath);
+      const partial = message(m, "partial");
+      recorder.recordPrimaryEvent({ type: "text_delta", contentIndex: 0, delta: "stalled delta", partial });
+      assert.doesNotMatch(readFileSync(recorder.filePath, "utf8"), /stalled delta/);
+      t.mock.timers.tick(10_000);
+      assert.match(readFileSync(recorder.filePath, "utf8"), /stalled delta/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("serializes Pi tool definitions without cloning executable functions", async () => {
     const { cfg, dir, traceDir } = tempConfig();
     try {
@@ -120,6 +145,7 @@ describe("trace capture", () => {
       await collect(streamGsdMoa(model("gpt55-glm52-single"), context, undefined, { config: cfg, upstream }));
       const tracePath = join(traceDir, readdirSync(traceDir)[0]);
       const trace = JSON.parse(readFileSync(tracePath, "utf8"));
+      assert.equal(statSync(tracePath).mode & 0o777, 0o600);
       assert.equal(trace.status, "done");
       assert.match(JSON.stringify(trace.inputContext.tools), /\[Function/);
     } finally {

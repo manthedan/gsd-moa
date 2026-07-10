@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import type { Context } from "../src/pi-compat.js";
+import { resetRuntimeCache, type Context } from "../src/pi-compat.js";
 import { DEFAULT_CONFIG, loadConfig, resetConfigCache, resolveProposerRoute, resolveSynthesisRoute, validateConfig } from "../src/config.ts";
 import { advisorCacheKey, readAdvisorCache, readCacheByKey, referenceCacheKey, writeAdvisorCache } from "../src/cache.ts";
 import { buildToolObservationSummary, countAdvisorInjections, hasRecentToolResults, latestUserText, sanitizeReferenceContext } from "../src/context.ts";
@@ -23,11 +23,21 @@ describe("mode policy", () => {
   it("uses deterministic auto heuristics across single, advisor, and full MoA", () => {
     assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-auto", latestUserText: "please plan this phase" }).mode, "advisor");
     assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-auto", latestUserText: "please do a deep review" }).mode, "full_moa");
+    assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-auto", latestUserText: "please do a deep reviewing pass" }).mode, "full_moa");
+    assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-auto", latestUserText: "threat modeling this system" }).mode, "full_moa");
+    assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-auto", latestUserText: "compare architecture critiques" }).mode, "full_moa");
+    assert.equal(chooseMode({ ...DEFAULT_CONFIG, auto: { ...DEFAULT_CONFIG.auto, defaultMode: "advisor" } }, { alias: "gpt55-glm52-auto", latestUserText: "make small edits" }).mode, "single");
     assert.equal(
       chooseMode({ ...DEFAULT_CONFIG, fullMoa: { ...DEFAULT_CONFIG.fullMoa, enabled: false } }, { alias: "gpt55-glm52-auto", latestUserText: "please do a deep review" }).mode,
       "advisor",
     );
     assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-auto", latestUserText: "fix a typo" }).mode, "single");
+    assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-auto", latestUserText: "explain planetary motion" }).mode, "single");
+    assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-auto", latestUserText: "explique la planète" }).mode, "single");
+    for (const prompt of ["planning the work", "debugging a failure", "reviewing this code", "run verification"]) {
+      assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-auto", latestUserText: prompt }).mode, "advisor", prompt);
+    }
+    assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-auto", latestUserText: "update information architecture" }).mode, "advisor");
   });
 
   it("Hermes-style alias runs initial full MoA but suppresses failure/drift checkpoints", () => {
@@ -66,7 +76,7 @@ describe("mode policy", () => {
   });
 
   it("honors and strips explicit markers", () => {
-    const result = stripMoaMarkers("<!-- gsd-moa:advisor --> do hard review");
+    const result = stripMoaMarkers("<!-- GSD-MOA:ADVISOR --> do hard review");
     assert.deepEqual(result.markers, ["<!-- gsd-moa:advisor -->"]);
     assert.equal(result.text, "do hard review");
     assert.equal(chooseMode(DEFAULT_CONFIG, { alias: "gpt55-glm52-single", latestUserText: "<!-- gsd-moa:advisor --> review" }).mode, "advisor");
@@ -631,6 +641,7 @@ describe("reference cache keys", () => {
     const cfg = { ...structuredClone(DEFAULT_CONFIG), cache: { enabled: true, dir: join(dir, "cache"), ttlSeconds: 60 } };
     try {
       writeAdvisorCache(cfg, "seed", "seed", usage, dir);
+      assert.equal(statSync(join(cfg.cache.dir, "seed.json")).mode & 0o777, 0o600);
       writeAdvisorCache(cfg, "empty", "   ", usage, dir);
       assert.equal(existsSync(join(cfg.cache.dir, "empty.json")), false);
       const corruptPath = join(cfg.cache.dir, "corrupt.json");
@@ -653,11 +664,57 @@ describe("reference cache keys", () => {
     const base = referenceCacheKey(DEFAULT_CONFIG, context, route, "advisor", DEFAULT_CONFIG.prompts.advisorVersion, { effort: "high", maxTokens: 1000 });
     assert.notEqual(base, referenceCacheKey(DEFAULT_CONFIG, context, route, "advisor", DEFAULT_CONFIG.prompts.advisorVersion, { effort: "low", maxTokens: 1000 }));
     assert.notEqual(base, referenceCacheKey(DEFAULT_CONFIG, context, route, "advisor", DEFAULT_CONFIG.prompts.advisorVersion, { effort: "high", maxTokens: 2000 }));
+    assert.notEqual(base, referenceCacheKey(DEFAULT_CONFIG, context, route, "advisor", DEFAULT_CONFIG.prompts.advisorVersion, { effort: "high", maxTokens: 1000, temperature: 0.5 }));
+    assert.notEqual(base, referenceCacheKey(DEFAULT_CONFIG, context, { ...route, temperature: 0.5 }, "advisor", DEFAULT_CONFIG.prompts.advisorVersion, { effort: "high", maxTokens: 1000 }));
+    assert.notEqual(base, referenceCacheKey(DEFAULT_CONFIG, context, { ...route, maxTokens: (route.maxTokens ?? 1000) + 1 }, "advisor", DEFAULT_CONFIG.prompts.advisorVersion, { effort: "high", maxTokens: 1000 }));
+    assert.notEqual(base, referenceCacheKey(DEFAULT_CONFIG, context, { ...route, headers: { "x-provider-version": "next" } }, "advisor", DEFAULT_CONFIG.prompts.advisorVersion, { effort: "high", maxTokens: 1000 }));
+    assert.notEqual(base, referenceCacheKey(DEFAULT_CONFIG, context, { ...route, compat: { supportsDeveloperRole: false } }, "advisor", DEFAULT_CONFIG.prompts.advisorVersion, { effort: "high", maxTokens: 1000 }));
+    process.env.GSD_MOA_TEST_PROVIDER_VERSION = "v1";
+    const envHeaderRoute = { ...route, headers: { "x-provider-version": "$GSD_MOA_TEST_PROVIDER_VERSION" } };
+    const firstHeaderKey = referenceCacheKey(DEFAULT_CONFIG, context, envHeaderRoute, "advisor", DEFAULT_CONFIG.prompts.advisorVersion);
+    process.env.GSD_MOA_TEST_PROVIDER_VERSION = "v2";
+    const secondHeaderKey = referenceCacheKey(DEFAULT_CONFIG, context, envHeaderRoute, "advisor", DEFAULT_CONFIG.prompts.advisorVersion);
+    delete process.env.GSD_MOA_TEST_PROVIDER_VERSION;
+    assert.notEqual(firstHeaderKey, secondHeaderKey);
+
+    const originalRuntime = process.env.GSD_MOA_RUNTIME;
+    process.env.GSD_MOA_RUNTIME = "omp";
+    resetRuntimeCache();
+    const ompKey = referenceCacheKey(DEFAULT_CONFIG, context, route, "advisor", DEFAULT_CONFIG.prompts.advisorVersion);
+    process.env.GSD_MOA_RUNTIME = "pi";
+    resetRuntimeCache();
+    const piKey = referenceCacheKey(DEFAULT_CONFIG, context, route, "advisor", DEFAULT_CONFIG.prompts.advisorVersion);
+    if (originalRuntime === undefined) delete process.env.GSD_MOA_RUNTIME;
+    else process.env.GSD_MOA_RUNTIME = originalRuntime;
+    resetRuntimeCache();
+    assert.notEqual(ompKey, piKey);
 
     const cfg = { ...structuredClone(DEFAULT_CONFIG), referenceMaxTokens: 1000 };
     assert.equal(
       advisorCacheKey(cfg, context),
-      referenceCacheKey(cfg, context, cfg.reference, "advisor", cfg.prompts.advisorVersion, { effort: "high", maxTokens: 1000 }),
+      referenceCacheKey(cfg, context, cfg.reference, "advisor", cfg.prompts.advisorVersion, { effort: "high", maxTokens: 1000, generation: { maxTokens: 1000, reasoning: "high" } }),
+    );
+    assert.equal(
+      advisorCacheKey(cfg, context, { effort: "low" }),
+      referenceCacheKey(cfg, context, cfg.reference, "advisor", cfg.prompts.advisorVersion, { effort: "low", maxTokens: 1000, generation: { maxTokens: 1000, reasoning: "low" } }),
+    );
+  });
+
+  it("preserves full history and code whitespace in cache identity", () => {
+    const route = DEFAULT_CONFIG.primary;
+    const indented: Context = { messages: [{ role: "user", content: "```python\nif ready:\n  run()\n```", timestamp: 1 }] };
+    const unindented: Context = { messages: [{ role: "user", content: "```python\nif ready:\nrun()\n```", timestamp: 1 }] };
+    assert.notEqual(
+      referenceCacheKey(DEFAULT_CONFIG, indented, route, "advisor", "v1"),
+      referenceCacheKey(DEFAULT_CONFIG, unindented, route, "advisor", "v1"),
+    );
+
+    const commonTail = Array.from({ length: 12 }, (_, index) => ({ role: "user" as const, content: `same-${index}`, timestamp: index + 2 }));
+    const first: Context = { messages: [{ role: "user", content: "architecture A", timestamp: 1 }, ...commonTail] };
+    const second: Context = { messages: [{ role: "user", content: "architecture B", timestamp: 1 }, ...commonTail] };
+    assert.notEqual(
+      referenceCacheKey(DEFAULT_CONFIG, first, route, "advisor", "v1"),
+      referenceCacheKey(DEFAULT_CONFIG, second, route, "advisor", "v1"),
     );
   });
 
@@ -680,6 +737,12 @@ describe("reference cache keys", () => {
     assert.notEqual(
       referenceCacheKey(DEFAULT_CONFIG, first, route, "full_moa:reference:gemini35flash", DEFAULT_CONFIG.prompts.fullMoaVersion),
       referenceCacheKey(DEFAULT_CONFIG, second, route, "full_moa:reference:gemini35flash", DEFAULT_CONFIG.prompts.fullMoaVersion),
+    );
+    const lowDetail: Context = { messages: [{ role: "user", content: [{ type: "image", data: "same", mimeType: "image/png", detail: "low" } as any], timestamp: 1 }] };
+    const originalDetail: Context = { messages: [{ role: "user", content: [{ type: "image", data: "same", mimeType: "image/png", detail: "original" } as any], timestamp: 1 }] };
+    assert.notEqual(
+      referenceCacheKey(DEFAULT_CONFIG, lowDetail, route, "image", "v1"),
+      referenceCacheKey(DEFAULT_CONFIG, originalDetail, route, "image", "v1"),
     );
   });
 });
