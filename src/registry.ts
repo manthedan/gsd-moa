@@ -10,6 +10,7 @@ export interface AliasPresetEntry {
   /** Model-card metadata override; wins over derived primary-route metadata. */
   card?: Partial<Pick<ProviderModelConfig, "reasoning" | "input" | "cost" | "contextWindow" | "maxTokens">>;
   checkpointScopes?: AliasConfig["checkpointScopes"];
+  typedCheckpoints?: boolean;
 }
 
 const DEFAULT_CLIPROXY_BASE_URL = "http://127.0.0.1:8318/v1";
@@ -389,6 +390,7 @@ export const ALIAS_PRESETS = [
   { id: "gpt55-cliproxycodex-auto", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (Auto)", mode: "auto", apply: applyCliproxyCodexPreset },
   { id: "gpt55-cliproxycodex-glm52-rescue", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (Rescue)", mode: "auto", apply: applyCliproxyCodexPreset, checkpointScopes: { initial: false, drift: false, failure: true } },
   { id: "gpt55-cliproxycodex-glm52-rescue-donegate", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (Rescue + Done Gate)", mode: "auto", apply: CLIPROXY_CODEX_THEN_DONE_GATE, checkpointScopes: { initial: false, drift: false, failure: true } },
+  { id: "gpt55-cliproxycodex-glm52-typed-donegate", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 (M3 Typed + Done Gate)", mode: "auto", apply: CLIPROXY_CODEX_THEN_DONE_GATE, checkpointScopes: { initial: false, drift: false, failure: true }, typedCheckpoints: true },
   { id: "gpt55-cliproxycodex-glm52-nosynth-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 refs (No Synth)", mode: "full_moa", apply: CLIPROXY_CODEX_THEN_NO_SYNTHESIS },
   { id: "gpt55-cliproxycodex-glm52only-nosynth-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2-only refs (No Synth)", mode: "full_moa", apply: CLIPROXY_CODEX_THEN_GLM_ONLY_NO_SYNTHESIS },
   { id: "gpt55-cliproxycodex-glm52-hermes-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 refs (Hermes-style Full MoA)", mode: "full_moa", apply: CLIPROXY_CODEX_HERMES_FULL },
@@ -404,7 +406,11 @@ export type BuiltinAliasId = (typeof ALIAS_PRESETS)[number]["id"];
 export const ALIAS_PRESET_IDS = new Set<string>(ALIAS_PRESETS.map((entry) => entry.id));
 
 export function buildDefaultAliasMap(entries: readonly AliasPresetEntry[] = ALIAS_PRESETS): Record<string, AliasConfig> {
-  return Object.fromEntries(entries.map((entry) => [entry.id, { mode: entry.mode, ...(entry.checkpointScopes ? { checkpointScopes: entry.checkpointScopes } : {}) }])) as Record<string, AliasConfig>;
+  return Object.fromEntries(entries.map((entry) => [entry.id, {
+    mode: entry.mode,
+    ...(entry.checkpointScopes ? { checkpointScopes: entry.checkpointScopes } : {}),
+    ...(entry.typedCheckpoints ? { typedCheckpoints: true } : {}),
+  }])) as Record<string, AliasConfig>;
 }
 
 export function findAliasPreset(alias: string, entries: readonly AliasPresetEntry[] = ALIAS_PRESETS): AliasPresetEntry | undefined {

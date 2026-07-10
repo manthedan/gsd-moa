@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Context, UserMessage } from "./pi-compat.js";
-import { isToolLoopContinuation, rawMessageText } from "./context.js";
+import { conversationIdentity, isToolLoopContinuation } from "./context.js";
 import type { GsdMoaConfig, TimeState } from "./types.js";
 import type { SessionStateSummary } from "./session-state.js";
 
@@ -13,56 +13,45 @@ export interface DoneGateDecision {
   reason: string;
 }
 
-const MAX_DONE_GATE_LEDGER_ENTRIES = 64;
+// One entry for each session identity retained by the host identity cache.
+const MAX_DONE_GATE_LEDGER_ENTRIES = 512;
 const doneGateLedger = new Map<string, DoneGateLedgerEntry>();
+const doneGateReservations = new Set<string>();
 
 export const DONE_GATE_NOTE = `[gsd-moa done gate — deterministic provider check, not from the user]
 You are finishing after modifying files, but no verification has been observed in this session. Before finishing, do exactly one of:
 (a) run the most relevant verification now — the task's own checker or tests if provided, a compile/import check (e.g. python3 -m py_compile <file>), or a concrete execution of the artifact you changed — and fix what fails; or
 (b) if verification is genuinely impossible in this environment, state in one line why, then finish.`;
 
-export function doneGateLedgerKey(aliasId: string, context: Context): string {
-  const userIndex = latestUserIndex(context);
-  const currentUser = userIndex >= 0 ? context.messages[userIndex] : undefined;
-  const currentUserMessageRawText = currentUser?.role === "user" ? rawMessageText(currentUser) : "";
+export function doneGateLedgerKey(aliasId: string, context: Context, sessionId?: string): string {
   return createHash("sha256")
-    .update(`${aliasId}|${currentUserMessageRawText}|${sessionDiscriminator(context, userIndex)}`)
+    .update(`${aliasId}|${conversationIdentity(context, sessionId)}`)
     .digest("hex");
-}
-
-function sessionDiscriminator(context: Context, userIndex = latestUserIndex(context)): string {
-  const currentTurnMessages = context.messages.slice(userIndex + 1);
-
-  for (const message of currentTurnMessages) {
-    if (message.role === "toolResult") return `tool:${message.toolName}:${message.toolCallId}:${message.timestamp ?? ""}`;
-  }
-
-  for (const message of currentTurnMessages) {
-    if (message.role !== "assistant") continue;
-    for (const item of message.content) {
-      const typed = item as { type?: unknown; id?: unknown; name?: unknown };
-      if (typed.type === "toolCall" || typed.type === "tool-call") {
-        return `call:${typeof typed.name === "string" ? typed.name : ""}:${typeof typed.id === "string" ? typed.id : ""}:${message.timestamp ?? ""}`;
-      }
-    }
-  }
-
-  const currentUser = userIndex >= 0 ? context.messages[userIndex] : undefined;
-  const currentTimestamp = currentUser?.timestamp ?? "";
-  return `fresh:${currentTimestamp}:${context.messages.length}`;
-}
-
-function latestUserIndex(context: Context): number {
-  return context.messages.reduce((latest, message, index) => message.role === "user" ? index : latest, -1);
 }
 
 export function readDoneGateLedger(key: string): DoneGateLedgerEntry | undefined {
   const entry = doneGateLedger.get(key);
-  return entry ? { ...entry } : undefined;
+  if (!entry) return undefined;
+  doneGateLedger.delete(key);
+  doneGateLedger.set(key, entry);
+  return { ...entry };
+}
+
+export function reserveDoneGate(key: string, maxPerTask: number): boolean {
+  if ((doneGateLedger.get(key)?.count ?? 0) >= maxPerTask || doneGateReservations.has(key)) return false;
+  if (doneGateReservations.size >= MAX_DONE_GATE_LEDGER_ENTRIES) return false;
+  doneGateReservations.add(key);
+  return true;
+}
+
+export function releaseDoneGateReservation(key: string): void {
+  doneGateReservations.delete(key);
 }
 
 export function recordDoneGateFire(key: string): void {
+  doneGateReservations.delete(key);
   const existing = doneGateLedger.get(key);
+  doneGateLedger.delete(key);
   doneGateLedger.set(key, { count: (existing?.count ?? 0) + 1 });
 
   while (doneGateLedger.size > MAX_DONE_GATE_LEDGER_ENTRIES) {
@@ -74,6 +63,7 @@ export function recordDoneGateFire(key: string): void {
 
 export function resetDoneGateLedger(): void {
   doneGateLedger.clear();
+  doneGateReservations.clear();
 }
 
 export function shouldArmDoneGate(

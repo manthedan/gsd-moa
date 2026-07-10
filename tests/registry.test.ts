@@ -179,6 +179,16 @@ describe("alias registry", () => {
     assert.equal(rescueDoneGate.doneGate.enabled, true);
     assert.deepEqual(buildDefaultAliasMap()["gpt55-cliproxycodex-glm52-rescue-donegate"], { mode: "auto", checkpointScopes: { initial: false, drift: false, failure: true } });
 
+    const typed = applyModelPreset(structuredClone(DEFAULT_CONFIG), "gpt55-cliproxycodex-glm52-typed-donegate");
+    assert.equal(typed.primary.provider, "openai-codex");
+    assert.equal(typed.doneGate.enabled, true);
+    assert.deepEqual(buildDefaultAliasMap()["gpt55-cliproxycodex-glm52-typed-donegate"], {
+      mode: "auto",
+      checkpointScopes: { initial: false, drift: false, failure: true },
+      typedCheckpoints: true,
+    });
+    assert.ok(GSD_MOA_MODELS.find((model) => model.id === "gpt55-cliproxycodex-glm52-typed-donegate"));
+
     const glmSingle = applyModelPreset(structuredClone(DEFAULT_CONFIG), "glm52-zai-single");
     assert.equal(glmSingle.primary.provider, "zai");
     assert.equal(glmSingle.primary.model, "glm-5.2");

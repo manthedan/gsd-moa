@@ -146,6 +146,33 @@ describe("done gate stream", () => {
     assert.equal(readDoneGateLedger(doneGateLedgerKey(gsdModel.id, context))?.count, 1);
   });
 
+  it("emits M3 pre-done fired and suppressed diagnostics", async () => {
+    const typedModel = { ...gsdModel, id: "typed-done-test" };
+    const typedConfig = config();
+    typedConfig.aliases[typedModel.id] = { mode: "single", typedCheckpoints: true };
+
+    let firedCalls = 0;
+    const firedUpstream: UpstreamClient = {
+      stream(model) {
+        firedCalls += 1;
+        return fakeTextStream(model, firedCalls === 1 ? "blind finish" : "done", 1);
+      },
+      async complete() { throw new Error("not used"); },
+    };
+    const fired = await collect(streamGsdMoa(typedModel, modifiedContext(), { sessionId: "typed-pre-done-fire" }, { config: typedConfig, upstream: firedUpstream }));
+    assert.equal(diagnostics(fired).typedCheckpoint.type, "pre_done");
+    assert.equal(diagnostics(fired).typedCheckpoint.status, "fired");
+
+    resetDoneGateLedger();
+    const suppressedUpstream: UpstreamClient = {
+      stream(model) { return fakeTextStream(model, "already verified", 1); },
+      async complete() { throw new Error("not used"); },
+    };
+    const suppressed = await collect(streamGsdMoa(typedModel, verifiedContext(), { sessionId: "typed-pre-done-suppress" }, { config: typedConfig, upstream: suppressedUpstream }));
+    assert.equal(diagnostics(suppressed).typedCheckpoint.type, "pre_done");
+    assert.equal(diagnostics(suppressed).typedCheckpoint.status, "suppressed");
+  });
+
   it("classifies verifier requests and explicit impossibility justifications", async () => {
     let verifierCalls = 0;
     const verifierUpstream: UpstreamClient = {

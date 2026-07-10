@@ -323,7 +323,7 @@ describe("mode policy", () => {
           role: "toolResult",
           toolName: "Bash",
           toolCallId: "call-1",
-          content: [{ type: "text", text: "Error: deploy failed\nWarning: Authorization: Bearer sk-supersecret1234567890\nWarning Authorization=Basic basic-secret-token\nWarning Authorization Bearer whitespace-secret-token\nWarning Authorization: token token-scheme-secret\nError OPENAI_API_KEY=sk-anothersecret1234567890\nError ANTHROPIC_API_KEY=anthropic-secret-value\nWarning NPM_TOKEN=npm-provider-token\nWarning //registry.npmjs.org/:_authToken=npm_secret_token\nWarning DATABASE_URL=postgres://dbuser:dbpassword@example.com/app\nWarning remote=https://oauth-token@example.com/repo.git\nWarning bare npm_abcdefghijklmnopqrstuvwxyz\nWarning bare AIzaabcdefghijklmnopqrstuvwxyz\nWarning {\"Authorization\":\"ApiKey json-apikey-secret\"}" }],
+          content: [{ type: "text", text: "Error: deploy failed\nWarning: Authorization: Bearer sk-supersecret1234567890\nWarning Authorization=Basic basic-secret-token\nWarning Authorization Bearer whitespace-secret-token\nWarning Authorization: token token-scheme-secret\nError OPENAI_API_KEY=sk-anothersecret1234567890\nError ANTHROPIC_API_KEY=anthropic-secret-value\nWarning NPM_TOKEN=npm-provider-token\nWarning //registry.npmjs.org/:_authToken=npm_secret_token\nWarning DATABASE_URL=postgres://dbuser:dbpassword@example.com/app\nWarning remote=https://oauth-token@example.com/repo.git\nWarning bare npm_abcdefghijklmnopqrstuvwxyz\nWarning bare AIzaabcdefghijklmnopqrstuvwxyz\nWarning {\"Authorization\":\"ApiKey json-apikey-secret\"}\nError PASSWORD=\"alpha beta\" ESCAPED_TOKEN=alpha\\ beta pytest --token cli-token-secret --password=cli-password-secret --db-password db-secret --openai-api-key openai-secret --registry-token registry-secret \"--quoted-password=double quoted secret\" '--quoted-token=single quoted secret' \"--password\" \"separately quoted secret\"" }],
           isError: true,
           timestamp: 2,
         } as any,
@@ -342,6 +342,16 @@ describe("mode policy", () => {
     assert.doesNotMatch(summary.text, /npm_secret_token/);
     assert.doesNotMatch(summary.text, /dbuser:dbpassword/);
     assert.doesNotMatch(summary.text, /json-apikey-secret/);
+    assert.doesNotMatch(summary.text, /alpha beta/);
+    assert.doesNotMatch(summary.text, /alpha\\ beta/);
+    assert.doesNotMatch(summary.text, /cli-token-secret/);
+    assert.doesNotMatch(summary.text, /cli-password-secret/);
+    assert.doesNotMatch(summary.text, /db-secret/);
+    assert.doesNotMatch(summary.text, /openai-secret/);
+    assert.doesNotMatch(summary.text, /registry-secret/);
+    assert.doesNotMatch(summary.text, /double quoted secret/);
+    assert.doesNotMatch(summary.text, /single quoted secret/);
+    assert.doesNotMatch(summary.text, /separately quoted secret/);
     assert.doesNotMatch(summary.text, /token-scheme-secret/);
     assert.doesNotMatch(summary.text, /oauth-token/);
     assert.doesNotMatch(summary.text, /npm_abcdefghijklmnopqrstuvwxyz/);

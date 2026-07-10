@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_CONFIG } from "../src/config.ts";
-import { doneGateLedgerKey, readDoneGateLedger, recordDoneGateFire, resetDoneGateLedger, shouldArmDoneGate } from "../src/done-gate.ts";
+import { doneGateLedgerKey, readDoneGateLedger, recordDoneGateFire, releaseDoneGateReservation, reserveDoneGate, resetDoneGateLedger, shouldArmDoneGate } from "../src/done-gate.ts";
 import type { Context } from "../src/pi-compat.js";
 import type { SessionStateSummary } from "../src/session-state.ts";
 import type { GsdMoaConfig, TimeState } from "../src/types.ts";
@@ -52,8 +52,21 @@ describe("done gate", () => {
     assert.equal(readDoneGateLedger(key1), undefined);
     recordDoneGateFire(key1);
     assert.deepEqual(readDoneGateLedger(key1), { count: 1 });
+    for (let index = 0; index < 100; index += 1) recordDoneGateFire(`other-${index}`);
+    assert.ok((readDoneGateLedger(key1)?.count ?? 0) >= 1);
     resetDoneGateLedger();
     assert.equal(readDoneGateLedger(key1), undefined);
+  });
+
+  it("reserves a done gate atomically while a stream is in flight", () => {
+    resetDoneGateLedger();
+    const key = doneGateLedgerKey("alias", continuation(), "reservation-session");
+    assert.equal(reserveDoneGate(key, 1), true);
+    assert.equal(reserveDoneGate(key, 1), false);
+    releaseDoneGateReservation(key);
+    assert.equal(reserveDoneGate(key, 1), true);
+    recordDoneGateFire(key);
+    assert.equal(reserveDoneGate(key, 1), false);
   });
 
   it("separates repeated same-prompt sessions by tool-loop identity", () => {
@@ -62,6 +75,19 @@ describe("done gate", () => {
     const key3 = doneGateLedgerKey("alias", continuation("c1", 4));
     assert.notEqual(key1, key2);
     assert.notEqual(key1, key3);
+  });
+
+  it("keeps the pre-done ledger stable across compaction with a session id", () => {
+    const before = continuation("compact-call", 30);
+    const after: Context = { messages: [
+      {
+        role: "user",
+        content: "The conversation history before this point was compacted into the following summary:\n\n<summary>task</summary>",
+        timestamp: 40,
+      },
+      ...before.messages.slice(1),
+    ] };
+    assert.equal(doneGateLedgerKey("alias", before, "compact-session"), doneGateLedgerKey("alias", after, "compact-session"));
   });
 
   it("keys the ledger to the current user turn", () => {

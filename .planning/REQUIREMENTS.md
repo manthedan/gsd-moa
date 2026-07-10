@@ -79,9 +79,22 @@ Requirements for completing full MoA before the testing/proof milestone, then pr
 - [x] **OBS-03**: Proof artifacts expose `gsd-moa.details` and route metadata sufficiently to debug advisor/full-MoA influence and cache behavior.
 - [x] **DOC-03**: Documentation includes current advisor-mode and full-MoA flow diagrams plus proof-harness usage instructions.
 
+## v1.2 Requirements
+
+### M3 GSD-Typed Checkpoints
+
+- [x] **M3-01**: Provider exposes a dedicated typed-checkpoint + done-gate alias without changing existing aliases.
+- [x] **M3-02**: Fresh tasks receive one deterministic strategy contract with no additional model call.
+- [x] **M3-03**: A failed verifier after the latest successful mutation triggers at most one tool-less diagnosis advisor per task.
+- [x] **M3-04**: Explicit routing markers and time-reserve suppression take precedence over automatic typed advice.
+- [x] **M3-05**: Diagnostics and the tracked Terminal-Bench aggregator distinguish typed checkpoint type, status, event count, trial count, and suppression reason.
+- [x] **M3-06**: Typed references preserve the single-writer boundary and all existing failed/cancelled usage accounting.
+- [ ] **M3-07**: The rebuilt Yukon runtime passes a live typed-alias smoke.
+- [ ] **M3-08**: A same-commit controlled M3 arm reports trigger precision, recovery/adoption, wall time, pass rate, and integrity.
+
 ## v2 Requirements
 
-Deferred to a future milestone.
+Deferred portability work.
 
 ### Proxy Portability
 
@@ -148,11 +161,20 @@ Deferred to a future milestone.
 | SAFE-01 | Phase 8 | Planned |
 | OBS-03 | Phase 8 | Complete |
 | DOC-03 | Phase 8 | Complete |
+| M3-01 | Phase 11 | Complete |
+| M3-02 | Phase 11 | Complete |
+| M3-03 | Phase 11 | Complete |
+| M3-04 | Phase 11 | Complete |
+| M3-05 | Phase 11 | Complete |
+| M3-06 | Phase 11 | Complete |
+| M3-07 | Phase 11 | Pending |
+| M3-08 | Phase 11 | Pending |
 
 **Coverage:**
 
 - v1 requirements: 27 total, complete
-- v1.1 requirements: 14 total, 10 complete and 4 mapped to planned phases
+- v1.1 requirements: 14 total, 10 complete and 4 retained as historical proof-suite work
+- v1.2 M3 requirements: 8 total, 6 complete and 2 pending live evaluation
 - Unmapped: 0 ✓
 
 ---

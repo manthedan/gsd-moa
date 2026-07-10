@@ -22,7 +22,17 @@ function isCompactionSummary(message: Message): boolean {
   if (message.synthetic === true) return true;
   const text = rawMessageText(message).trimStart();
   return text.startsWith("The conversation history before this point was compacted into the following summary:")
-    || text.startsWith("Another language model started to solve this problem and produced a summary of its thinking process.");
+    || text.startsWith("Another language model started to solve this problem and produced a summary of its thinking process.")
+    || text.startsWith("You are resuming a prior conversation. Its earlier turns were archived to reclaim context");
+}
+
+export function hasGenuineTaskUser(context: Context): boolean {
+  return context.messages.some((message) => message.role === "user" && !isCompactionSummary(message));
+}
+
+export function hasStableConversationIdentity(context: Context, sessionId?: string): boolean {
+  if (hasGenuineTaskUser(context)) return true;
+  return Boolean(sessionId && sessionTaskIdentities.has(sessionId));
 }
 
 /** Stable-enough identity for one in-process conversation across tool turns. */
@@ -66,7 +76,7 @@ export function conversationIdentity(context: Context, sessionId?: string): stri
   let toolIdentity = "";
   for (const message of context.messages.slice(taskUserIndex + 1)) {
     if (message.role === "toolResult") {
-      toolIdentity = `${message.toolName}:${message.toolCallId}`;
+      toolIdentity = `${message.toolName}:${message.toolCallId}:${message.timestamp ?? ""}`;
       break;
     }
     if (message.role !== "assistant") continue;
@@ -75,7 +85,7 @@ export function conversationIdentity(context: Context, sessionId?: string): stri
       return type === "toolCall" || type === "tool-call";
     }) as { id?: unknown; name?: unknown } | undefined;
     if (call) {
-      toolIdentity = `${typeof call.name === "string" ? call.name : ""}:${typeof call.id === "string" ? call.id : ""}`;
+      toolIdentity = `${typeof call.name === "string" ? call.name : ""}:${typeof call.id === "string" ? call.id : ""}:${message.timestamp ?? ""}`;
       break;
     }
   }
@@ -227,7 +237,11 @@ export function redactSensitiveText(raw: string): string {
   return raw
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[REDACTED_PRIVATE_KEY]")
     .replace(/\b(["']?Authorization["']?(?:\s*[:=]\s*["']?|\s+))[^'"`,;}\r\n]+/gi, "$1[REDACTED_AUTH]")
-    .replace(/\b(["']?[A-Z0-9_.-]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|AUTH[_-]?TOKEN|ACCESS[_-]?TOKEN|REFRESH[_-]?TOKEN)[A-Z0-9_.-]*["']?\s*[:=]\s*["']?)[^\s'"`,;}]+/gi, "$1[REDACTED_SECRET]")
+    .replace(/\b(["']?[A-Z0-9_.-]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|AUTH[_-]?TOKEN|ACCESS[_-]?TOKEN|REFRESH[_-]?TOKEN)[A-Z0-9_.-]*["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*')/gi, "$1[REDACTED_SECRET]")
+    .replace(/\b(["']?[A-Z0-9_.-]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|AUTH[_-]?TOKEN|ACCESS[_-]?TOKEN|REFRESH[_-]?TOKEN)[A-Z0-9_.-]*["']?\s*[:=]\s*)((?:\\.|[^\s'"`,;}])+)/gi, "$1[REDACTED_SECRET]")
+    .replace(/(["'])(--?[a-z0-9_.-]*(?:api[_-]?key|token|secret|password|passwd|auth[_-]?token|access[_-]?token|refresh[_-]?token)[a-z0-9_.-]*)\1(\s+)(?:"[^"]*"|'[^']*'|\S+)/gi, "$1$2$1$3[REDACTED_SECRET]")
+    .replace(/(["'])(--?[a-z0-9_.-]*(?:api[_-]?key|token|secret|password|passwd|auth[_-]?token|access[_-]?token|refresh[_-]?token)[a-z0-9_.-]*)(\s+|=)[\s\S]*?\1/gi, "$1$2$3[REDACTED_SECRET]$1")
+    .replace(/((?:^|\s))(["']?)(--?[a-z0-9_.-]*(?:api[_-]?key|token|secret|password|passwd|auth[_-]?token|access[_-]?token|refresh[_-]?token)[a-z0-9_.-]*)(?:\s+|=)(?:"[^"]*"|'[^']*'|(?:\\.|[^\s"'])+)/gi, "$1$2$3=[REDACTED_SECRET]")
     .replace(/([?&](?:api[_-]?key|token|secret|password|auth[_-]?token|access[_-]?token)=)[^\s&'"`]+/gi, "$1[REDACTED_SECRET]")
     .replace(/(\/\/[\w.-]+\/:_authToken=)[^\s'"`]+/gi, "$1[REDACTED_SECRET]")
     .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{20,})\b/g, "[REDACTED_TOKEN]")
@@ -399,6 +413,14 @@ export function withFullMoaGuidance(context: Context, result: FullMoaResult, pol
 
   if (!context.tools?.length) return finalContext;
   return appendPublicExecutionNote(finalContext, "[Execution note from provider: You are inside the live task environment and have tools. If this request asks to configure, fix, install, run, edit files, or modify services, use tools to perform and verify the work instead of only providing instructions.]");
+}
+
+export function withTypedStrategyNote(context: Context): Context {
+  return appendPublicExecutionNote(context, [
+    "[GSD typed strategy checkpoint from provider]",
+    "Before modifying files: identify the concrete success condition and the first available verifier or executable check.",
+    "Then implement with tools, run that check after the final mutation, and treat any later mutation as invalidating earlier verification.",
+  ].join(" "));
 }
 
 export function withTimeAwarenessNote(context: Context, timeState: TimeState): Context {

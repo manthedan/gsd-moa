@@ -34,6 +34,8 @@ export type RoutePresetConfig = Partial<UpstreamRoute>;
 export interface AliasConfig {
   mode: AliasMode;
   checkpointScopes?: Partial<CheckpointScopesConfig>;
+  /** M3 prototype: deterministic strategy note + one-shot failed-verifier advice. */
+  typedCheckpoints?: boolean;
 }
 
 export interface AutoPolicyConfig {
@@ -202,10 +204,19 @@ export interface PolicyDecision {
 }
 
 export type CheckpointScope = "initial" | "explicit" | "failure" | "drift";
+export type TypedCheckpointType = "strategy" | "verify_failure" | "pre_done";
+
+export interface TypedCheckpointSignal {
+  type: TypedCheckpointType;
+  status: "fired" | "suppressed";
+  mode: "deterministic-note" | "advisor" | "done-gate";
+  reason: string;
+  structuredOutputValid?: boolean;
+}
 
 export type MoaAction =
-  | { kind: "single"; reason: string; observationSummary?: ToolObservationSummary; rescueSuppressionReason?: string }
-  | { kind: "run"; mode: Exclude<MoaMode, "single">; scope: CheckpointScope; reason: string; observationSummary?: ToolObservationSummary };
+  | { kind: "single"; reason: string; observationSummary?: ToolObservationSummary; rescueSuppressionReason?: string; typedCheckpoint?: TypedCheckpointSignal }
+  | { kind: "run"; mode: Exclude<MoaMode, "single">; scope: CheckpointScope; reason: string; observationSummary?: ToolObservationSummary; typedCheckpoint?: TypedCheckpointSignal };
 
 export interface AdvisorResult {
   text: string;
@@ -297,6 +308,7 @@ export interface MoaRunDetails {
   rescueTrailingFailureStreak?: number;
   rescueSignature?: string;
   rescueAdvisorInjectionCount?: number;
+  typedCheckpoint?: TypedCheckpointSignal;
   observationFilesMentioned?: string[];
   cacheHit?: boolean;
   guidanceInjected?: boolean;

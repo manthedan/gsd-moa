@@ -48,6 +48,7 @@ export { ALIAS_PRESETS, applyAliasPreset, applyDoneGatePreset, applyGlmZaiSingle
 export type { AliasPresetEntry, BuiltinAliasId } from "./registry.js";
 export { streamGsdMoa } from "./stream.js";
 export { computeTimeState } from "./time.js";
+export { chooseTypedCheckpoint, recordTypedCheckpoint, resetTypedCheckpoints } from "./typed-checkpoint.js";
 export { createTraceRecorder } from "./trace.js";
 export { PROVIDER_ID } from "./types.js";
-export type { AsyncAdvisorConfig, CheckpointPolicyConfig, CheckpointScope, DefaultReasoningEffort, DoneGateConfig, FullMoaFailure, FullMoaProposal, FullMoaResult, GsdMoaConfig, ModelRef, MoaAction, MoaMode, PolicyDecision, PortfolioDecision, ReasoningEffort, ReferenceWhenConfig, RescuePolicyConfig, TimeAwareConfig, TimeState, TraceConfig, UpstreamRoute } from "./types.js";
+export type { AsyncAdvisorConfig, CheckpointPolicyConfig, CheckpointScope, DefaultReasoningEffort, DoneGateConfig, FullMoaFailure, FullMoaProposal, FullMoaResult, GsdMoaConfig, ModelRef, MoaAction, MoaMode, PolicyDecision, PortfolioDecision, ReasoningEffort, ReferenceWhenConfig, RescuePolicyConfig, TimeAwareConfig, TimeState, TraceConfig, TypedCheckpointSignal, TypedCheckpointType, UpstreamRoute } from "./types.js";

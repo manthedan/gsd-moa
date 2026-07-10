@@ -11,16 +11,17 @@ import {
 import { runAdvisor } from "./advisor.js";
 import { asyncAdvisorUnattributedUsage, maybeUseAsyncAdvisor, type AsyncAdvisorDecision } from "./async-advisor.js";
 import { loadConfig } from "./config.js";
-import { assistantText, buildToolObservationSummary, countAdvisorInjections, isToolLoopContinuation, latestMessageHasMoaMarker, latestUserText, redactSensitiveText, stripMarkersFromContext, withAdvisorGuidance, withBenchmarkIntegrityNote, withFullMoaGuidance, withTimeAwarenessNote } from "./context.js";
+import { assistantText, buildToolObservationSummary, countAdvisorInjections, hasStableConversationIdentity, isToolLoopContinuation, latestMessageHasMoaMarker, latestUserText, redactSensitiveText, stripMarkersFromContext, withAdvisorGuidance, withBenchmarkIntegrityNote, withFullMoaGuidance, withTimeAwarenessNote, withTypedStrategyNote } from "./context.js";
 import { FullMoaError, runFullMoa } from "./moa.js";
 import { chooseAction, chooseMode } from "./policy.js";
 import { ReferenceCallError } from "./reference-call.js";
 import { applyModelPreset } from "./presets.js";
-import { doneGateLedgerKey, readDoneGateLedger, recordDoneGateFire, shouldArmDoneGate, withDoneGateNote } from "./done-gate.js";
+import { doneGateLedgerKey, readDoneGateLedger, recordDoneGateFire, releaseDoneGateReservation, reserveDoneGate, shouldArmDoneGate, withDoneGateNote } from "./done-gate.js";
 import { readRescueLedger, recordRescue, rescueLedgerKey } from "./rescue-ledger.js";
 import { assistantRequestsVerifier, buildSessionStateSummary, type SessionStateSummary } from "./session-state.js";
 import { timeEnvFromProcess, computeTimeState } from "./time.js";
 import { createTraceRecorder } from "./trace.js";
+import { chooseTypedCheckpoint, normalizeVerifyFailureGuidance, recordTypedCheckpoint, releaseTypedCheckpointReservation, reserveTypedCheckpoint } from "./typed-checkpoint.js";
 import type { AdvisorResult, FullMoaResult, GsdMoaConfig, InnerCallDetails, MoaAction, MoaRunDetails, PolicyInput, TimeState } from "./types.js";
 import { effortForTrace, routeToModel, streamOptionsForRoute, type UpstreamClient, compatUpstreamClient } from "./upstream.js";
 import { addUsage } from "./usage.js";
@@ -92,15 +93,49 @@ export function streamGsdMoa(
       const recentToolSummary = policyInput.recentToolSummary;
       const rescueKey = rescueLedgerKey(model.id, context, options?.sessionId);
       const requestedPolicy = chooseMode(config, policyInput);
-      const action = chooseAction(config, requestedPolicy, policyInput);
+      const baseAction = chooseAction(config, requestedPolicy, policyInput);
+      const typedEnabled = config.aliases[model.id]?.typedCheckpoints === true;
+      const sessionState = (config.doneGate.enabled || typedEnabled) ? buildSessionStateSummary(context) : undefined;
+      const typedDecision = chooseTypedCheckpoint(
+        typedEnabled,
+        model.id,
+        context,
+        requestedPolicy,
+        baseAction,
+        contextIsToolLoopContinuation,
+        sessionState ?? { filesModified: false, modifiedFiles: [], commandsRun: 0, verifierRan: false, verifierEvidence: [] },
+        recentToolSummary,
+        config.timeAware,
+        timeState,
+        options?.sessionId,
+      );
+      const action = typedDecision.action;
+      let strategyReservationKey: string | undefined;
+      if (action.typedCheckpoint?.type === "strategy" && action.typedCheckpoint.status === "fired" && typedDecision.ledgerKey) {
+        if (reserveTypedCheckpoint(typedDecision.ledgerKey)) {
+          strategyReservationKey = typedDecision.ledgerKey;
+        } else {
+          action.typedCheckpoint = {
+            ...action.typedCheckpoint,
+            status: "suppressed",
+            reason: "strategy already delivered or in flight",
+          };
+          typedDecision.injectStrategyNote = false;
+        }
+      }
       const policy = action.kind === "run"
         ? { ...requestedPolicy, mode: action.mode, reason: action.reason }
         : { ...requestedPolicy, mode: "single" as const, reason: action.reason };
       let diagnosticPolicy = policy;
       trace = createTraceRecorder(config, model, context, policy, action);
+      // Bound M3 spend by attempts, not only successful injections. Provider
+      // failures must not trigger an advisor call on every subsequent turn.
+      if (action.typedCheckpoint?.status === "fired" && action.typedCheckpoint.type !== "strategy" && typedDecision.ledgerKey) {
+        recordTypedCheckpoint(typedDecision.ledgerKey);
+      }
 
       const primaryContext = stripMarkersFromContext(context);
-      let finalContext = primaryContext;
+      let finalContext = typedDecision.injectStrategyNote ? withTypedStrategyNote(primaryContext) : primaryContext;
       let advisor: AdvisorResult | undefined;
       let fullMoa: FullMoaResult | undefined;
       let guidanceInjected: boolean | undefined;
@@ -111,9 +146,34 @@ export function streamGsdMoa(
       let primaryEffort: string | undefined;
       let primaryStarted = false;
       let priorPrimaryUsageForError: AssistantMessage["usage"] | undefined;
+      let doneGateReservationKey: string | undefined;
+      const releaseDoneGate = () => {
+        if (!doneGateReservationKey) return;
+        releaseDoneGateReservation(doneGateReservationKey);
+        doneGateReservationKey = undefined;
+      };
+      let strategyDelivered = action.typedCheckpoint?.type !== "strategy" || action.typedCheckpoint.status !== "fired";
+      const recordStrategyDelivery = () => {
+        if (strategyDelivered || !strategyReservationKey) return;
+        recordTypedCheckpoint(strategyReservationKey);
+        strategyReservationKey = undefined;
+        strategyDelivered = true;
+      };
+      const markUndeliveredStrategy = () => {
+        if (strategyDelivered || action.typedCheckpoint?.type !== "strategy") return;
+        if (strategyReservationKey) releaseTypedCheckpointReservation(strategyReservationKey);
+        strategyReservationKey = undefined;
+        action.typedCheckpoint = {
+          ...action.typedCheckpoint,
+          status: "suppressed",
+          reason: "primary failed before strategy delivery",
+        };
+      };
       // Install terminal accounting before reference calls and primary route setup:
       // cancellation or configuration failures after billed inner work must retain it.
       buildTerminalError = (error, aborted) => {
+        markUndeliveredStrategy();
+        releaseDoneGate();
         const errorMessage = makeErrorMessage(model, error, aborted);
         const primaryUsage = errorMessage.usage;
         if (doneGateDetails?.fired) doneGateDetails = { ...doneGateDetails, postGateBehavior: "error" };
@@ -137,12 +197,14 @@ export function streamGsdMoa(
         return errorMessage;
       };
       if (action.kind === "run" && action.mode === "advisor") {
-        asyncAdvisor = maybeUseAsyncAdvisor(config, model, context, policy, action, upstream, options, timeState);
+        asyncAdvisor = action.typedCheckpoint?.type === "verify_failure" && action.typedCheckpoint.status === "fired"
+          ? undefined
+          : maybeUseAsyncAdvisor(config, model, context, policy, action, upstream, options, timeState);
         if (asyncAdvisor) {
           if (asyncAdvisor.status === "injected" && asyncAdvisor.advisor) {
             advisor = asyncAdvisor.advisor;
             guidanceInjected = true;
-            finalContext = withAdvisorGuidance(primaryContext, advisor.text, policy);
+            finalContext = withAdvisorGuidance(finalContext, advisor.text, policy);
           } else {
             guidanceInjected = false;
             guidanceSkippedReason = asyncAdvisor.status === "failed"
@@ -154,8 +216,13 @@ export function streamGsdMoa(
         } else {
           try {
             advisor = await runAdvisor(config, context, policy, upstream, options, trace, action.observationSummary, timeState);
+            if (action.typedCheckpoint?.type === "verify_failure" && action.typedCheckpoint.status === "fired") {
+              const normalized = normalizeVerifyFailureGuidance(advisor.text);
+              advisor = { ...advisor, text: normalized.text };
+              action.typedCheckpoint.structuredOutputValid = normalized.valid;
+            }
             guidanceInjected = true;
-            finalContext = withAdvisorGuidance(primaryContext, advisor.text, policy);
+            finalContext = withAdvisorGuidance(finalContext, advisor.text, policy);
           } catch (error) {
             if (error instanceof ReferenceCallError) failedReferenceCalls.push(referenceFailureCall(error.details, "reference", safeErrorMessage(error)));
             if (options?.signal?.aborted) throw error;
@@ -173,7 +240,7 @@ export function streamGsdMoa(
           }
           if (fullMoa.proposals.length > 0) {
             guidanceInjected = true;
-            finalContext = withFullMoaGuidance(primaryContext, fullMoa, policy);
+            finalContext = withFullMoaGuidance(finalContext, fullMoa, policy);
           } else {
             guidanceInjected = false;
             guidanceSkippedReason = `full_moa failed: all proposers failed: ${fullMoa.failures.map((failure) => failure.message).join("; ")}`;
@@ -192,18 +259,24 @@ export function streamGsdMoa(
         guidanceSkippedReason = action.reason;
       }
 
-      if (guidanceInjected === true && action.kind === "run" && action.scope === "failure") {
+      if (guidanceInjected === true && action.kind === "run" && action.scope === "failure" && !(action.typedCheckpoint?.type === "verify_failure" && action.typedCheckpoint.status === "fired")) {
         recordRescue(rescueKey, recentToolSummary?.totalToolResultCount ?? 0);
       }
 
       if (timeState) finalContext = withTimeAwarenessNote(finalContext, timeState);
       if (config.benchmarkIntegrity) finalContext = withBenchmarkIntegrityNote(finalContext);
 
-      const doneGateKey = config.doneGate.enabled ? doneGateLedgerKey(model.id, context) : undefined;
-      const sessionState = config.doneGate.enabled ? buildSessionStateSummary(context) : undefined;
-      const doneGateDecision = sessionState && doneGateKey
-        ? shouldArmDoneGate(config, context, sessionState, readDoneGateLedger(doneGateKey)?.count ?? 0, timeState)
+      const doneGateKey = config.doneGate.enabled ? doneGateLedgerKey(model.id, context, options?.sessionId) : undefined;
+      const ambiguousTypedIdentity = typedEnabled && !hasStableConversationIdentity(context, options?.sessionId);
+      let doneGateDecision = sessionState && doneGateKey
+        ? ambiguousTypedIdentity
+          ? { armed: false, reason: "stable-session-id-unavailable-after-compaction" }
+          : shouldArmDoneGate(config, context, sessionState, readDoneGateLedger(doneGateKey)?.count ?? 0, timeState)
         : undefined;
+      if (doneGateDecision?.armed && doneGateKey) {
+        if (reserveDoneGate(doneGateKey, config.doneGate.maxPerTask)) doneGateReservationKey = doneGateKey;
+        else doneGateDecision = { armed: false, reason: "done-gate already fired or in flight" };
+      }
       doneGateDetails = doneGateDecision && sessionState ? doneGateDiagnostic(doneGateDecision.armed, false, doneGateDecision.reason, sessionState) : undefined;
 
       trace?.recordFinalContext(finalContext);
@@ -216,8 +289,18 @@ export function streamGsdMoa(
 
       if (!doneGateDecision?.armed) {
         for await (const event of inner) {
+          if (event.type === "error") markUndeliveredStrategy();
+          else recordStrategyDelivery();
           trace?.recordPrimaryEvent(event);
           if (event.type === "done") {
+            if (typedEnabled && !action.typedCheckpoint && event.reason === "stop" && !assistantHasToolCalls(event.message) && doneGateDecision) {
+              action.typedCheckpoint = {
+                type: "pre_done",
+                status: "suppressed",
+                mode: "done-gate",
+                reason: doneGateDecision.reason,
+              };
+            }
             const primaryUsage = event.message.usage;
             const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, ...failedReferenceCalls.map((call) => call.usage), primaryUsage);
             event.message.usage = combinedUsage;
@@ -240,15 +323,19 @@ export function streamGsdMoa(
           }
           stream.push(event);
         }
+        markUndeliveredStrategy();
         stream.end();
         return;
       }
 
       const buffered: AssistantMessageEvent[] = [];
       for await (const event of inner) {
+        if (event.type === "error") markUndeliveredStrategy();
+        else recordStrategyDelivery();
         trace?.recordPrimaryEvent(event);
         buffered.push(event);
         if (event.type === "error") {
+          releaseDoneGate();
           const primaryUsage = event.error.usage;
           const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, ...failedReferenceCalls.map((call) => call.usage), primaryUsage);
           event.error.usage = combinedUsage;
@@ -268,6 +355,7 @@ export function streamGsdMoa(
         const firstPrimaryUsage = event.message.usage;
         doneGateDetails = doneGateDetails ? { ...doneGateDetails, firstStopReason: event.message.stopReason ?? event.reason } : undefined;
         if (assistantHasToolCalls(event.message) || event.reason !== "stop") {
+          releaseDoneGate();
           const combinedUsage = addUsage(advisor?.usage, fullMoa?.usage, ...failedReferenceCalls.map((call) => call.usage), firstPrimaryUsage);
           event.message.usage = combinedUsage;
           const diagnostic = moaDiagnostic(config, diagnosticPolicy, action, advisor, fullMoa, firstPrimaryUsage, combinedUsage, primaryEffort, trace?.filePath, guidanceInjected, guidanceSkippedReason, timeState, asyncAdvisor, policyInput.advisorInjectionCount, doneGateDetails, failedReferenceCalls);
@@ -283,7 +371,16 @@ export function streamGsdMoa(
 
         if (!doneGateKey) throw new Error("done gate key missing");
         recordDoneGateFire(doneGateKey);
+        doneGateReservationKey = undefined;
         doneGateDetails = doneGateDetails ? { ...doneGateDetails, fired: true } : undefined;
+        if (typedEnabled && !action.typedCheckpoint) {
+          action.typedCheckpoint = {
+            type: "pre_done",
+            status: "fired",
+            mode: "done-gate",
+            reason: doneGateDecision.reason,
+          };
+        }
         priorPrimaryUsageForError = firstPrimaryUsage;
         const retryContext = withDoneGateNote(finalContext);
         trace?.recordFinalContext(retryContext);
@@ -320,6 +417,8 @@ export function streamGsdMoa(
         stream.end();
         return;
       }
+      markUndeliveredStrategy();
+      releaseDoneGate();
       stream.end();
     } catch (error) {
       const aborted = Boolean(options?.signal?.aborted);
@@ -363,6 +462,7 @@ function moaDiagnostic(
     requestedMode: policy.requestedMode,
     reason: policy.reason,
     ...(action.kind === "run" ? { checkpointScope: action.scope } : {}),
+    ...(action.typedCheckpoint ? { typedCheckpoint: action.typedCheckpoint } : {}),
     ...(action.observationSummary ? {
       observationDigest: action.observationSummary.digest,
       observationToolResultCount: action.observationSummary.toolResultCount,

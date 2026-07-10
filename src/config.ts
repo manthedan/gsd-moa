@@ -427,6 +427,9 @@ export function validateConfig(cfg: GsdMoaConfig): void {
     if (!name.trim()) throw new Error("aliases must not contain blank model ids");
     validateMode(`aliases.${name}.mode`, alias.mode);
     if (alias.checkpointScopes !== undefined) validatePartialCheckpointScopes(`aliases.${name}.checkpointScopes`, alias.checkpointScopes);
+    if (alias.typedCheckpoints !== undefined && typeof alias.typedCheckpoints !== "boolean") {
+      throw new Error(`aliases.${name}.typedCheckpoints must be boolean`);
+    }
   }
 
   validateMode("auto.defaultMode", cfg.auto.defaultMode);
@@ -542,6 +545,7 @@ function mergeAliases(defaults: GsdMoaConfig["aliases"], overrides: Record<strin
       if (!isRecord(override.checkpointScopes)) throw new Error(`aliases.${name}.checkpointScopes must be an object`);
       alias.checkpointScopes = { ...(override.checkpointScopes as Partial<CheckpointScopesConfig>) };
     }
+    if (override.typedCheckpoints !== undefined) alias.typedCheckpoints = override.typedCheckpoints as boolean;
     merged[name] = alias;
   }
   return merged;

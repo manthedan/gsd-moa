@@ -4,9 +4,16 @@ import { detectFailureSignals } from "./context.js";
 export interface SessionStateSummary {
   filesModified: boolean;
   modifiedFiles: string[];
+  confirmedModifiedFiles?: string[];
   commandsRun: number;
   verifierRan: boolean;
   lastVerifierPassed?: boolean;
+  lastVerifierEvidence?: string;
+  /** Exact standalone verifier command for typed diagnosis; compound commands are omitted conservatively. */
+  lastVerifierCommand?: string;
+  lastVerifierCommandClass?: string;
+  lastVerifierFailureSignals?: string[];
+  lastVerifierHadPrecedingMutation?: boolean;
   verifierEvidence: string[];
 }
 
@@ -14,7 +21,7 @@ const FILE_MOD_TOOL_RE = /^(edit|write|apply[-_]?patch|create[-_]?file|str[-_]?r
 const BASH_LIKE_TOOL_RE = /^(bash|shell|exec|run|terminal)$/i;
 const CODE_LIKE_TOOL_RE = /^(eval|python|node)$/i;
 const COMMAND_LIKE_TOOL_RE = /^(bash|shell|exec|run|terminal|eval|python|node)$/i;
-const STATE_CHANGE_COMMAND_RE = /(>>?|\btee\b|\bcp\b|\bmv\b|\bsed\s+-i\b|\bapply[_-]?patch\b|\bpatch\b|\binstall\b|\bmkdir\b|\btouch\b|\bgit\s+(apply|checkout)\b)/i;
+const SHELL_STATE_EXECUTABLE = String.raw`(?:tee|cp|mv|rm|chmod|truncate|ln|sed\s+-i|apply[_-]?patch|patch|install|mkdir|touch|git\s+(?:apply|checkout|rm)|npm\s+(?:install|i|ci|ic|clean-install|uninstall|remove|update)|pnpm\s+(?:install|i|add|remove|update)|yarn\s+(?:install|add|remove|up)|pip3?\s+(?:install|uninstall)|python3?\s+-m\s+pip\s+(?:install|uninstall)|bun\s+(?:install|add|remove|update)|composer\s+(?:install|update|remove|require)|bundle\s+(?:install|update)|gem\s+(?:install|uninstall))`;
 const CODE_STATE_CHANGE_RE = /(?:\bBun\.write\b|\bwriteFile(?:Sync)?\b|\.write_text\b|\bopen\s*\([^)]*[,)]\s*["']?[wa]["']?|\bmkdir\b|\brename\b|\bunlink\b)/i;
 const STATE_CHANGE_RESULT_RE = /\b(wrote|created|updated|modified|deleted|patched|generated|saved|replaced)\b/i;
 const MUTATION_PREVENTED_RE = /\b(permission denied|operation not permitted|access denied|read-only file system|no such file or directory)\b/i;
@@ -31,16 +38,25 @@ export function buildSessionStateSummary(context: Context): SessionStateSummary 
   const verifierEvidence: string[] = [];
   const verifierCandidates: Array<{ id?: string; name: string; command?: string; invocation: string; precedingMutationIds: string[] }> = [];
   const toolResultsByCallId = new Map<string, { raw: string; isError: boolean }>();
-  const mutationsByCallId = new Map<string, { files: string[]; writeTargets: string[]; failed: boolean; commandLike: boolean; command?: string }>();
+  const mutationsByCallId = new Map<string, { files: string[]; writeTargets: string[]; failed: boolean; confirmed: boolean; commandLike: boolean; command?: string }>();
   let commandsRun = 0;
   let verifierRan = false;
   let lastVerifierPassed: boolean | undefined;
+  let lastVerifierEvidence: string | undefined;
+  let lastVerifierCommand: string | undefined;
+  let lastVerifierCommandClass: string | undefined;
+  let lastVerifierFailureSignals: string[] | undefined;
+  let lastVerifierHadPrecedingMutation: boolean | undefined;
 
   const latestUserIndex = context.messages.reduce((latest, message, index) => message.role === "user" ? index : latest, -1);
   const currentTurnMessages = context.messages.slice(latestUserIndex + 1);
 
   for (const message of currentTurnMessages) {
     if (message.role === "assistant") {
+      // OMP may execute sibling non-PTY tool calls concurrently. Only mutations
+      // from earlier assistant batches, or from this exact compound call, can be
+      // considered causally before a verifier.
+      const priorBatchMutationIds = [...mutationsByCallId.keys()];
       for (const toolCall of assistantToolCalls(message)) {
         const name = toolCall.name;
         const args = toolCall.arguments ?? {};
@@ -48,12 +64,14 @@ export function buildSessionStateSummary(context: Context): SessionStateSummary 
         const invocation = invocationText(name, args, command);
         if (COMMAND_LIKE_TOOL_RE.test(name)) commandsRun += 1;
 
-        if (FILE_MOD_TOOL_RE.test(name) || (command && ((BASH_LIKE_TOOL_RE.test(name) && (STATE_CHANGE_COMMAND_RE.test(command) || CODE_STATE_CHANGE_RE.test(command))) || (CODE_LIKE_TOOL_RE.test(name) && CODE_STATE_CHANGE_RE.test(command))))) {
-          const files = filesFromText(invocation);
+        if (FILE_MOD_TOOL_RE.test(name) || (command && ((BASH_LIKE_TOOL_RE.test(name) && (hasPersistentShellStateChange(command) || hasShellCodeStateChange(command))) || (CODE_LIKE_TOOL_RE.test(name) && CODE_STATE_CHANGE_RE.test(command))))) {
+          const writeTargets = command ? writeTargetsFromCommand(command) : explicitMutationPaths(args);
+          const files = FILE_MOD_TOOL_RE.test(name) ? explicitMutationPaths(args) : writeTargets;
           if (toolCall.id) mutationsByCallId.set(toolCall.id, {
             files,
-            writeTargets: command ? writeTargetsFromCommand(command) : files,
+            writeTargets,
             failed: false,
+            confirmed: false,
             commandLike: Boolean(command && COMMAND_LIKE_TOOL_RE.test(name)),
             ...(command ? { command } : {}),
           });
@@ -64,7 +82,10 @@ export function buildSessionStateSummary(context: Context): SessionStateSummary 
           name,
           ...(command ? { command } : {}),
           invocation,
-          precedingMutationIds: [...mutationsByCallId.keys()],
+          precedingMutationIds: [
+            ...priorBatchMutationIds,
+            ...(toolCall.id && mutationsByCallId.has(toolCall.id) ? [toolCall.id] : []),
+          ],
         });
       }
       continue;
@@ -79,13 +100,18 @@ export function buildSessionStateSummary(context: Context): SessionStateSummary 
       // errors remain potentially mutating. Clear them only when the output is
       // tied to the write/patch itself. Dedicated edit/write tools fail as a unit.
       mutation.failed = mutationWasPrevented(mutation, raw, Boolean(message.isError));
+      mutation.confirmed = !mutation.failed && mutationWasConfirmed(mutation, raw, Boolean(message.isError));
       if (!message.isError && hasPositiveStateChange(raw)) addFiles(mutation.files, filesFromText(raw));
     }
   }
 
   const successfulOrPendingMutations = [...mutationsByCallId.values()].filter((mutation) => !mutation.failed);
+  const modifiedFiles: string[] = [];
+  for (const mutation of successfulOrPendingMutations) addFiles(modifiedFiles, mutation.files);
   const confirmedModifiedFiles: string[] = [];
-  for (const mutation of successfulOrPendingMutations) addFiles(confirmedModifiedFiles, mutation.files);
+  for (const mutation of successfulOrPendingMutations) {
+    if (mutation.confirmed) addFiles(confirmedModifiedFiles, mutation.files);
+  }
 
   const successfulMutationIds = [...mutationsByCallId.entries()]
     .filter(([, mutation]) => !mutation.failed)
@@ -96,24 +122,233 @@ export function buildSessionStateSummary(context: Context): SessionStateSummary 
     const precedingModifiedFiles: string[] = [];
     for (const mutationId of candidate.precedingMutationIds) {
       const mutation = mutationsByCallId.get(mutationId);
-      if (mutation && !mutation.failed) addFiles(precedingModifiedFiles, mutation.files);
+      if (!mutation || mutation.failed) continue;
+      // A compound command can run a verifier before a later `&&` write. That
+      // write is not evidence that the failed verifier checked a mutation.
+      if (mutationId === candidate.id && candidate.command && !mutationAppearsBeforeVerifier(candidate.command)) continue;
+      addFiles(precedingModifiedFiles, mutation.files);
     }
+    // Background jobs make the aggregate result unrelated to a unique verifier.
+    if (candidate.command && hasBackgroundSeparator(candidate.command)) continue;
+    // If this same compound command mutates again after its verifier, that
+    // verifier is stale by the time the command completes. Do not let it satisfy
+    // the done gate or trigger typed failure advice from an aggregate exit code.
+    if (candidate.id && candidate.command && mutationsByCallId.has(candidate.id) && mutationAppearsAfterVerifier(candidate.command)) continue;
     const evidence = verifierEvidenceFor(candidate.name, candidate.command, candidate.invocation, precedingModifiedFiles);
     if (!evidence) continue;
     verifierRan = true;
     addCapped(verifierEvidence, evidence, 10);
     const result = candidate.id ? toolResultsByCallId.get(candidate.id) : undefined;
-    if (result) lastVerifierPassed = !result.isError && detectFailureSignals(result.raw, result.isError).length === 0;
+    if (result) {
+      lastVerifierFailureSignals = detectFailureSignals(result.raw, result.isError);
+      lastVerifierPassed = !result.isError && lastVerifierFailureSignals.length === 0;
+      lastVerifierEvidence = evidence;
+      lastVerifierCommandClass = candidate.command ? standaloneVerifierClass(candidate.name, candidate.command) : undefined;
+      lastVerifierCommand = lastVerifierCommandClass ? candidate.command : undefined;
+      lastVerifierHadPrecedingMutation = candidate.precedingMutationIds.some((id) => {
+        const mutation = mutationsByCallId.get(id);
+        if (!mutation?.confirmed) return false;
+        return id !== candidate.id || !candidate.command || mutationAppearsBeforeVerifier(candidate.command);
+      });
+    }
   }
 
   return {
     filesModified: successfulOrPendingMutations.length > 0,
-    modifiedFiles: confirmedModifiedFiles,
+    modifiedFiles,
+    confirmedModifiedFiles,
     commandsRun,
     verifierRan,
     ...(verifierRan && lastVerifierPassed !== undefined ? { lastVerifierPassed } : {}),
+    ...(lastVerifierEvidence ? { lastVerifierEvidence } : {}),
+    ...(lastVerifierCommand ? { lastVerifierCommand } : {}),
+    ...(lastVerifierCommandClass ? { lastVerifierCommandClass } : {}),
+    ...(lastVerifierFailureSignals ? { lastVerifierFailureSignals } : {}),
+    ...(lastVerifierHadPrecedingMutation !== undefined ? { lastVerifierHadPrecedingMutation } : {}),
     verifierEvidence,
   };
+}
+
+function mutationIndexes(command: string): number[] {
+  const shell = normalizeCombinedOutputRedirection(maskQuotedShellMetacharacters(stripDescriptorRedirects(command)));
+  const indexes = executableMutationIndexes(shell);
+  for (const segment of shellSegments(shell)) {
+    const normalized = normalizedShellExecutable(segment.text);
+    if (!/^(?:python3?|node|bun|tsx|ts-node)\b/i.test(normalized)) continue;
+    for (const match of normalized.matchAll(new RegExp(CODE_STATE_CHANGE_RE.source, "gi"))) {
+      if (match.index !== undefined) indexes.push(segment.index + match.index);
+    }
+  }
+  if (interpreterHereDocBodies(command).some((body) => CODE_STATE_CHANGE_RE.test(body))) indexes.push(0);
+  for (const redirect of shell.matchAll(/>>?\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/g)) {
+    const target = redirect[1] ?? redirect[2] ?? redirect[3] ?? "";
+    if (/^\/dev\/(?:null|stdout|stderr)$/.test(target)) continue;
+    const prefix = shell.slice(0, redirect.index ?? 0);
+    let segmentStart = 0;
+    for (const separator of prefix.matchAll(/&&|\|\||[;&|\n]/g)) segmentStart = (separator.index ?? 0) + separator[0].length;
+    indexes.push(segmentStart);
+  }
+  return indexes;
+}
+
+function normalizeCombinedOutputRedirection(command: string): string {
+  return command
+    .replace(/&(?=>{1,2})/g, " ")
+    .replace(/>(?=&(?!\d+\b))&/g, "> ")
+    .replace(/\|&/g, "| ");
+}
+
+function hasBackgroundSeparator(command: string): boolean {
+  const shell = maskQuotedShellMetacharacters(stripShellRedirections(stripDescriptorRedirects(command))).replaceAll("&&", "");
+  return shell.includes("&");
+}
+
+function mutationAppearsBeforeVerifier(command: string): boolean {
+  const verifierIndex = verifierSegmentIndex(command);
+  if (verifierIndex < 0) return true;
+  return mutationIndexes(command).some((index) => index < verifierIndex);
+}
+
+function mutationAppearsAfterVerifier(command: string): boolean {
+  const verifierIndex = verifierSegmentIndex(command);
+  if (verifierIndex < 0) return false;
+  return mutationIndexes(command).some((index) => index > verifierIndex);
+}
+
+function verifierSegmentIndex(command: string): number {
+  let verifierIndex = -1;
+  for (const segment of shellSegments(command)) {
+    const classified = stripLeadingShellAssignments(stripShellRedirections(stripDescriptorRedirects(segment.text))).trim();
+    if (SHELL_VERIFIER_COMMAND_RE.test(classified)) verifierIndex = segment.index;
+  }
+  return verifierIndex;
+}
+
+function standaloneVerifierClass(name: string, command: string): string | undefined {
+  if (!BASH_LIKE_TOOL_RE.test(name)) return undefined;
+  const classified = stripLeadingShellAssignments(stripShellRedirections(stripDescriptorRedirects(stripHereDocBodies(command)))).trim();
+  if (/[;&\n]|&&|\|\||\|/.test(maskQuotedShellMetacharacters(classified))) return undefined;
+  return classified.match(/^(?:python3?\s+-m\s+(?:pytest|unittest|py_compile)|npm\s+(?:test|run\s+(?:test|check))|cargo\s+(?:test|check)|go\s+test|make\s+(?:test|check)|mvn\s+test|R\s+CMD\s+check|pytest|tox|jest|vitest|[\w./-]*(?:check(?:er)?|verify|validate)(?:\.(?:py|sh))?)/i)?.[0];
+}
+
+function hasShellCodeStateChange(command: string): boolean {
+  if (interpreterHereDocBodies(command).some((body) => CODE_STATE_CHANGE_RE.test(body))) return true;
+  return shellSegments(command).some((segment) => {
+    const normalized = normalizedShellExecutable(segment.text);
+    return /^(?:python3?|node|bun|tsx|ts-node)\b/i.test(normalized) && CODE_STATE_CHANGE_RE.test(normalized);
+  });
+}
+
+function normalizedShellExecutable(segment: string): string {
+  return stripLeadingShellAssignments(segment)
+    .trimStart()
+    .replace(/^sudo\s+/, "")
+    .replace(/^\S*\/(?=(?:python3?|node|bun|tsx|ts-node)\b)/i, "");
+}
+
+function hasPersistentShellStateChange(command: string): boolean {
+  const shell = stripDescriptorRedirects(command);
+  if (executableMutationIndexes(shell).length > 0) return true;
+  return redirectTargetsFromCommand(maskQuotedShellMetacharacters(shell)).some((target) => !/^\/dev\/(?:null|stdout|stderr)$/.test(target));
+}
+
+function executableMutationIndexes(command: string): number[] {
+  const indexes: number[] = [];
+  for (const segment of shellSegments(command)) {
+    const executable = stripLeadingShellAssignments(segment.text).trimStart().replace(/^sudo\s+/, "");
+    if (new RegExp(`^${SHELL_STATE_EXECUTABLE}\\b`, "i").test(executable)) indexes.push(segment.index);
+  }
+  return indexes;
+}
+
+function shellSegments(command: string): Array<{ text: string; index: number }> {
+  const masked = maskQuotedShellMetacharacters(command);
+  const segments: Array<{ text: string; index: number }> = [];
+  let start = 0;
+  for (const separator of masked.matchAll(/&&|\|\||[;&|\n]/g)) {
+    const end = separator.index ?? start;
+    segments.push({ text: command.slice(start, end), index: start });
+    start = end + separator[0].length;
+  }
+  segments.push({ text: command.slice(start), index: start });
+  return segments;
+}
+
+function maskQuotedShellMetacharacters(command: string): string {
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+  return Array.from(command, (character) => {
+    if (escaped) {
+      escaped = false;
+      return character;
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true;
+      return character;
+    }
+    if (quote) {
+      if (character === quote) quote = undefined;
+      return /[;&|<>]/.test(character) ? " " : character;
+    }
+    if (character === "'" || character === '"') quote = character;
+    return character;
+  }).join("");
+}
+
+function redirectTargetsFromCommand(command: string): string[] {
+  const targets: string[] = [];
+  command = normalizeCombinedOutputRedirection(command);
+  for (const match of command.matchAll(/(?:^|[^>])(?:(?:\d+|&)?>{1,2})(?!&)\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/gm)) {
+    addCapped(targets, match[1] ?? match[2] ?? match[3] ?? "", 20);
+  }
+  return targets;
+}
+
+function stripShellRedirections(command: string): string {
+  const normalized = normalizeCombinedOutputRedirection(command);
+  return normalized.replace(/(?:(?:\b\d*)|&)?>{1,2}\s*(?:"[^"]*"|'[^']*'|[^\s;&|]+)/g, (match) => " ".repeat(match.length));
+}
+
+function stripLeadingShellAssignments(command: string): string {
+  let rest = command;
+  const envPrefix = /^\s*(?:\/usr\/bin\/)?env\s+/.exec(rest);
+  if (envPrefix) {
+    rest = rest.slice(envPrefix[0].length);
+    while (true) {
+      const optionWithOperand = /^(?:-u|-C|--unset|--chdir)\s+(?:"[^"]*"|'[^']*'|\S+)\s*/.exec(rest);
+      if (optionWithOperand) {
+        rest = rest.slice(optionWithOperand[0].length);
+        continue;
+      }
+      const endOfOptions = /^--\s+/.exec(rest);
+      if (endOfOptions) {
+        rest = rest.slice(endOfOptions[0].length);
+        break;
+      }
+      const selfContainedOption = /^(?:--(?:unset|chdir)=\S+|-[^-\s]\S*)\s*/.exec(rest);
+      if (!selfContainedOption) break;
+      rest = rest.slice(selfContainedOption[0].length);
+    }
+  }
+  return rest.replace(/^(?:\s*[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S+)\s+)+/, "");
+}
+
+function stripDescriptorRedirects(command: string): string {
+  return command.replace(/(?:\b\d+)?[<>]\s*&\s*\d+\b/g, (match) => " ".repeat(match.length));
+}
+
+function mutationWasConfirmed(
+  mutation: { commandLike: boolean; command?: string },
+  resultText: string,
+  isError: boolean,
+): boolean {
+  if (isError) return false;
+  if (!mutation.commandLike) return true;
+  const shellStructure = mutation.command ? maskQuotedShellMetacharacters(stripHereDocBodies(mutation.command)) : "";
+  const compound = /[;&\n]|&&|\|\||\|/.test(shellStructure);
+  if (compound && (MUTATION_PREVENTED_RE.test(resultText) || PATCH_PREVENTED_RE.test(resultText) || GIT_MUTATION_PREVENTED_RE.test(resultText))) return false;
+  const andOnly = shellStructure.includes("&&") && !/[;&\n|]/.test(shellStructure.replaceAll("&&", ""));
+  return !compound || andOnly || hasPositiveStateChange(resultText);
 }
 
 function mutationWasPrevented(
@@ -131,8 +366,8 @@ function mutationWasPrevented(
   if (mutation.command && /apply[_-]?patch|\bgit\s+apply\b/i.test(mutation.command) && PATCH_PREVENTED_RE.test(resultText)) return true;
   if (mutation.command && /\bgit\s+(?:checkout|apply)\b/i.test(mutation.command) && GIT_MUTATION_PREVENTED_RE.test(resultText)) return true;
   if (mutation.command && /(?:^|[;&|]\s*)patch\b/im.test(mutation.command) && /0\s+out\s+of\s+\d+\s+hunks?\s+(?:failed|applied)/i.test(resultText)) return true;
-  const shellStructure = mutation.command ? stripHereDocBodies(mutation.command) : "";
-  const compound = /[;\n]|&&|\|\||\|/.test(shellStructure);
+  const shellStructure = mutation.command ? maskQuotedShellMetacharacters(stripHereDocBodies(mutation.command)) : "";
+  const compound = /[;&\n]|&&|\|\||\|/.test(shellStructure);
   const andSegments = mutation.command?.split("&&") ?? [];
   if (andSegments.length > 1 && MUTATION_PREVENTED_RE.test(resultText)) {
     const firstCommand = andSegments[0] ?? "";
@@ -179,18 +414,75 @@ function hasPositiveStateChange(text: string): boolean {
 function writeTargetsFromCommand(command: string): string[] {
   const targets: string[] = [];
   const patterns = [
-    /(?:^|\s)>{1,2}\s*["']?([^\s"';|&]+)/gm,
+    />{1,2}&\s*(?!\d+\b)["']?([^\s"';|&]+)/gm,
+    /(?:^|[^>])(?:(?:\d+|&)?>{1,2})(?!&)\s*["']?([^\s"';|&]+)/gm,
     /\btee(?:\s+-a)?\s+["']?([^\s"';|&]+)/gm,
     /\b(?:Path\s*\(|Bun\.write\s*\(|writeFile(?:Sync)?\s*\(|open\s*\()\s*["']([^"']+)["']/gm,
     /^\*\*\* (?:Update|Add|Delete) File:\s*(\S+)/gm,
     /\b(?:mkdir|touch)(?:\s+-[^\s]+)*\s+["']?([^\s"';|&]+)/gm,
-    /\b(?:cp|mv)(?:\s+-[^\s]+)*\s+(?:["'][^"']+["']|\S+)\s+["']?([^\s"';|&]+)/gm,
+    /\b(?:rm|git\s+rm)(?:\s+-[^\s]+)*\s+["']?([^\s"';|&]+)/gm,
+    /\btruncate(?:\s+-[^\s]+\s+\S+)*\s+["']?([^\s"';|&]+)/gm,
+    /\bchmod(?:\s+-[^\s]+)*\s+\S+\s+["']?([^\s"';|&]+)/gm,
     /\bsed\s+-i(?:\S*)?(?:\s+-[^\s]+)*\s+(?:["'][^"']+["']|\S+)\s+["']?([^\s"';|&]+)/gm,
   ];
   for (const pattern of patterns) {
     for (const match of command.matchAll(pattern)) addCapped(targets, match[1] ?? "", 20);
   }
+  addFiles(targets, copyMoveTargetsFromCommand(command));
+  addFiles(targets, destructiveTargetsFromCommand(command));
   return targets;
+}
+
+function copyMoveTargetsFromCommand(command: string): string[] {
+  const targets: string[] = [];
+  for (const segment of shellSegments(command)) {
+    const normalized = stripLeadingShellAssignments(segment.text).trimStart().replace(/^sudo\s+/, "");
+    const match = /^(?:cp|mv|ln)\b([\s\S]*)/m.exec(normalized);
+    if (!match) continue;
+    const operands = (match[1] ?? "").match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+    let targetDirectory: string | undefined;
+    const positional: string[] = [];
+    for (let index = 0; index < operands.length; index += 1) {
+      const operand = operands[index] ?? "";
+      if (operand === "-t" || operand === "--target-directory") {
+        targetDirectory = operands[index + 1]?.replace(/^["']|["']$/g, "");
+        index += 1;
+      } else if (operand.startsWith("--target-directory=")) {
+        targetDirectory = operand.slice(operand.indexOf("=") + 1).replace(/^["']|["']$/g, "");
+      } else if (!operand.startsWith("-")) {
+        positional.push(operand.replace(/^["']|["']$/g, ""));
+      }
+    }
+    const destination = targetDirectory ?? positional.at(-1);
+    if (destination) addCapped(targets, destination, 20);
+  }
+  return targets;
+}
+
+function destructiveTargetsFromCommand(command: string): string[] {
+  const targets: string[] = [];
+  for (const segment of shellSegments(command)) {
+    const normalized = stripLeadingShellAssignments(segment.text).trimStart().replace(/^sudo\s+/, "");
+    const match = /^(?:git\s+)?rm\b([\s\S]*)/m.exec(normalized);
+    if (!match) continue;
+    const operands = (match[1] ?? "").match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+    for (const operand of operands) {
+      if (operand.startsWith("-")) continue;
+      addCapped(targets, operand.replace(/^["']|["']$/g, ""), 20);
+    }
+  }
+  return targets;
+}
+
+function explicitMutationPaths(args: Record<string, unknown>): string[] {
+  const paths: string[] = [];
+  for (const key of ["path", "file", "filePath", "target", "destination"] as const) {
+    if (typeof args[key] === "string") addCapped(paths, args[key], 20);
+  }
+  for (const key of ["patch", "diff"] as const) {
+    if (typeof args[key] === "string") addFiles(paths, writeTargetsFromCommand(args[key]));
+  }
+  return paths;
 }
 
 export function assistantRequestsVerifier(message: AssistantMessage, modifiedFiles: string[] = []): boolean {
@@ -261,7 +553,7 @@ function isVerifierInvocation(name: string, command: string | undefined, verifie
 }
 
 function verifierSearchTextForShell(command: string): string {
-  const shellText = stripRedirectionTargets(stripHereDocBodies(command))
+  const shellText = stripLeadingShellAssignments(stripRedirectionTargets(stripHereDocBodies(command)))
     .split("\n")
     .filter((line) => !isPureShellWriteLine(line))
     .join("\n");

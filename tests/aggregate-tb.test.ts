@@ -91,6 +91,33 @@ describe("Terminal-Bench results aggregation", () => {
     assert.match(markdown, /Voids/);
   });
 
+  it("counts typed checkpoint events and trials separately", () => {
+    const trialDir = makeTempTrial();
+    try {
+      const diagnostic = (typedCheckpoint: Record<string, unknown>) => ({
+        type: "message_end",
+        message: { diagnostics: [{ type: "gsd-moa.details", details: { typedCheckpoint, innerCalls: [] } }] },
+      });
+      writeAgentFile(trialDir, "pi-gsd-moa/pi-output.jsonl", [
+        JSON.stringify(diagnostic({ type: "strategy", status: "fired", mode: "deterministic-note", reason: "initial" })),
+        JSON.stringify(diagnostic({ type: "verify_failure", status: "fired", mode: "advisor", reason: "failed verifier", structuredOutputValid: true })),
+        JSON.stringify(diagnostic({ type: "verify_failure", status: "fired", mode: "advisor", reason: "failed verifier", structuredOutputValid: false })),
+        JSON.stringify(diagnostic({ type: "verify_failure", status: "suppressed", mode: "advisor", reason: "maxPerTask" })),
+      ].join("\n"));
+      const telemetry = parseMoaTelemetry(trialDir);
+      assert.equal(telemetry.typedCheckpointEvents["strategy:fired"], 1);
+      assert.equal(telemetry.typedCheckpointEvents["verify_failure:fired"], 2);
+      assert.equal(telemetry.typedCheckpointTrials["verify_failure:fired"], 1);
+      assert.equal(telemetry.typedCheckpointSuppressions["verify_failure:maxPerTask"], 1);
+      assert.equal(telemetry.typedCheckpointStructuredOutputEvents.valid, 1);
+      assert.equal(telemetry.typedCheckpointStructuredOutputEvents.invalid, 1);
+      assert.equal(telemetry.typedCheckpointStructuredOutputTrials.valid, 1);
+      assert.equal(telemetry.typedCheckpointStructuredOutputTrials.invalid, 1);
+    } finally {
+      rmSync(trialDir, { recursive: true, force: true });
+    }
+  });
+
   it("does not combine unrelated verifier-only and modified snapshots", () => {
     const trialDir = makeTempTrial();
     try {

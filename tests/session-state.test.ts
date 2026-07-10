@@ -33,6 +33,77 @@ describe("session state summary", () => {
     assert.deepEqual(summary.modifiedFiles, ["src/a.ts"]);
   });
 
+  it("does not derive confirmed paths from write content", () => {
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("write-path", "write", { path: "src/a.ts", content: "documentation mentions src/b.ts" }),
+      toolResult("write-path", "write", "wrote src/a.ts", false),
+    ]));
+    assert.deepEqual(summary.modifiedFiles, ["src/a.ts"]);
+    assert.deepEqual(summary.confirmedModifiedFiles, ["src/a.ts"]);
+  });
+
+  it("detects common destructive shell mutations", () => {
+    for (const command of ["rm src/a.ts", "git rm src/a.ts", "chmod 600 src/a.ts", "truncate -s 0 src/a.ts", "ln -s source.ts src/a.ts"]) {
+      const summary = buildSessionStateSummary(ctx([
+        assistantTool(`mutation-${command}`, "bash", { command }),
+        toolResult(`mutation-${command}`, "bash", "", false),
+      ]));
+      assert.equal(summary.filesModified, true, command);
+      assert.ok(summary.confirmedModifiedFiles?.includes("src/a.ts"), command);
+    }
+  });
+
+  it("recognizes env-wrapped mutation executables", () => {
+    for (const [command, target] of [["env -- rm src/a.ts", "src/a.ts"], ["env MODE=prod mv src/a.ts src/b.ts", "src/b.ts"]] as const) {
+      const summary = buildSessionStateSummary(ctx([
+        assistantTool(`env-mutation-${command}`, "bash", { command }),
+        toolResult(`env-mutation-${command}`, "bash", "", false),
+      ]));
+      assert.equal(summary.filesModified, true, command);
+      assert.ok(summary.confirmedModifiedFiles?.includes(target), command);
+    }
+  });
+
+  it("detects package-manager installation mutations", () => {
+    for (const command of ["npm install", "npm i", "npm ci", "npm clean-install", "npm ic", "pnpm i", "npm uninstall zod", "pnpm add zod", "yarn add zod", "pip install pytest", "pip uninstall pytest", "python3 -m pip install pytest", "bundle install", "composer update"]) {
+      const summary = buildSessionStateSummary(ctx([
+        assistantTool(`install-${command}`, "bash", { command }),
+        toolResult(`install-${command}`, "bash", "", false),
+      ]));
+      assert.equal(summary.filesModified, true, command);
+    }
+  });
+
+  it("attributes multi-source copy and move commands to the destination", () => {
+    for (const command of ["cp a.ts b.ts out/", "mv a.ts b.ts out/", "cp -t out/ a.ts b.ts", "  cp a.ts b.ts out/"]) {
+      const summary = buildSessionStateSummary(ctx([
+        assistantTool(`multi-copy-${command}`, "bash", { command }),
+        toolResult(`multi-copy-${command}`, "bash", "", false),
+      ]));
+      assert.deepEqual(summary.confirmedModifiedFiles, ["out/"], command);
+    }
+  });
+
+  it("detects adjacent and descriptor-prefixed output redirects", () => {
+    for (const [command, target] of [["echo x>src/a.ts", "src/a.ts"], ["cmd 2>errors.log", "errors.log"], ["cmd &>combined.log", "combined.log"]] as const) {
+      const summary = buildSessionStateSummary(ctx([
+        assistantTool(`redirect-${command}`, "bash", { command }),
+        toolResult(`redirect-${command}`, "bash", "", false),
+      ]));
+      assert.equal(summary.filesModified, true, command);
+      assert.ok(summary.modifiedFiles.includes(target), command);
+    }
+  });
+
+  it("preserves possible partial success for multi-target rm", () => {
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("partial-rm", "bash", { command: "  rm existing.txt missing.txt" }),
+      toolResult("partial-rm", "bash", "rm: missing.txt: No such file or directory", true),
+    ]));
+    assert.equal(summary.filesModified, true);
+    assert.deepEqual(summary.modifiedFiles, ["existing.txt", "missing.txt"]);
+  });
+
   it("detects bash redirection file modifications", () => {
     const summary = buildSessionStateSummary(ctx([assistantTool("c1", "bash", { command: "echo x > f.py" })]));
     assert.equal(summary.filesModified, true);
@@ -191,6 +262,22 @@ describe("session state summary", () => {
     assert.ok(summary.modifiedFiles.includes("f.py"));
   });
 
+  it("detects prefixed interpreter mutations", () => {
+    for (const command of [
+      "/usr/bin/python3 -c \"from pathlib import Path; Path('a').write_text('x')\"",
+      ".venv/bin/python -c \"from pathlib import Path; Path('a').write_text('x')\"",
+      "/usr/local/bin/python3 -c \"open('a', 'w').write('x')\"",
+      "/opt/homebrew/bin/node -e \"require('fs').writeFileSync('a', 'x')\"",
+      "sudo python3 -c \"open('a', 'w').write('x')\"",
+    ]) {
+      const summary = buildSessionStateSummary(ctx([
+        assistantTool(`prefixed-code-${command}`, "bash", { command }),
+        toolResult(`prefixed-code-${command}`, "bash", "", false),
+      ]));
+      assert.equal(summary.filesModified, true, command);
+    }
+  });
+
   it("detects file modifications from shell apply_patch helpers", () => {
     const summary = buildSessionStateSummary(ctx([
       assistantTool("c1", "bash", { command: "apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: f.py\n@@\n-x\n+y\n*** End Patch\nPATCH" }),
@@ -208,6 +295,100 @@ describe("session state summary", () => {
     assert.equal(summary.verifierRan, true);
     assert.equal(summary.lastVerifierPassed, true);
     assert.deepEqual(summary.verifierEvidence, ["python3 -m py_compile f.py"]);
+  });
+
+  it("does not treat descriptor-only verifier redirection as a later mutation", () => {
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("write-before-fd", "write", { path: "a.ts", content: "x" }),
+      toolResult("write-before-fd", "write", "wrote a.ts", false),
+      assistantTool("verify-with-fd", "bash", { command: "npm test 2>&1" }),
+      toolResult("verify-with-fd", "bash", "1 failed", true),
+    ]));
+    assert.equal(summary.verifierRan, true);
+    assert.equal(summary.lastVerifierPassed, false);
+    assert.equal(summary.lastVerifierCommand, "npm test 2>&1");
+    assert.equal(summary.lastVerifierHadPrecedingMutation, true);
+  });
+
+  it("recognizes verifier output redirection and leading environment assignments", () => {
+    for (const command of ["npm test >/dev/null 2>&1", "npm test &>test.log", "npm test >&test.log", "CI=1 npm test", "env CI=1 npm test", "/usr/bin/env CI=1 pytest", "env -u NODE_OPTIONS npm test", "env -C /tmp pytest", "env -- npm test"]) {
+      const summary = buildSessionStateSummary(ctx([
+        assistantTool(`write-${command}`, "write", { path: "a.ts", content: "x" }),
+        toolResult(`write-${command}`, "write", "wrote a.ts", false),
+        assistantTool(`verify-${command}`, "bash", { command }),
+        toolResult(`verify-${command}`, "bash", "1 failed", true),
+      ]));
+      assert.equal(summary.verifierRan, true, command);
+      assert.equal(summary.lastVerifierPassed, false, command);
+      assert.equal(summary.lastVerifierCommand, command);
+      assert.equal(summary.lastVerifierHadPrecedingMutation, true, command);
+    }
+    const piped = buildSessionStateSummary(ctx([
+      assistantTool("piped-write", "write", { path: "a.ts", content: "x" }),
+      toolResult("piped-write", "write", "wrote a.ts", false),
+      assistantTool("piped-test", "bash", { command: "npm test |& cat" }),
+      toolResult("piped-test", "bash", "1 failed", true),
+    ]));
+    assert.equal(piped.verifierRan, true);
+    assert.equal(piped.lastVerifierCommand, undefined);
+  });
+
+  it("does not order sibling tool calls that may execute concurrently", () => {
+    const batch = assistantTool("parallel-install", "bash", { command: "npm ci" });
+    batch.content = [
+      { type: "toolCall", id: "parallel-install", name: "bash", arguments: { command: "npm ci" } },
+      { type: "toolCall", id: "parallel-test", name: "bash", arguments: { command: "npm test" } },
+    ];
+    const summary = buildSessionStateSummary(ctx([
+      batch,
+      toolResult("parallel-test", "bash", "1 failed", true),
+      toolResult("parallel-install", "bash", "", false),
+    ]));
+    assert.equal(summary.filesModified, true);
+    assert.equal(summary.verifierRan, false);
+  });
+
+  it("rejects background verifier attribution and env-prefixed stale verification", () => {
+    const background = buildSessionStateSummary(ctx([
+      assistantTool("background-write", "write", { path: "a.ts", content: "x" }),
+      toolResult("background-write", "write", "wrote a.ts", false),
+      assistantTool("background-test", "bash", { command: "npm test & false" }),
+      toolResult("background-test", "bash", "1 failed", true),
+    ]));
+    assert.equal(background.verifierRan, false);
+
+    const stale = buildSessionStateSummary(ctx([
+      assistantTool("env-stale", "bash", { command: "CI=1 npm test && sed -i 's/a/b/' a.ts" }),
+      toolResult("env-stale", "bash", "ok", false),
+    ]));
+    assert.equal(stale.filesModified, true);
+    assert.equal(stale.verifierRan, false);
+  });
+
+  it("does not mistake verifier arguments for destructive mutations", () => {
+    for (const command of ["pytest -k rm", "go test ./cmd/rm", "npm test -- --grep 'x; rm y'", "npm test -- --grep writeFile"]) {
+      const summary = buildSessionStateSummary(ctx([
+        assistantTool(`write-before-${command}`, "write", { path: "a.ts", content: "x" }),
+        toolResult(`write-before-${command}`, "write", "wrote a.ts", false),
+        assistantTool(`verify-${command}`, "bash", { command }),
+        toolResult(`verify-${command}`, "bash", "1 passed", false),
+      ]));
+      assert.equal(summary.verifierRan, true, command);
+      assert.equal(summary.lastVerifierPassed, true, command);
+    }
+  });
+
+  it("ties failure categories to the selected verifier result", () => {
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("signal-write", "write", { path: "a.ts", content: "x" }),
+      toolResult("signal-write", "write", "wrote a.ts", false),
+      assistantTool("signal-test", "bash", { command: "npm test" }),
+      toolResult("signal-test", "bash", "1 failed", true),
+      assistantTool("later-read", "read", { path: "other.txt" }),
+      toolResult("later-read", "read", "timeout", true),
+    ]));
+    assert.ok(summary.lastVerifierFailureSignals?.includes("error-output"));
+    assert.equal(summary.lastVerifierFailureSignals?.includes("timeout"), false);
   });
 
   it("detects failing pytest verifier results", () => {
@@ -305,6 +486,7 @@ describe("session state summary", () => {
     assert.equal(summary.filesModified, true);
     assert.equal(summary.verifierRan, true);
     assert.equal(summary.lastVerifierPassed, true);
+    assert.equal(summary.lastVerifierHadPrecedingMutation, false);
     assert.deepEqual(summary.verifierEvidence, [command]);
   });
 
@@ -317,6 +499,7 @@ describe("session state summary", () => {
     assert.equal(summary.filesModified, true);
     assert.equal(summary.verifierRan, true);
     assert.equal(summary.lastVerifierPassed, true);
+    assert.equal(summary.lastVerifierHadPrecedingMutation, true);
     assert.deepEqual(summary.verifierEvidence, [command]);
   });
 
@@ -354,6 +537,30 @@ describe("session state summary", () => {
     assert.deepEqual(summary.modifiedFiles, ["f.py"]);
     assert.equal(summary.verifierRan, false);
     assert.deepEqual(summary.verifierEvidence, []);
+  });
+
+  it("does not attribute a verifier to a later write in the same compound command", () => {
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("compound-order", "bash", { command: "npm test && echo ok > marker.txt" }),
+      toolResult("compound-order", "bash", "1 failed", true),
+    ]));
+    assert.equal(summary.verifierRan, false);
+    assert.equal(summary.lastVerifierPassed, undefined);
+    assert.equal(summary.lastVerifierHadPrecedingMutation, undefined);
+  });
+
+  it("does not confirm an ambiguous compound mutation before typed verifier attribution", () => {
+    const summary = buildSessionStateSummary(ctx([
+      assistantTool("ambiguous-write", "bash", { command: "cp missing.ts src/a.ts || true" }),
+      toolResult("ambiguous-write", "bash", "cp: missing.ts: No such file or directory\ncreated fallback", false),
+      assistantTool("later-test", "bash", { command: "npm test" }),
+      toolResult("later-test", "bash", "1 failed", true),
+    ]));
+    assert.equal(summary.filesModified, true);
+    assert.deepEqual(summary.confirmedModifiedFiles, []);
+    assert.equal(summary.verifierRan, true);
+    assert.equal(summary.lastVerifierPassed, false);
+    assert.equal(summary.lastVerifierHadPrecedingMutation, false);
   });
 
   it("does not count a general verifier that ran before the final mutation", () => {
@@ -412,5 +619,6 @@ describe("session state summary", () => {
     const summary = buildSessionStateSummary(ctx(messages));
     assert.equal(summary.modifiedFiles.length, 20);
     assert.equal(summary.verifierEvidence.length, 10);
+    assert.equal(summary.lastVerifierEvidence, "python3 -m py_compile file11.py");
   });
 });

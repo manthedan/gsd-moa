@@ -82,6 +82,13 @@ export interface MoaEventSummary {
   };
   innerCalls: InnerCallSummary[];
   combinedUsage?: UsageSummary;
+  typedCheckpoint?: {
+    type: string;
+    status: string;
+    mode?: string;
+    reason?: string;
+    structuredOutputValid?: boolean;
+  };
   doneGate?: {
     armed: boolean;
     fired: boolean;
@@ -118,6 +125,11 @@ export interface MoaAggregate {
   doneGateFired: number;
   doneGatePostBehavior: CountMap;
   doneGateOutcomes: CountMap;
+  typedCheckpointEvents: CountMap;
+  typedCheckpointTrials: CountMap;
+  typedCheckpointSuppressions: CountMap;
+  typedCheckpointStructuredOutputEvents: CountMap;
+  typedCheckpointStructuredOutputTrials: CountMap;
   pricedInnerCalls: number;
   unpricedInnerCalls: number;
 }
@@ -238,6 +250,11 @@ function emptyMoaAggregate(): MoaAggregate {
     doneGateFired: 0,
     doneGatePostBehavior: {},
     doneGateOutcomes: {},
+    typedCheckpointEvents: {},
+    typedCheckpointTrials: {},
+    typedCheckpointSuppressions: {},
+    typedCheckpointStructuredOutputEvents: {},
+    typedCheckpointStructuredOutputTrials: {},
     pricedInnerCalls: 0,
     unpricedInnerCalls: 0,
   };
@@ -577,6 +594,15 @@ function applyMoaEvent(aggregate: MoaAggregate, event: MoaEventSummary): void {
     aggregate.combinedUsageTurns += 1;
     addUsage(aggregate.combinedUsage, event.combinedUsage);
   }
+  if (event.typedCheckpoint) {
+    increment(aggregate.typedCheckpointEvents, `${event.typedCheckpoint.type}:${event.typedCheckpoint.status}`);
+    if (event.typedCheckpoint.status === "suppressed") {
+      increment(aggregate.typedCheckpointSuppressions, `${event.typedCheckpoint.type}:${event.typedCheckpoint.reason ?? "unknown"}`);
+    }
+    if (event.typedCheckpoint.structuredOutputValid !== undefined) {
+      increment(aggregate.typedCheckpointStructuredOutputEvents, event.typedCheckpoint.structuredOutputValid ? "valid" : "invalid");
+    }
+  }
   if (event.doneGate) {
     aggregate.doneGateEvents += 1;
     if (event.doneGate.filesModified) aggregate.doneGateModifiedTurns += 1;
@@ -603,6 +629,7 @@ function moaEventFromDiagnostic(diagnostic: unknown): MoaEventSummary | null {
   const details = asRecord(diag.details) ?? diag;
   const timeAware = asRecord(details.timeAware);
   const doneGate = asRecord(details.doneGate);
+  const typedCheckpoint = asRecord(details.typedCheckpoint);
   const combinedUsage = usageFrom(details.combinedUsage);
 
   return {
@@ -622,6 +649,17 @@ function moaEventFromDiagnostic(diagnostic: unknown): MoaEventSummary | null {
     } : {}),
     innerCalls: summarizeInnerCalls(details.innerCalls),
     ...(combinedUsage ? { combinedUsage } : {}),
+    ...(typedCheckpoint && firstString(typedCheckpoint.type) && firstString(typedCheckpoint.status) ? {
+      typedCheckpoint: {
+        type: firstString(typedCheckpoint.type)!,
+        status: firstString(typedCheckpoint.status)!,
+        ...(firstString(typedCheckpoint.mode) ? { mode: firstString(typedCheckpoint.mode) } : {}),
+        ...(firstString(typedCheckpoint.reason) ? { reason: firstString(typedCheckpoint.reason) } : {}),
+        ...(booleanValue(typedCheckpoint.structuredOutputValid) !== undefined
+          ? { structuredOutputValid: booleanValue(typedCheckpoint.structuredOutputValid) }
+          : {}),
+      },
+    } : {}),
     ...(doneGate ? {
       doneGate: {
         armed: booleanValue(doneGate.armed) ?? false,
@@ -734,6 +772,19 @@ export function parseMoaTelemetry(trialDir: string): MoaAggregate & { eventSumma
       applyMoaEvent(aggregate, summary);
     }
   }
+
+  const trialTypedCheckpoints = new Set(
+    aggregate.eventSummaries.flatMap((summary) => summary.typedCheckpoint
+      ? [`${summary.typedCheckpoint.type}:${summary.typedCheckpoint.status}`]
+      : []),
+  );
+  for (const checkpoint of trialTypedCheckpoints) increment(aggregate.typedCheckpointTrials, checkpoint);
+  const trialStructuredOutputs = new Set(
+    aggregate.eventSummaries.flatMap((summary) => summary.typedCheckpoint?.structuredOutputValid !== undefined
+      ? [summary.typedCheckpoint.structuredOutputValid ? "valid" : "invalid"]
+      : []),
+  );
+  for (const validity of trialStructuredOutputs) increment(aggregate.typedCheckpointStructuredOutputTrials, validity);
 
   const trialDoneGateEvents = aggregate.eventSummaries.flatMap((summary) => summary.doneGate ? [summary.doneGate] : []);
   if (trialDoneGateEvents.length) {
@@ -871,6 +922,11 @@ function mergeMoa(target: MoaAggregate, source: MoaAggregate): void {
   for (const [key, value] of Object.entries(source.innerCallsByRoleModel)) increment(target.innerCallsByRoleModel, key, value);
   for (const [key, value] of Object.entries(source.doneGatePostBehavior)) increment(target.doneGatePostBehavior, key, value);
   for (const [key, value] of Object.entries(source.doneGateOutcomes)) increment(target.doneGateOutcomes, key, value);
+  for (const [key, value] of Object.entries(source.typedCheckpointEvents)) increment(target.typedCheckpointEvents, key, value);
+  for (const [key, value] of Object.entries(source.typedCheckpointTrials)) increment(target.typedCheckpointTrials, key, value);
+  for (const [key, value] of Object.entries(source.typedCheckpointSuppressions)) increment(target.typedCheckpointSuppressions, key, value);
+  for (const [key, value] of Object.entries(source.typedCheckpointStructuredOutputEvents)) increment(target.typedCheckpointStructuredOutputEvents, key, value);
+  for (const [key, value] of Object.entries(source.typedCheckpointStructuredOutputTrials)) increment(target.typedCheckpointStructuredOutputTrials, key, value);
   for (const [role, efforts] of Object.entries(source.effortsByRole)) {
     target.effortsByRole[role] ??= {};
     for (const [effort, value] of Object.entries(efforts)) increment(target.effortsByRole[role], effort, value);
@@ -1056,6 +1112,9 @@ function groupDetails(group: GroupAggregate): string[] {
   if (Object.keys(group.moa.guidanceSkipped).length) parts.push(`skips {${formatCounts(group.moa.guidanceSkipped)}}`);
   if (group.moa.synthesisFailureCount) parts.push(`synthesis failures {${formatCounts(group.moa.synthesisFailures)}}`);
   if (group.moa.timeAwareSuppressions) parts.push(`time-aware suppressions {${formatCounts(group.moa.timeAwareSuppressionPhases)}}`);
+  if (Object.keys(group.moa.typedCheckpointEvents).length) {
+    parts.push(`typed checkpoints {trials: ${formatCounts(group.moa.typedCheckpointTrials)}, events: ${formatCounts(group.moa.typedCheckpointEvents)}, suppressions: ${formatCounts(group.moa.typedCheckpointSuppressions)}, structured output events: ${formatCounts(group.moa.typedCheckpointStructuredOutputEvents)}, structured output trials: ${formatCounts(group.moa.typedCheckpointStructuredOutputTrials)}}`);
+  }
   if (group.moa.doneGateEvents) {
     parts.push(`done gate {trials: ${group.moa.doneGateTrials}, modified trials: ${group.moa.doneGateModifiedTrials}, fire trials: ${group.moa.doneGateFireTrials}, verifier-run trials: ${group.moa.doneGateVerifierRunTrials}, verifier-pass trials: ${group.moa.doneGateVerifierPassTrials}, verifier-failure trials: ${group.moa.doneGateVerifierFailureTrials}, armed events: ${group.moa.doneGateArmed}, fired events: ${group.moa.doneGateFired}, outcomes: ${formatCounts(group.moa.doneGateOutcomes)}, post snapshots: ${formatCounts(group.moa.doneGatePostBehavior)}}`);
   }
@@ -1135,6 +1194,15 @@ export function renderMarkdown(report: AggregateReport): string {
   lines.push("## Totals by model alias");
   lines.push("");
   lines.push(...tableForGroups(report.totalsByAlias));
+  const totalDetails = report.totalsByAlias.flatMap((group) => {
+    const parts = groupDetails(group);
+    return parts.length ? [`- ${group.alias} [${group.label}]: ${parts.join("; ")}`] : [];
+  });
+  if (totalDetails.length) {
+    lines.push("");
+    lines.push("Details:");
+    lines.push(...totalDetails);
+  }
   lines.push("");
   return lines.join("\n");
 }

@@ -6,7 +6,7 @@
 
 - [x] **Phase 9 / M1: Mechanical done-gate evaluation** — 13/23 vs same-commit single control 11/23; mechanism validated, directional lift, retained for future arms.
 - [x] **Phase 10 / M2: Same-harness model-diversity oracle** — GLM-5.2 single 7/23 with no complementary wins; broad model-mix work stopped.
-- [ ] **Phase 11 / M3: GSD-typed checkpoints** — current phase; explicit plan/implement/verify/review checkpoint contract and prototype arm in the harness.
+- [ ] **Phase 11 / M3: GSD-typed checkpoints** — design contract and local prototype implemented; live typed-alias smoke and same-commit controlled arm pending.
 - [ ] **Phase 12 / M4: Scoped closed-loop review** — parked after M2; reconsider only with semantic-risk reviewer evidence.
 
 ## Historical v1.1 overview

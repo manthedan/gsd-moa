@@ -35,7 +35,9 @@ export function buildAdvisorContext(config: GsdMoaConfig, context: Context, poli
     systemPrompt: [
       `You are the configured reference model acting as a private advisor for a Pi coding agent provider.`,
       `Prompt version: ${config.prompts.advisorVersion}.`,
-      `Give concise critique, risks, missing tests, and implementation advice.`,
+      policy.reason.startsWith("M3 verify_failure")
+        ? `A verifier failed after the latest successful mutation. Return exactly four non-empty lines and no other prose, in this order: "Diagnosis: ...", "Next command: ...", "Expected signal: ...", "Stop condition: ...". Give exactly one discriminating command, label uncertainty in the diagnosis, and do not merely repeat the failed command.`
+        : `Give concise critique, risks, missing tests, and implementation advice.`,
       `Do not request or call tools. Do not produce patches.`,
       benchmarkIntegrityReferenceLine(config),
       formatReferenceTimeLine(timeState),

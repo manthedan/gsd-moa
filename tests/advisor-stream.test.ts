@@ -528,6 +528,176 @@ describe("advisor orchestration", () => {
     }
   });
 
+  it("injects the M3 strategy contract without a reference call", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.aliases["typed-test"] = { mode: "auto", typedCheckpoints: true, checkpointScopes: { initial: false, drift: false, failure: true } };
+    try {
+      const quotedStrategy = "[GSD typed strategy checkpoint from provider] Before modifying files: identify the concrete success condition and the first available verifier or executable check. Then implement with tools, run that check after the final mutation, and treat any later mutation as invalidating earlier verification.";
+      const context: Context = { messages: [{ role: "user", content: `fix the task; quoted documentation: ${quotedStrategy}`, timestamp: 101 }] };
+      const upstream: UpstreamClient = {
+        async complete() { throw new Error("unexpected reference call"); },
+        stream(seenModel, seenContext) {
+          const serialized = JSON.stringify(seenContext.messages);
+          assert.equal(serialized.match(/GSD typed strategy checkpoint/g)?.length, 2);
+          return streamText(seenModel, "final");
+        },
+      };
+      const events = await collect(streamGsdMoa(model("typed-test"), context, { sessionId: "typed-strategy" }, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.typedCheckpoint.type, "strategy");
+      assert.equal(details.typedCheckpoint.mode, "deterministic-note");
+      assert.equal(details.innerCalls.filter((call: any) => call.role === "reference").length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not consume the strategy cap when primary stream setup fails", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.aliases["typed-strategy-retry"] = { mode: "auto", typedCheckpoints: true };
+    const context: Context = { messages: [{ role: "user", content: "retry strategy delivery", timestamp: 131 }] };
+    try {
+      const failing: UpstreamClient = {
+        async complete() { throw new Error("unexpected reference call"); },
+        stream() { throw new Error("route setup failed"); },
+      };
+      const failedEvents = await collect(streamGsdMoa(model("typed-strategy-retry"), context, { sessionId: "typed-strategy-retry-session" }, { config: cfg, upstream: failing }));
+      assert.equal(failedEvents.at(-1)?.type, "error");
+      const succeeding: UpstreamClient = {
+        async complete() { throw new Error("unexpected reference call"); },
+        stream(seenModel, seenContext) {
+          assert.match(JSON.stringify(seenContext.messages), /GSD typed strategy checkpoint/);
+          return streamText(seenModel, "final");
+        },
+      };
+      const events = await collect(streamGsdMoa(model("typed-strategy-retry"), context, { sessionId: "typed-strategy-retry-session" }, { config: cfg, upstream: succeeding }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.typedCheckpoint.status, "fired");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reserves the strategy cap across overlapping streams", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.aliases["typed-strategy-overlap"] = { mode: "auto", typedCheckpoints: true };
+    const context: Context = { messages: [{ role: "user", content: "overlapping strategy", timestamp: 141 }] };
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    try {
+      const firstUpstream: UpstreamClient = {
+        async complete() { throw new Error("unexpected reference call"); },
+        stream(seenModel) {
+          const delayed = createAssistantMessageEventStream();
+          void firstGate.then(() => {
+            const msg = message(seenModel, "first");
+            delayed.push({ type: "start", partial: msg });
+            delayed.push({ type: "text_start", contentIndex: 0, partial: msg });
+            delayed.push({ type: "text_delta", contentIndex: 0, delta: "first", partial: msg });
+            delayed.push({ type: "text_end", contentIndex: 0, content: "first", partial: msg });
+            delayed.push({ type: "done", reason: "stop", message: msg });
+            delayed.end();
+          });
+          return delayed;
+        },
+      };
+      const first = collect(streamGsdMoa(model("typed-strategy-overlap"), context, { sessionId: "typed-strategy-overlap-session" }, { config: cfg, upstream: firstUpstream }));
+      await new Promise((resolve) => setImmediate(resolve));
+      const secondUpstream: UpstreamClient = {
+        async complete() { throw new Error("unexpected reference call"); },
+        stream(seenModel, seenContext) {
+          assert.doesNotMatch(JSON.stringify(seenContext.messages), /GSD typed strategy checkpoint/);
+          return streamText(seenModel, "second");
+        },
+      };
+      const secondEvents = await collect(streamGsdMoa(model("typed-strategy-overlap"), context, { sessionId: "typed-strategy-overlap-session" }, { config: cfg, upstream: secondUpstream }));
+      const secondDone = secondEvents.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      const secondDetails = secondDone.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(secondDetails.typedCheckpoint.status, "suppressed");
+      assert.match(secondDetails.typedCheckpoint.reason, /in flight/);
+      releaseFirst();
+      await first;
+    } finally {
+      releaseFirst();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves the M3 strategy contract when ordinary initial advice also runs", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    cfg.aliases["typed-advisor-test"] = { mode: "advisor", typedCheckpoints: true };
+    try {
+      const context: Context = { messages: [{ role: "user", content: "plan and fix", timestamp: 151 }] };
+      const upstream: UpstreamClient = {
+        async complete(seenModel) { return message(seenModel, "ordinary advice"); },
+        stream(seenModel, seenContext) {
+          const serialized = JSON.stringify(seenContext.messages);
+          assert.match(serialized, /GSD typed strategy checkpoint/);
+          assert.match(serialized, /ordinary advice/);
+          return streamText(seenModel, "final");
+        },
+      };
+      const events = await collect(streamGsdMoa(model("typed-advisor-test"), context, { sessionId: "typed-advisor" }, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(details.typedCheckpoint.type, "strategy");
+      assert.equal(details.guidanceInjected, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs one M3 advisor after a failed verifier", async () => {
+    const { cfg, dir } = tempConfig();
+    cfg.cache.enabled = false;
+    cfg.aliases["typed-verify-test"] = { mode: "auto", typedCheckpoints: true, checkpointScopes: { initial: false, drift: false, failure: true } };
+    try {
+      const context: Context = {
+        messages: [
+          { role: "user", content: "fix the task", timestamp: 201 },
+          { ...message(model("typed-verify-test"), ""), content: [{ type: "toolCall", id: "w1", name: "bash", arguments: { command: "echo x > src/a.ts" } }], stopReason: "toolUse" },
+          { role: "toolResult", toolCallId: "w1", toolName: "bash", content: [{ type: "text", text: "created src/a.ts" }], isError: false, timestamp: 202 } as any,
+          { ...message(model("typed-verify-test"), ""), content: [{ type: "toolCall", id: "v1", name: "bash", arguments: { command: "PRIVATE_KEY_B64=base64-secret AWS_ACCESS_KEY_ID=AKIAFAKE123 npm test -- --token hunter2 --password=secret-value --db-password=db-secret-value '--registry-token=quoted secret' \"--auth-token\" \"separate quoted secret\"" } }], stopReason: "toolUse" },
+          { role: "toolResult", toolCallId: "v1", toolName: "bash", content: [{ type: "text", text: "ERROR: file or directory not found: hunter2" }], isError: true, timestamp: 203 } as any,
+          { ...message(model("typed-verify-test"), ""), content: [{ type: "toolCall", id: "r1", name: "read", arguments: { path: "other.txt" } }], stopReason: "toolUse" },
+          { role: "toolResult", toolCallId: "r1", toolName: "read", content: [{ type: "text", text: "timeout" }], isError: true, timestamp: 204 } as any,
+        ],
+        tools: [{ name: "Bash", description: "run shell", parameters: { type: "object" } as any }],
+      };
+      let referenceCalls = 0;
+      const upstream: UpstreamClient = {
+        async complete(seenModel, seenContext) {
+          referenceCalls += 1;
+          assert.equal(seenContext.tools, undefined);
+          assert.match(String(seenContext.systemPrompt), /exactly four non-empty lines/);
+          const referenceMessages = JSON.stringify(seenContext.messages);
+          assert.match(referenceMessages, /Failed verifier command class: npm test/);
+          assert.doesNotMatch(referenceMessages, /base64-secret|AKIAFAKE123|hunter2|secret-value|db-secret-value|quoted secret|separate quoted secret|timeout/);
+          assert.match(referenceMessages, /error-output/);
+          assert.match(referenceMessages, /src\/a.ts/);
+          return message(seenModel, "Diagnosis: stale output\nNext command: npm test -- --runInBand\nExpected signal: focused failing assertion\nStop condition: the focused test passes");
+        },
+        stream(seenModel, seenContext) {
+          assert.equal(seenContext.tools?.length, 1);
+          assert.match(JSON.stringify(seenContext.messages), /stale output/);
+          return streamText(seenModel, "final");
+        },
+      };
+      const events = await collect(streamGsdMoa(model("typed-verify-test"), context, { sessionId: "typed-verify" }, { config: cfg, upstream }));
+      const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+      const details = done.message.diagnostics?.find((d) => d.type === "gsd-moa.details")?.details as any;
+      assert.equal(referenceCalls, 1);
+      assert.equal(details.typedCheckpoint.type, "verify_failure");
+      assert.equal(details.typedCheckpoint.structuredOutputValid, true);
+      assert.equal(details.guidanceInjected, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("auto mode chooses advisor for high-leverage review prompts", async () => {
     const { cfg, dir } = tempConfig();
     try {

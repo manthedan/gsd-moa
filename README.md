@@ -104,6 +104,7 @@ Additional alias families are available for local subscription/proxy setups:
 | `gpt55-*-full` portfolio aliases | Force specific full-MoA reference portfolios, including Gemini, Claude, or Hermes-style ablation variants. |
 | `glm52-zai-gpt55-cliproxycodex-*` | Experimental GLM-5.2 acting model with GPT-5.5/Codex references. |
 | `gpt55-cliproxycodex-glm52-hermes-full` | Hermes-style ablation: GLM-5.2 + GPT-5.5 references once on the initial turn, no synthesis, raw bundle to the actor. |
+| `gpt55-cliproxycodex-glm52-typed-donegate` | M3 prototype: deterministic strategy contract, one-shot GLM diagnosis after a failed verifier, and the mechanical done gate. |
 
 See `src/registry.ts` for the exact registered alias IDs, preset transforms, and display names. Built-in model cards and default alias config are generated from that registry.
 

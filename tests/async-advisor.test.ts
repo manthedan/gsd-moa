@@ -177,7 +177,7 @@ describe("async advisor", () => {
     }
     const compacted = driftContext(999);
     Object.assign(compacted.messages[0]!, {
-      content: "The conversation history before this point was compacted into the following summary:\n\n<summary>summary</summary>",
+      content: "You are resuming a prior conversation. Its earlier turns were archived to reclaim context and are reproduced under HISTORY below, oldest to newest.\n\nHISTORY\nsummary",
     });
     const resumed = await collect(streamGsdMoa(model(), compacted, { sessionId: "retained" }, { config, upstream }));
     assert.equal(diagnostics(resumed).asyncAdvisor.status, "injected");
