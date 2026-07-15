@@ -322,7 +322,10 @@ function genRepair(seed: number): LangbenchItem {
 
 function genKnapsack(seed: number, level: number): LangbenchItem {
   const rng = mulberry32(seed);
-  const n = level >= 3 ? 16 : level === 2 ? 14 : 10;
+  // Calibrated 2026-07-15: GLM-5.2 never finds the optimum at n=14/16 (floor)
+  // and open-budget calls run 10+ min. Smaller instances + a budget cap keep
+  // the family in the discriminative band.
+  const n = level >= 3 ? 13 : level === 2 ? 12 : 10;
   const weights = Array.from({ length: n }, () => int(rng, 17, 89));
   const values = Array.from({ length: n }, () => int(rng, 15, 99));
   const capacity = Math.floor(weights.reduce((a, b) => a + b, 0) * 0.45);

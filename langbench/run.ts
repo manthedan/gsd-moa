@@ -91,7 +91,7 @@ function verifyPython(candidate: string, tests: string, timeoutMs: number): { co
   }
 }
 
-const RETRYABLE = /HTTP (429|500|502|503|504)/;
+const RETRYABLE = /HTTP (429|500|502|503|504)|fetch failed/;
 
 async function callModelWithRetry(
   attempts: number,
