@@ -132,6 +132,9 @@ async function callModel(
       signal: controller.signal,
       headers: {
         "content-type": "application/json",
+        // Z.ai sheds Node's default UA with misleading 429/1305 "overloaded"
+        // errors (A/B-verified 2026-07-15); any explicit client UA is admitted.
+        "user-agent": "gsd-moa-langbench/0.1",
         ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
       },
       body: JSON.stringify({
@@ -186,6 +189,9 @@ async function main(): Promise<void> {
   const allowExec = process.argv.includes("--allow-exec");
   const yokeSchedule = arg("--yoke-schedule");
   const retries = Number(arg("--retries", "5"));
+  // Minimum spacing between call STARTS across all workers. Subscription
+  // endpoints (Z.ai coding plan) throttle on burst concurrency, not volume.
+  const delayMs = Number(arg("--delay-ms", "0"));
 
   const items: LangbenchItem[] = readFileSync(itemsPath, "utf8")
     .split("\n")
@@ -282,9 +288,19 @@ async function main(): Promise<void> {
   console.log(`items=${items.length} langs=${langs.join("/")} policies=${policies.join("/")} k=${k} → ${work.length} calls pending (${done.size} already recorded)`);
 
   let cursor = 0;
+  let nextStartAt = 0;
+  const paceThenTake = async (): Promise<(() => Promise<void>) | undefined> => {
+    if (cursor >= work.length) return undefined;
+    const task = work[cursor++]!;
+    if (delayMs > 0) {
+      const wait = Math.max(0, nextStartAt - Date.now());
+      nextStartAt = Date.now() + wait + delayMs;
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+    return task;
+  };
   const workers = Array.from({ length: Math.max(1, concurrency) }, async () => {
-    while (cursor < work.length) {
-      const task = work[cursor++]!;
+    for (let task = await paceThenTake(); task; task = await paceThenTake()) {
       await task();
     }
   });
