@@ -1,6 +1,18 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench experiments
 
-Last updated: 2026-07-14 (PROJECT PIVOT: MoA abandoned; bilingual EN/ZH reasoning-language experiment is the new track; phase-0 infra landed).
+Last updated: 2026-07-15 (PHASE-1 SWEEP IN FLIGHT — see below; MoA abandoned 07-14).
+
+## PHASE-1 LANGBENCH SWEEP: RUNNING since 2026-07-15 (laptop background, ~2 days)
+
+**GLM-5.2 (Z.ai) factorial: 5 policies (off/en/zh/free/mixed) × 2 input langs × k=2 over pinned item sets (seed 20260715, commit `84a60ae`):** `langbench/data/phase1-cap1536.jsonl` (mod-arith 60 + seq-track 60 + repair 15, max_tokens 1536) then `phase1-cap3072.jsonl` (substr-count 60 + chain-arith 15, max_tokens 3072). 4,200 calls, single worker, `--delay-ms 4000` (~1,900 calls/day). Results append to `.proof/runs/langbench-phase1/results-glm52-cap*.jsonl` — RESUMABLE: rerun the same `langbench/run.ts` command to continue after any interruption; analyze with `langbench/analyze.ts --results <file> --baseline off`.
+
+**Calibration read (2026-07-15, k=1, policy off, EN):** GLM-5.2 is at ceiling on ALL mechanical families at open budget regardless of length scaling (level 3 = 97.5%); **the max_tokens cap is the difficulty dial** (compute-matched, per the expert design; empty-answer-on-budget-exhaustion counts as wrong). Calibrated bands: mod-arith 0.38 & seq-track 0.38 @1536; substr-count 0.38 & chain-arith 0.75 @3072; repair 0.88 @1536 (anchor). **knapsack DROPPED** — 0.00 at every size/budget tried (12–16 items; GLM never finds true optima) + 10-min-plus wall at open budget; future variant: graded score = achieved/optimal.
+
+**Z.ai API gotchas (hard-won, memory `experiment-infrastructure`):** 429 code-1305 "overloaded" = client-fingerprint shed of Node's default user-agent (A/B-proven; runner now sends `gsd-moa-langbench/0.1`); keep concurrency 1 + spacing (user: "their api doesn't like concurrency"); `fetch failed` on long calls is retryable (patched); seeds must be int32.
+
+**Early substantive finding:** zh-policy adherence is task-dependent (GLM thinking stayed English on chain/seq, 63–90% CJK on mod/repair) → arms are intention-to-treat; per-row cjkFrac is a first-class outcome.
+
+**Next after sweep:** analyze paired (per input-lang, baseline off); decide TB agentic arms (gate: nonzero langbench effect OR adherence-dynamics interest; recipe: GLM single alias, ~10 tasks, k≥5, baseline + 2 winners + yoked, endpoints = adherence/switch dynamics + directional accuracy); ZH task-instruction variants pending; q27 arm needs a 172.17.0.1:18081→18080 bridge on yukon first.
 
 ## PIVOT 2026-07-14: MoA ABANDONED → BILINGUAL REASONING EXPERIMENT
 
