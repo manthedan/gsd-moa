@@ -54,6 +54,8 @@ interface TraceFile {
   status: "running" | "done" | "error";
   model: Pick<Model<Api>, "provider" | "id" | "api">;
   policy: PolicyDecision;
+  langPolicy?: string;
+  langYokeSchedule?: string;
   action: MoaAction;
   config: unknown;
   inputContext?: Context;
@@ -96,6 +98,10 @@ class JsonTraceRecorder implements TraceRecorder {
       status: "running",
       model: { provider: model.provider, id: model.id, api: model.api },
       policy,
+      ...(config.langPolicy.policy !== "off" ? {
+        langPolicy: config.langPolicy.policy,
+        ...(config.langPolicy.yokeSchedule !== undefined ? { langYokeSchedule: config.langPolicy.yokeSchedule } : {}),
+      } : {}),
       action: compactAction(action),
       config: redactedConfig(config),
       ...(config.trace.includeContexts ? { inputContext: traceClone(inputContext) } : {}),

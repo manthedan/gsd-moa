@@ -431,6 +431,10 @@ export function withBenchmarkIntegrityNote(context: Context): Context {
   return appendPublicExecutionNote(context, BENCHMARK_INTEGRITY_PUBLIC_NOTE, { dedupeExact: true });
 }
 
+export function withLanguagePolicyNote(context: Context, note: string): Context {
+  return appendPublicExecutionNote(context, note, { dedupeExact: true });
+}
+
 export function benchmarkIntegrityReferenceLine(config: Pick<GsdMoaConfig, "benchmarkIntegrity">): string | undefined {
   return config.benchmarkIntegrity ? BENCHMARK_INTEGRITY_REFERENCE_NOTE : undefined;
 }

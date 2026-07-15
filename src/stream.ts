@@ -11,7 +11,8 @@ import {
 import { runAdvisor } from "./advisor.js";
 import { asyncAdvisorUnattributedUsage, maybeUseAsyncAdvisor, type AsyncAdvisorDecision } from "./async-advisor.js";
 import { loadConfig } from "./config.js";
-import { assistantText, buildToolObservationSummary, countAdvisorInjections, hasStableConversationIdentity, isToolLoopContinuation, latestMessageHasMoaMarker, latestUserText, redactSensitiveText, stripMarkersFromContext, withAdvisorGuidance, withBenchmarkIntegrityNote, withFullMoaGuidance, withTimeAwarenessNote, withTypedStrategyNote } from "./context.js";
+import { assistantText, buildToolObservationSummary, countAdvisorInjections, hasStableConversationIdentity, isToolLoopContinuation, latestMessageHasMoaMarker, latestUserText, redactSensitiveText, stripMarkersFromContext, withAdvisorGuidance, withBenchmarkIntegrityNote, withFullMoaGuidance, withLanguagePolicyNote, withTimeAwarenessNote, withTypedStrategyNote } from "./context.js";
+import { buildLanguagePolicyNote } from "./lang-policy.js";
 import { FullMoaError, runFullMoa } from "./moa.js";
 import { chooseAction, chooseMode } from "./policy.js";
 import { ReferenceCallError } from "./reference-call.js";
@@ -265,6 +266,8 @@ export function streamGsdMoa(
 
       if (timeState) finalContext = withTimeAwarenessNote(finalContext, timeState);
       if (config.benchmarkIntegrity) finalContext = withBenchmarkIntegrityNote(finalContext);
+      const langPolicyNote = buildLanguagePolicyNote(config);
+      if (langPolicyNote) finalContext = withLanguagePolicyNote(finalContext, langPolicyNote);
 
       const doneGateKey = config.doneGate.enabled ? doneGateLedgerKey(model.id, context, options?.sessionId) : undefined;
       const ambiguousTypedIdentity = typedEnabled && !hasStableConversationIdentity(context, options?.sessionId);
@@ -481,6 +484,12 @@ function moaDiagnostic(
     ...(fullMoa?.synthesisError ? { synthesisFailedReason: fullMoa.synthesisError } : {}),
     ...(fullMoa?.failures.length ? { referenceFailures: fullMoa.failures } : {}),
     ...(config.benchmarkIntegrity ? { benchmarkIntegrity: true } : {}),
+    ...(config.langPolicy.policy !== "off" ? {
+      langPolicy: {
+        policy: config.langPolicy.policy,
+        ...(config.langPolicy.yokeSchedule !== undefined ? { yokeSchedule: config.langPolicy.yokeSchedule } : {}),
+      },
+    } : {}),
     ...(timeState ? {
       timeAware: {
         remainingMs: timeState.remainingMs,

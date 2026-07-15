@@ -1,6 +1,17 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench experiments
 
-Last updated: 2026-07-10 (M3 typed-checkpoint prototype committed, synced to Yukon, rebuilt-bundle smoke passed; controlled arm next).
+Last updated: 2026-07-14 (PROJECT PIVOT: MoA abandoned; bilingual EN/ZH reasoning-language experiment is the new track; phase-0 infra landed).
+
+## PIVOT 2026-07-14: MoA ABANDONED → BILINGUAL REASONING EXPERIMENT
+
+User dropped the MoA thesis (M3 arm will not run). The TB infra is retained as the platform for an EN/ZH reasoning-language study (expert proposal in the 2026-07-14 session; phased: behavioral factorial → counterfactual switch-branching → conditional mech-interp). **Phase-0 infra landed this date (all local, GSD bypassed at user request):**
+
+- **Provider lang-policy injection** (Codex gpt-5.6-sol implemented from Claude spec, reviewed): `GSD_MOA_LANG_POLICY={off,en,zh,free,mixed,yoked}` + `GSD_MOA_LANG_YOKE_SCHEDULE` inject a reasoning-language note into the PRIMARY context only (dedupe-exact, cache-friendly; advisor/reference contexts stay policy-free). Diagnostics + trace header carry `langPolicy`. New alias `qwen36-q27-single` → local q27/Quasar server (Qwen3.6-27B-MTP; default `http://172.17.0.1:18081/v1`, env `GSD_MOA_Q27_BASE_URL`/`GSD_MOA_Q27_MODEL`/`Q27_API_KEY`). 236/236 tests both runtimes.
+- **langbench/** — containerless verifier-backed task family for statistical power: `generate.ts` (chain-arith, seq-track, mod-arith, repair; parallel EN/ZH renderings, seeded, `--hard` tier; chain-arith independently re-verified over 50 items), `run.ts` (OpenAI-compat sweep item×lang×policy×k, resumable, retries API-error rows, python verify behind `--allow-exec`, shares the provider's exact policy-note texts via `src/lang-policy.ts`), `analyze.ts` (paired per-item bootstrap CIs vs baseline policy), `lang-stats.ts` (CJK/Latin runs + switch counts, code-stripped).
+- **scripts/analyze-language-switches.ts** — per-trace-dir CJK fraction / switch positions for TB arms (needs `GSD_MOA_TRACE=1` + `GSD_MOA_TRACE_INCLUDE_OUTPUTS=1`).
+- **Live smokes passed:** GLM-5.2 zai chat sweep 8/8 verified (easy tier is at ceiling → use `--hard` for GLM arms); provider smoke `glm52-zai-single` + `GSD_MOA_LANG_POLICY=zh` answered an EN prompt in Chinese, note injected exactly once, trace `langPolicy: zh`, analyzer read-back OK. **Early finding:** zh-policy adherence is task-dependent (GLM thinking stayed English on chain-arith/seq-track, 63–90% CJK on mod-arith/repair) — adherence (cjkFrac) is a first-class measured outcome, treat arms as intention-to-treat.
+- **q27 note:** server listens 127.0.0.1:18080 on yukon; TB containers need a bridge forward (172.17.0.1:18081→18080) or a 0.0.0.0 listener before any `qwen36-q27-single` arm. q27 supports temperature/top_p/seed; NO logit_bias yet (script-mask sampling = future q27 extension for constrained-language decoding).
+- **Next:** calibrate `--hard` difficulty for GLM-5.2 (target 30–70% accuracy band), generate the phase-1 item set (300+ per family), run the GLM-5.2 factorial (policies × input-lang, k≥4), and pick the TB task slice for the agentic cell (ZH task-instruction translations pending).
 
 ## M3 TYPED CHECKPOINTS: IMPLEMENTED + LIVE SMOKE PASSED 2026-07-10
 

@@ -108,6 +108,14 @@ export interface DoneGateConfig {
   minRemainingMs: number;
 }
 
+export type LangPolicyId = "off" | "en" | "zh" | "free" | "mixed" | "yoked";
+
+export interface LangPolicyConfig {
+  policy: LangPolicyId;
+  /** Free-text schedule description embedded into the yoked note. */
+  yokeSchedule?: string;
+}
+
 export interface TimeState {
   remainingMs: number;
   elapsedMs?: number;
@@ -163,6 +171,7 @@ export interface GsdMoaConfig {
   timeAware: TimeAwareConfig;
   asyncAdvisor: AsyncAdvisorConfig;
   doneGate: DoneGateConfig;
+  langPolicy: LangPolicyConfig;
   referenceTimeoutMs: number;
   referenceMaxTokens?: number;
 }
@@ -322,6 +331,7 @@ export interface MoaRunDetails {
     suppressed?: string;
   };
   benchmarkIntegrity?: boolean;
+  langPolicy?: LangPolicyConfig;
   unattributedAsyncUsage?: Usage;
   asyncAdvisor?: {
     status: "fired" | "pending" | "injected" | "failed";

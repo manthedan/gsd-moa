@@ -18,6 +18,8 @@ const DEFAULT_CODEX_MODEL = "gpt-5.5";
 const DEFAULT_GEMINI_FLASH_MODEL = "gemini-3-flash";
 const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6";
 const DEFAULT_CLAUDE_OPUS_MODEL = "claude-opus-4-8";
+const DEFAULT_Q27_BASE_URL = "http://172.17.0.1:18081/v1";
+const DEFAULT_Q27_MODEL = "qwen36-27b-mtp";
 
 const CLIPROXY_ROUTE_PRESET: Partial<UpstreamRoute> = {
   api: "openai-completions",
@@ -27,6 +29,24 @@ const CLIPROXY_ROUTE_PRESET: Partial<UpstreamRoute> = {
     supportsDeveloperRole: false,
     maxTokensField: "max_tokens",
   },
+};
+
+const Q27_ROUTE_PRESET: Partial<UpstreamRoute> = {
+  api: "openai-completions",
+  baseUrl: DEFAULT_Q27_BASE_URL,
+  apiKey: "$Q27_API_KEY",
+  compat: {
+    supportsDeveloperRole: false,
+    maxTokensField: "max_tokens",
+  },
+};
+
+const Q27_METADATA: Partial<UpstreamRoute> = {
+  reasoning: true,
+  input: ["text"],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 16_384,
+  maxTokens: 4_096,
 };
 
 const CODEX_METADATA: Partial<UpstreamRoute> = {
@@ -215,6 +235,23 @@ export function applyGlmZaiSinglePreset(config: GsdMoaConfig): GsdMoaConfig {
   return cfg;
 }
 
+export function applyQ27SinglePreset(config: GsdMoaConfig): GsdMoaConfig {
+  const cfg = structuredClone(config);
+  cfg.routePresets.q27 = {
+    ...Q27_ROUTE_PRESET,
+    ...(cfg.routePresets.q27 ?? {}),
+    ...(process.env.GSD_MOA_Q27_BASE_URL ? { baseUrl: process.env.GSD_MOA_Q27_BASE_URL } : {}),
+  };
+  cfg.primary = mergeUpstreamRoute(
+    mergeUpstreamRoute(
+      { provider: "q27", model: process.env.GSD_MOA_Q27_MODEL || DEFAULT_Q27_MODEL },
+      cfg.routePresets.q27,
+    ),
+    Q27_METADATA,
+  );
+  return cfg;
+}
+
 export function applyGlmDriverCodexReferencePreset(config: GsdMoaConfig, options: { synthesis: boolean }): GsdMoaConfig {
   const cfg = applyCliproxyCodexPreset(config);
   cfg.primary = glmPrimaryRoute(cfg);
@@ -397,6 +434,7 @@ export const ALIAS_PRESETS = [
   { id: "gpt55-cliproxycodex-glm52-gemini35flash-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 + Gemini Flash (Full MoA)", mode: "full_moa", apply: CLIPROXY_CODEX_THEN_GEMINI },
   { id: "gpt55-cliproxycodex-glm52-claudeopus48-full", name: "GSD MoA: GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 + Claude Opus 4.8 (Full MoA)", mode: "full_moa", apply: CLIPROXY_CODEX_THEN_CLAUDE_OPUS },
   { id: "glm52-zai-single", name: "GSD MoA: GLM-5.2 via Z.ai (Single)", mode: "single", apply: applyGlmZaiSinglePreset },
+  { id: "qwen36-q27-single", name: "GSD MoA: Qwen3.6-27B via q27 (Single)", mode: "single", apply: applyQ27SinglePreset },
   { id: "glm52-zai-gpt55-cliproxycodex-full", name: "GSD MoA: GLM-5.2 driver + GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 refs (Full MoA)", mode: "full_moa", apply: (config: GsdMoaConfig) => applyGlmDriverCodexReferencePreset(config, { synthesis: true }) },
   { id: "glm52-zai-gpt55-cliproxycodex-nosynth-full", name: "GSD MoA: GLM-5.2 driver + GPT-5.5 via CLIProxyAPI Codex + GLM-5.2 refs (No Synth)", mode: "full_moa", apply: (config: GsdMoaConfig) => applyGlmDriverCodexReferencePreset(config, { synthesis: false }) },
 ] as const satisfies readonly AliasPresetEntry[];

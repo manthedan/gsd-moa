@@ -2,7 +2,7 @@ import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { getRuntime } from "./pi-compat.js";
 import { buildDefaultAliasMap } from "./registry.js";
-import type { AliasConfig, AliasMode, CheckpointScopesConfig, DefaultReasoningEffort, FullMoaConfig, FullMoaProposerConfig, FullMoaSynthesisConfig, GsdMoaConfig, ModelRef, ReasoningEffort, UpstreamRoute } from "./types.js";
+import type { AliasConfig, AliasMode, CheckpointScopesConfig, DefaultReasoningEffort, FullMoaConfig, FullMoaProposerConfig, FullMoaSynthesisConfig, GsdMoaConfig, LangPolicyId, ModelRef, ReasoningEffort, UpstreamRoute } from "./types.js";
 import { PROVIDER_ID } from "./types.js";
 
 export const DEFAULT_CONFIG_PATH = ".pi/gsd-moa.json";
@@ -73,6 +73,15 @@ export function buildDefaultRoutePresets(): GsdMoaConfig["routePresets"] {
         supportsDeveloperRole: false,
         supportsReasoningParams: true,
         supportsReasoningEffort: true,
+        maxTokensField: "max_tokens",
+      },
+    },
+    q27: {
+      api: "openai-completions",
+      baseUrl: "http://172.17.0.1:18081/v1",
+      apiKey: "$Q27_API_KEY",
+      compat: {
+        supportsDeveloperRole: false,
         maxTokensField: "max_tokens",
       },
     },
@@ -157,6 +166,9 @@ export const DEFAULT_CONFIG: GsdMoaConfig = {
     enabled: false,
     maxPerTask: 1,
     minRemainingMs: 90_000,
+  },
+  langPolicy: {
+    policy: "off",
   },
   referenceTimeoutMs: 120000,
   referenceMaxTokens: undefined,
@@ -322,6 +334,7 @@ function parseConfigFile(fullPath: string, displayPath: string): GsdMoaConfig {
     timeAware: isRecord(parsed.timeAware) ? { ...DEFAULT_CONFIG.timeAware, ...parsed.timeAware } as GsdMoaConfig["timeAware"] : structuredClone(DEFAULT_CONFIG.timeAware),
     asyncAdvisor: isRecord(parsed.asyncAdvisor) ? { ...DEFAULT_CONFIG.asyncAdvisor, ...parsed.asyncAdvisor } as GsdMoaConfig["asyncAdvisor"] : structuredClone(DEFAULT_CONFIG.asyncAdvisor),
     doneGate: isRecord(parsed.doneGate) ? { ...DEFAULT_CONFIG.doneGate, ...parsed.doneGate } as GsdMoaConfig["doneGate"] : structuredClone(DEFAULT_CONFIG.doneGate),
+    langPolicy: isRecord(parsed.langPolicy) ? { ...DEFAULT_CONFIG.langPolicy, ...parsed.langPolicy } as GsdMoaConfig["langPolicy"] : structuredClone(DEFAULT_CONFIG.langPolicy),
     referenceTimeoutMs: typeof parsed.referenceTimeoutMs === "number" ? parsed.referenceTimeoutMs : DEFAULT_CONFIG.referenceTimeoutMs,
     referenceMaxTokens: typeof parsed.referenceMaxTokens === "number" ? parsed.referenceMaxTokens : DEFAULT_CONFIG.referenceMaxTokens,
   };
@@ -385,6 +398,12 @@ function applyEnvOverrides(cfg: GsdMoaConfig): void {
   }
   if (process.env.GSD_MOA_BENCH_INTEGRITY !== undefined) {
     cfg.benchmarkIntegrity = /^(1|true|yes|on)$/i.test(process.env.GSD_MOA_BENCH_INTEGRITY);
+  }
+  if (process.env.GSD_MOA_LANG_POLICY !== undefined) {
+    cfg.langPolicy.policy = parseLangPolicyId(process.env.GSD_MOA_LANG_POLICY);
+  }
+  if (process.env.GSD_MOA_LANG_YOKE_SCHEDULE !== undefined) {
+    cfg.langPolicy.yokeSchedule = process.env.GSD_MOA_LANG_YOKE_SCHEDULE;
   }
   if (process.env.GSD_MOA_REFERENCE_TIMEOUT_MS !== undefined) {
     cfg.referenceTimeoutMs = Number(process.env.GSD_MOA_REFERENCE_TIMEOUT_MS);
@@ -462,6 +481,7 @@ export function validateConfig(cfg: GsdMoaConfig): void {
     throw new Error("asyncAdvisor.maxPendingMs must be a positive integer");
   }
   validateDoneGate(cfg.doneGate);
+  validateLangPolicy(cfg.langPolicy);
   if (!Number.isInteger(cfg.referenceTimeoutMs) || cfg.referenceTimeoutMs < 1) {
     throw new Error("referenceTimeoutMs must be a positive integer");
   }
@@ -606,6 +626,22 @@ function validateDoneGate(doneGate: GsdMoaConfig["doneGate"]): void {
   if (typeof doneGate.enabled !== "boolean") throw new Error("doneGate.enabled must be boolean");
   if (!Number.isInteger(doneGate.maxPerTask) || doneGate.maxPerTask < 1) throw new Error("doneGate.maxPerTask must be a positive integer");
   if (!Number.isInteger(doneGate.minRemainingMs) || doneGate.minRemainingMs < 0) throw new Error("doneGate.minRemainingMs must be a non-negative integer");
+}
+
+const LANG_POLICY_IDS = new Set<LangPolicyId>(["off", "en", "zh", "free", "mixed", "yoked"]);
+
+function parseLangPolicyId(value: unknown): LangPolicyId {
+  return typeof value === "string" && LANG_POLICY_IDS.has(value as LangPolicyId) ? value as LangPolicyId : "off";
+}
+
+function validateLangPolicy(langPolicy: GsdMoaConfig["langPolicy"]): void {
+  if (!isRecord(langPolicy)) throw new Error("langPolicy must be an object");
+  if (!LANG_POLICY_IDS.has(langPolicy.policy as LangPolicyId)) {
+    throw new Error("langPolicy.policy must be one of: off, en, zh, free, mixed, yoked");
+  }
+  if (langPolicy.yokeSchedule !== undefined && typeof langPolicy.yokeSchedule !== "string") {
+    throw new Error("langPolicy.yokeSchedule must be a string");
+  }
 }
 
 function mergeFullMoa(defaults: FullMoaConfig, override: unknown): FullMoaConfig {

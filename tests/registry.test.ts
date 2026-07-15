@@ -15,6 +15,22 @@ function routeId(route: { provider: string; model: string }): string {
   return `${route.provider}/${route.model}`;
 }
 
+function withEnv<T>(values: Record<string, string | undefined>, run: () => T): T {
+  const before = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
+  try {
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    return run();
+  } finally {
+    for (const [key, value] of Object.entries(before)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
 function fingerprint(alias: string) {
   const cfg = applyModelPreset(structuredClone(DEFAULT_CONFIG), alias);
   const synthesisRoute = resolveSynthesisRoute(cfg.reference, cfg.fullMoa.synthesis, cfg.routePresets);
@@ -199,6 +215,33 @@ describe("alias registry", () => {
 
   it("keeps existing aliases done-gate disabled by default", () => {
     for (const id of CURRENT_ALIAS_IDS) assert.equal(applyModelPreset(structuredClone(DEFAULT_CONFIG), id).doneGate.enabled, false, id);
+  });
+
+  it("registers the q27 single alias with default and env-overridden routes", () => {
+    const id = "qwen36-q27-single";
+    const registered = ALIAS_PRESETS.find((entry) => entry.id === id);
+    assert.ok(registered);
+    assert.equal(registered.name, "GSD MoA: Qwen3.6-27B via q27 (Single)");
+    assert.equal(buildDefaultAliasMap()[id]?.mode, "single");
+    assert.ok(GSD_MOA_MODELS.find((entry) => entry.id === id));
+
+    withEnv({ GSD_MOA_Q27_BASE_URL: undefined, GSD_MOA_Q27_MODEL: undefined }, () => {
+      const cfg = applyModelPreset(structuredClone(DEFAULT_CONFIG), id);
+      assert.equal(cfg.primary.provider, "q27");
+      assert.equal(cfg.primary.model, "qwen36-27b-mtp");
+      assert.equal(cfg.primary.baseUrl, "http://172.17.0.1:18081/v1");
+      assert.equal(cfg.primary.api, "openai-completions");
+      assert.equal(cfg.primary.apiKey, "$Q27_API_KEY");
+      assert.deepEqual(cfg.primary.compat, { supportsDeveloperRole: false, maxTokensField: "max_tokens" });
+      assert.equal(cfg.primary.contextWindow, 16_384);
+      assert.equal(cfg.primary.maxTokens, 4_096);
+    });
+
+    withEnv({ GSD_MOA_Q27_BASE_URL: "http://127.0.0.1:19000/v1", GSD_MOA_Q27_MODEL: "custom-qwen" }, () => {
+      const cfg = applyModelPreset(structuredClone(DEFAULT_CONFIG), id);
+      assert.equal(cfg.primary.baseUrl, "http://127.0.0.1:19000/v1");
+      assert.equal(cfg.primary.model, "custom-qwen");
+    });
   });
 
   it("registers the Hermes-style no-synthesis alias with initial-only checkpoints", () => {
