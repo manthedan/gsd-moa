@@ -91,6 +91,27 @@ function verifyPython(candidate: string, tests: string, timeoutMs: number): { co
   }
 }
 
+const RETRYABLE = /HTTP (429|500|502|503|504)/;
+
+async function callModelWithRetry(
+  attempts: number,
+  ...args: Parameters<typeof callModel>
+): Promise<Awaited<ReturnType<typeof callModel>>> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await callModel(...args);
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (!RETRYABLE.test(message) || attempt === attempts - 1) throw error;
+      const delayMs = Math.min(120_000, 15_000 * 2 ** attempt) + Math.floor(Math.random() * 5_000);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError;
+}
+
 async function callModel(
   baseUrl: string,
   apiKey: string | undefined,
@@ -164,6 +185,7 @@ async function main(): Promise<void> {
   const timeoutMs = Number(arg("--timeout-ms", "300000"));
   const allowExec = process.argv.includes("--allow-exec");
   const yokeSchedule = arg("--yoke-schedule");
+  const retries = Number(arg("--retries", "5"));
 
   const items: LangbenchItem[] = readFileSync(itemsPath, "utf8")
     .split("\n")
@@ -214,8 +236,8 @@ async function main(): Promise<void> {
               text: "",
             };
             try {
-              const result = await callModel(
-                baseUrl, apiKey, model, note, item.prompt[lang], temperature, maxTokens,
+              const result = await callModelWithRetry(
+                retries, baseUrl, apiKey, model, note, item.prompt[lang], temperature, maxTokens,
                 hashSeed(key), timeoutMs,
               );
               row.text = result.text;

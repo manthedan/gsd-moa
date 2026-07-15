@@ -70,9 +70,11 @@ function main(): void {
     const row = JSON.parse(line) as Row;
     byKey.set(row.key, row);
   }
-  const rows: Row[] = [...byKey.values()].filter((row) => !langFilter || row.inputLang === langFilter);
+  const allRows = [...byKey.values()].filter((row) => !langFilter || row.inputLang === langFilter);
+  // API-error rows (no model output) carry no accuracy signal — report and drop.
+  const rows: Row[] = allRows.filter((row) => !(row.error && !(row as Row & { text?: string }).text));
+  const droppedApiErrors = allRows.length - rows.length;
 
-  const apiErrors = rows.filter((row) => row.error && !row.error.startsWith("python verification skipped")).length;
   const conditions = new Map<string, Row[]>();
   for (const row of rows) {
     const key = `${row.inputLang}|${row.policy}`;
@@ -81,7 +83,7 @@ function main(): void {
   }
 
   console.log(`# Langbench analysis — ${resultsPath}`);
-  console.log(`rows=${rows.length}, api errors=${apiErrors}${langFilter ? `, lang=${langFilter}` : ""}\n`);
+  console.log(`rows=${rows.length} (dropped ${droppedApiErrors} api-error rows)${langFilter ? `, lang=${langFilter}` : ""}\n`);
   console.log(`| lang | policy | n | accuracy | cjkFrac | switches | mean out-tokens | mean latency s |`);
   console.log(`|---|---|---|---|---|---|---|---|`);
   for (const [key, group] of [...conditions.entries()].sort()) {

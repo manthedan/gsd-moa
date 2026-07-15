@@ -12,14 +12,15 @@
  *  - mod-arith:   modular exponentiation plus products.
  *  - repair:      fix a seeded bug in a small Python function (exec-verified).
  *
- * Usage: node --import tsx langbench/generate.ts --count 40 --seed 20260714 --out langbench/items.jsonl [--hard]
+ * Usage: node --import tsx langbench/generate.ts --count 40 --seed 20260714 --out langbench/items.jsonl [--level 1|2|3]
+ * (--hard is kept as an alias for --level 2; level 3 is the "extreme" tier)
  */
 
 import { writeFileSync } from "node:fs";
 
 export interface LangbenchItem {
   id: string;
-  family: "chain-arith" | "seq-track" | "mod-arith" | "repair";
+  family: "chain-arith" | "seq-track" | "mod-arith" | "repair" | "knapsack" | "substr-count";
   seed: number;
   prompt: { en: string; zh: string };
   /** Expected value for exact-match families; expected behavior note for repair. */
@@ -48,9 +49,9 @@ const ANSWER_LINE_ZH = '回复的最后一行必须是 "ANSWER: <值>"，其后�
 
 // ---------------------------------------------------------------- chain-arith
 
-function genChainArith(seed: number, hard: boolean): LangbenchItem {
+function genChainArith(seed: number, level: number): LangbenchItem {
   const rng = mulberry32(seed);
-  const steps = hard ? int(rng, 14, 18) : int(rng, 9, 12);
+  const steps = level >= 3 ? int(rng, 26, 34) : level === 2 ? int(rng, 14, 18) : int(rng, 9, 12);
   let value = int(rng, 12, 99);
   const startValue = value;
   const enOps: string[] = [];
@@ -120,12 +121,12 @@ function genChainArith(seed: number, hard: boolean): LangbenchItem {
 
 // ------------------------------------------------------------------ seq-track
 
-function genSeqTrack(seed: number, hard: boolean): LangbenchItem {
+function genSeqTrack(seed: number, level: number): LangbenchItem {
   const rng = mulberry32(seed);
   const tokens = ["P1", "K2", "M3", "T4", "R5", "B6", "D7", "G8", "L9", "S0"];
-  const size = hard ? 9 : 7;
+  const size = level >= 3 ? 10 : level === 2 ? 9 : 7;
   let list = tokens.slice(0, size);
-  const opCount = hard ? int(rng, 12, 15) : int(rng, 8, 11);
+  const opCount = level >= 3 ? int(rng, 22, 28) : level === 2 ? int(rng, 12, 15) : int(rng, 8, 11);
   const enOps: string[] = [];
   const zhOps: string[] = [];
   for (let i = 0; i < opCount; i++) {
@@ -196,13 +197,31 @@ function powMod(base: bigint, exp: bigint, mod: bigint): bigint {
   return result;
 }
 
-function genModArith(seed: number, hard: boolean): LangbenchItem {
+function genModArith(seed: number, level: number): LangbenchItem {
   const rng = mulberry32(seed);
+  const hard = level >= 2;
   const m = pick(rng, hard ? [53, 59, 61, 67, 71, 73, 79, 83, 89, 97] : [11, 13, 17, 19, 23, 29, 31, 37, 41, 43]);
   const a = int(rng, 3, 20);
   const b = int(rng, hard ? 25 : 12, hard ? 60 : 30);
   const c = int(rng, 11, 99);
   const d = int(rng, 11, 99);
+  if (level >= 3) {
+    // Two independent power terms: twice the square-and-multiply bookkeeping.
+    const e = int(rng, 3, 20);
+    const f = int(rng, 40, 90);
+    const answer = Number(
+      (powMod(BigInt(a), BigInt(b + 30), BigInt(m)) + powMod(BigInt(e), BigInt(f), BigInt(m)) + (BigInt(c * d) % BigInt(m))) % BigInt(m),
+    );
+    const en = [
+      `Compute (${a}^${b + 30} + ${e}^${f} + ${c}×${d}) mod ${m}. Work it out step by step by hand; do not just assert a result.`,
+      ANSWER_LINE_EN,
+    ].join("\n");
+    const zh = [
+      `计算 (${a}^${b + 30} + ${e}^${f} + ${c}×${d}) mod ${m}。请一步一步手工推导，不要直接断言结果。`,
+      ANSWER_LINE_ZH,
+    ].join("\n");
+    return { id: `mod-arith-${seed}`, family: "mod-arith", seed, prompt: { en, zh }, answer: String(answer), verify: "exact" };
+  }
   const answer = Number((powMod(BigInt(a), BigInt(b), BigInt(m)) + BigInt(c * d) % BigInt(m)) % BigInt(m));
   const en = [
     `Compute (${a}^${b} + ${c}×${d}) mod ${m}. Work it out step by step by hand; do not just assert a result.`,
@@ -299,15 +318,86 @@ function genRepair(seed: number): LangbenchItem {
   return { id: `repair-${template.name}-${seed}`, family: "repair", seed, prompt: { en, zh }, answer: `passes: ${template.name}`, verify: "python", tests };
 }
 
+// ------------------------------------------------------------------- knapsack
+
+function genKnapsack(seed: number, level: number): LangbenchItem {
+  const rng = mulberry32(seed);
+  const n = level >= 3 ? 16 : level === 2 ? 14 : 10;
+  const weights = Array.from({ length: n }, () => int(rng, 17, 89));
+  const values = Array.from({ length: n }, () => int(rng, 15, 99));
+  const capacity = Math.floor(weights.reduce((a, b) => a + b, 0) * 0.45);
+  // Exact optimum via DP over capacity.
+  const dp = new Array<number>(capacity + 1).fill(0);
+  for (let i = 0; i < n; i++) {
+    for (let c = capacity; c >= weights[i]!; c--) {
+      dp[c] = Math.max(dp[c]!, dp[c - weights[i]!]! + values[i]!);
+    }
+  }
+  const optimum = dp[capacity]!;
+  const rows = weights.map((w, i) => `item ${i + 1}: weight ${w}, value ${values[i]}`);
+  const zhRows = weights.map((w, i) => `物品 ${i + 1}：重量 ${w}，价值 ${values[i]}`);
+  const en = [
+    `A knapsack has capacity ${capacity}. Choose any subset of the items below (each usable at most once) so the total weight is at most ${capacity} and the total value is as large as possible.`,
+    ...rows,
+    `What is the MAXIMUM achievable total value? You must find the true optimum, not just a good solution — check systematically.`,
+    ANSWER_LINE_EN,
+  ].join("\n");
+  const zh = [
+    `一个背包的容量为 ${capacity}。从下面的物品中任选一个子集（每件最多用一次），使总重量不超过 ${capacity}，且总价值尽可能大。`,
+    ...zhRows,
+    `可以达到的最大总价值是多少？必须找到真正的最优解，而不只是一个较好的解——请系统地检查。`,
+    ANSWER_LINE_ZH,
+  ].join("\n");
+  return { id: `knapsack-${seed}`, family: "knapsack", seed, prompt: { en, zh }, answer: String(optimum), verify: "exact" };
+}
+
+// --------------------------------------------------------------- substr-count
+
+function genSubstrCount(seed: number, level: number): LangbenchItem {
+  const rng = mulberry32(seed);
+  const length = level >= 3 ? 240 : level === 2 ? 180 : 120;
+  // Biased digit alphabet so short patterns occur often enough to be countable
+  // but frequently enough to punish sloppy scanning.
+  const alphabet = "0112233445";
+  let digits = "";
+  for (let i = 0; i < length; i++) digits += alphabet[int(rng, 0, alphabet.length - 1)];
+  // Pick the bigram whose true count is closest to length/15 so every item has
+  // a substantive, non-guessable count (ties broken lexicographically).
+  const bigramCounts = new Map<string, number>();
+  for (let i = 0; i + 2 <= digits.length; i++) {
+    const bigram = digits.slice(i, i + 2);
+    bigramCounts.set(bigram, (bigramCounts.get(bigram) ?? 0) + 1);
+  }
+  const target = Math.round(length / 15);
+  const pattern = [...bigramCounts.entries()]
+    .sort((a, b) => Math.abs(a[1] - target) - Math.abs(b[1] - target) || (a[0] < b[0] ? -1 : 1))[0]![0];
+  const count = bigramCounts.get(pattern)!;
+  const grouped = digits.replace(/(.{10})/g, "$1 ").trim();
+  const en = [
+    `Count how many times the two-digit pattern "${pattern}" occurs in the digit string below. Occurrences may overlap (count every starting position). Spaces are only visual grouping — ignore them.`,
+    grouped,
+    ANSWER_LINE_EN,
+  ].join("\n");
+  const zh = [
+    `数一数两位数字模式 "${pattern}" 在下面的数字串中出现了多少次。允许重叠（统计每一个起始位置）。空格只是视觉分组——请忽略。`,
+    grouped,
+    ANSWER_LINE_ZH,
+  ].join("\n");
+  return { id: `substr-count-${seed}`, family: "substr-count", seed, prompt: { en, zh }, answer: String(count), verify: "exact" };
+}
+
 // ------------------------------------------------------------------------ CLI
 
-export function generateItems(countPerFamily: number, baseSeed: number, hard: boolean): LangbenchItem[] {
+export function generateItems(countPerFamily: number, baseSeed: number, level: number | boolean): LangbenchItem[] {
+  const numericLevel = typeof level === "boolean" ? (level ? 2 : 1) : level;
   const items: LangbenchItem[] = [];
   for (let i = 0; i < countPerFamily; i++) {
-    items.push(genChainArith(baseSeed + i * 4 + 0, hard));
-    items.push(genSeqTrack(baseSeed + i * 4 + 1, hard));
-    items.push(genModArith(baseSeed + i * 4 + 2, hard));
-    items.push(genRepair(baseSeed + i * 4 + 3));
+    items.push(genChainArith(baseSeed + i * 6 + 0, numericLevel));
+    items.push(genSeqTrack(baseSeed + i * 6 + 1, numericLevel));
+    items.push(genModArith(baseSeed + i * 6 + 2, numericLevel));
+    items.push(genRepair(baseSeed + i * 6 + 3));
+    items.push(genKnapsack(baseSeed + i * 6 + 4, numericLevel));
+    items.push(genSubstrCount(baseSeed + i * 6 + 5, numericLevel));
   }
   return items;
 }
@@ -321,12 +411,12 @@ function main(): void {
   const count = Number(get("--count", "40"));
   const seed = Number(get("--seed", "20260714"));
   const out = get("--out", "langbench/items.jsonl")!;
-  const hard = args.includes("--hard");
-  const items = generateItems(count, seed, hard);
+  const level = args.includes("--hard") ? 2 : Number(get("--level", "1"));
+  const items = generateItems(count, seed, level);
   writeFileSync(out, items.map((item) => JSON.stringify(item)).join("\n") + "\n");
   const byFamily = new Map<string, number>();
   for (const item of items) byFamily.set(item.family, (byFamily.get(item.family) ?? 0) + 1);
-  console.log(`wrote ${items.length} items to ${out} (${[...byFamily.entries()].map(([f, n]) => `${f}: ${n}`).join(", ")}, hard=${hard})`);
+  console.log(`wrote ${items.length} items to ${out} (${[...byFamily.entries()].map(([f, n]) => `${f}: ${n}`).join(", ")}, level=${level})`);
 }
 
 if (process.argv[1]?.endsWith("generate.ts")) main();
