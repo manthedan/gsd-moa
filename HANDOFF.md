@@ -1,8 +1,16 @@
 # Session Handoff — oh-my-pi port + Terminal-Bench experiments
 
-Last updated: 2026-07-15 (PHASE-1 SWEEP IN FLIGHT — see below; MoA abandoned 07-14).
+Last updated: 2026-07-17 (cap-1536 DONE + first read below; sweep remainder + pilot now detached ON YUKON).
 
-## PHASE-1 LANGBENCH SWEEP: RUNNING since 2026-07-15 (laptop background, ~2 days)
+## 2026-07-17: CAP-1536 COMPLETE — FIRST PHASE-1 READ; SWEEP MOVED TO YUKON (detached)
+
+**Ops:** laptop background sweep tasks kept dying with Claude Code session teardowns (2,054/2,700 at first death; two restart attempts also killed). Sweep is now decoupled from sessions: `yukon:~/lang-sweep-chain.sh` (setsid nohup, log `yukon:~/lang-sweep.log`) waits for the TB pilot to exit (keeps Z.ai single-stream), then resumes cap-1536 (1 straggler) + runs cap-3072 via `/tmp/omp-bun/bun`. **Results are now CANONICAL on yukon** at `~/projects/gsd-moa/.proof/runs/langbench-phase1/` (laptop copies scp'd there 07-17; do not append on the laptop anymore). TB pilot (off/zh/free × 4 tasks × k=3, `jobs/lang-pilot/`) was auto-launched 07-17 and is RUNNING.
+
+**Cap-1536 read (2,700 calls, mod-arith+seq-track+repair, k=2, full 5×2 factorial) — two-layer result:**
+1. **Budget survival dominates at tight caps:** with NO policy note, GLM-5.2's hidden reasoning exhausts the 1536 cap with zero visible output on **50%** of EN-input calls (29% ZH-input); ANY policy note cuts that to ~14–29%. Most of the raw "+0.19–0.30 vs off" accuracy lift is this survival effect — do NOT sell it as language-choice causality. CONFOUND: `off` = no system message at all → need a **placebo arm** (language-neutral "reason carefully" note, same items, ~540 calls) before conclusions.
+2. **Forced-Chinese genuinely underperforms when it answers:** answered-accuracy on ZH inputs: en 0.916 / off 0.922 / free 0.875 / **zh 0.728**; zh also has the worst survival on ZH inputs (33% deaths) and only partial adherence (cjkFrac 0.31 EN-input / 0.48 ZH-input, heavy switching). `free` best-or-near-best everywhere (best survival 14%); `mixed` dominated (tag ceremony costs tokens and accuracy). Consistent with H3 English-advantage-under-compute-pressure; mechanism = per-token efficiency of reasoning language (H4 territory). Analysis: `langbench/analyze.ts --baseline off` + empty-output decomposition (2026-07-17 session).
+
+## PHASE-1 LANGBENCH SWEEP: layout (launched 2026-07-15)
 
 **GLM-5.2 (Z.ai) factorial: 5 policies (off/en/zh/free/mixed) × 2 input langs × k=2 over pinned item sets (seed 20260715, commit `84a60ae`):** `langbench/data/phase1-cap1536.jsonl` (mod-arith 60 + seq-track 60 + repair 15, max_tokens 1536) then `phase1-cap3072.jsonl` (substr-count 60 + chain-arith 15, max_tokens 3072). 4,200 calls, single worker, `--delay-ms 4000` (~1,900 calls/day). Results append to `.proof/runs/langbench-phase1/results-glm52-cap*.jsonl` — RESUMABLE: rerun the same `langbench/run.ts` command to continue after any interruption; analyze with `langbench/analyze.ts --results <file> --baseline off`.
 
